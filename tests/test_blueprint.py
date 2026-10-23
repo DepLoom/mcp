@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from upgrade_blueprint import (  # noqa: E402
+from deploom_mcp.blueprint import (  # noqa: E402
     RESERVED_VERIFIED_STATUSES,
     BlueprintOptions,
     BlueprintPolicy,
@@ -225,6 +225,16 @@ class HeadlessIntegrationTests(unittest.TestCase):
         self.assertTrue(Path(result.manifest_path).is_file())
         self.assertTrue(Path(result.plan_path).is_file())
         self.assertTrue(Path(result.blueprint_path).is_file())
+
+        # Real published artifact must satisfy the shipped JSON Schema (the
+        # schema was reconciled with the real planner deadline clock in Stage A/B).
+        try:
+            import jsonschema
+        except ImportError:  # pragma: no cover - optional dependency
+            jsonschema = None  # type: ignore[assignment]
+        if jsonschema is not None:
+            schema = _read_json(ROOT / "contracts" / "upgrade-blueprint.schema.json")
+            jsonschema.validate(bp, schema)
 
     def test_repeated_planning_is_deterministic(self) -> None:
         proj = _make_project(self._tmp)

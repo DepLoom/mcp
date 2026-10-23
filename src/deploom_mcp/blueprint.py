@@ -80,6 +80,13 @@ NEEDS_REVIEW = (
 GENERATOR_BASENAME = "dependency_live_roadmap_generator.py"
 
 
+def _default_core_dir() -> Path:
+    """Standalone repository layout: the pinned planning core lives at
+    ``<repo root>/upstream/deploom``, while this module lives at
+    ``<repo root>/src/deploom_mcp/blueprint.py``."""
+    return Path(__file__).resolve().parents[2] / "upstream" / "deploom"
+
+
 @dataclass(frozen=True)
 class BlueprintPolicy:
     """The policy the planner was asked to satisfy (yellow/green closure)."""
@@ -105,6 +112,7 @@ class BlueprintOptions:
     output_dir: Optional[str] = None
     python: Optional[str] = None
     generator_path: Optional[str] = None
+    core_dir: Optional[str] = None
     run_timeout_seconds: Optional[float] = None
     workspace_id: Optional[str] = None
 
@@ -474,7 +482,23 @@ def generate_upgrade_blueprint(
     start = time.perf_counter()
 
     repo_root = Path(__file__).resolve().parent
-    generator = Path(opts.generator_path).resolve() if opts.generator_path else repo_root / GENERATOR_BASENAME
+    if opts.generator_path:
+        generator = Path(opts.generator_path).resolve()
+    elif opts.core_dir:
+        generator = Path(opts.core_dir).resolve() / GENERATOR_BASENAME
+    else:
+        generator = _default_core_dir() / GENERATOR_BASENAME
+    if not generator.is_file():
+        return UpgradeBlueprintResult(
+            ok=False, run_id=run_id or "", draft_status=None, blueprint=None,
+            blueprint_path=None, artifacts_dir=None, plan_path=None, manifest_path=None,
+            elapsed=time.perf_counter() - start, python_version=_python_version(),
+            error=_error(
+                "core-not-found",
+                f"pinned planning core not found at {generator}; "
+                "ensure the submodule is initialized (git submodule update --init --recursive)",
+            ),
+        )
     interpreter = str(Path(opts.python).resolve()) if opts.python else sys.executable
 
     purl = Path(project_path).expanduser().resolve().absolute()
@@ -667,6 +691,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--output-dir", default="", help="Where to keep artifacts + blueprint JSON (default: temp).")
     parser.add_argument("--json-out", default="", help="Blueprint JSON output path (default: <output-dir>/upgrade-blueprint.json).")
     parser.add_argument("--python", default="", help="Python interpreter for the planner subprocess (default: sys.executable).")
+    parser.add_argument("--core-dir", default="", help="Pinned planning core directory (default: <repo>/upstream/deploom).")
     parser.add_argument("--timeout", type=float, default=0.0, help="Subprocess timeout seconds (default: auto).")
     parser.add_argument("--workspace-id", default="", help="Stable workspace id for the manifest.")
     args = parser.parse_args(argv)
@@ -689,6 +714,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         registry_metadata_ttl=args.registry_metadata_ttl,
         output_dir=out_dir or None,
         python=args.python or None,
+        core_dir=args.core_dir or None,
         run_timeout_seconds=args.timeout or None,
         workspace_id=args.workspace_id or None,
     )

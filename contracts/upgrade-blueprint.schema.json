@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://github.com/AlexanderLevenskikh/deploom/docs/ecosystem/upgrade-blueprint.schema.json",
+  "$id": "https://github.com/DepLoom/mcp/contracts/upgrade-blueprint.schema.json",
   "title": "Upgrade Blueprint",
-  "description": "Machine-readable planning output of the DepLoom planner exposed through the headless boundary (upgrade_blueprint.py). schemaVersion 2 projects the Draft run plan.json/result.json without recomputation. A planning-only blueprint MUST carry verificationStatus=NOT_VERIFIED, authority=PLANNING_ONLY, compatibility=UNKNOWN and parallelExecutionSafety=UNPROVEN; it MUST NOT claim CONSTRAINT_SATISFIED/MATERIALIZED/PROJECT_VERIFIED for any dependency.",
+  "description": "Machine-readable planning output of the DepLoom planner exposed through the headless boundary (src/deploom_mcp/blueprint.py). schemaVersion 2 projects the Draft run plan.json/result.json without recomputation. A planning-only blueprint MUST carry verificationStatus=NOT_VERIFIED, authority=PLANNING_ONLY, compatibility=UNKNOWN and parallelExecutionSafety=UNPROVEN; it MUST NOT claim CONSTRAINT_SATISFIED/MATERIALIZED/PROJECT_VERIFIED for any dependency.",
   "type": "object",
   "required": ["schemaVersion", "kind", "generatedAt", "source", "policy", "status", "summary", "dependencies"],
   "properties": {
@@ -10,7 +10,15 @@
     "kind": { "const": "upgrade-blueprint" },
     "generatedAt": { "type": ["string", "null"] },
     "elapsedMs": { "type": ["number", "null"] },
-    "deadline": { "type": ["number", "null"] },
+    "deadline": {
+      "description": "Planner deadline clock as published in result.json: a deadlineSeconds budget and remainingMs when the run finished.",
+      "type": ["object", "number", "null"],
+      "properties": {
+        "deadlineSeconds": { "type": "number" },
+        "remainingMs": { "type": "number" }
+      },
+      "required": ["deadlineSeconds", "remainingMs"]
+    },
     "run": {
       "type": "object",
       "properties": {

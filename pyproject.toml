@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deploom-mcp"
+version = "0.1.0"
+description = "DepLoom MCP: headless upgrade-planning boundary and MCP server (Stage 2). Planning-only, never verifies."
+readme = "README.md"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+    "mcp>=2,<3",
+    "requests",
+    "semantic_version",
+    "python-dateutil",
+    "PyYAML>=6,<7",
+    "z3-solver==4.13.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/DepLoom/mcp"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+deploom_mcp = ["py.typed"]

@@ -1,5 +1,15 @@
 # Stage 1: Upstream Blueprint — headless planning boundary
 
+> Repository note: этот документ и связанные артефакты Stage 1 перенесены из
+> `AlexanderLevenskikh/deploom` в самостоятельный репозиторий `DepLoom/mcp`.
+> Новые пути: `src/deploom_mcp/blueprint.py` (бывш. `upgrade_blueprint.py`),
+> `contracts/upgrade-blueprint.schema.json` (бывш.
+> `docs/ecosystem/upgrade-blueprint.schema.json`), `tests/test_blueprint.py`
+> (бывш. `tests/test_upgrade_blueprint_headless.py`),
+> `benchmarks/measure_blueprint.py` (бывш.
+> `scripts/measure_upgrade_blueprint.py`). Ядро планирования подключено как
+> submodule `upstream/deploom` (пин `9e20107`). Старый репозиторий не изменён.
+
 Роль документа: техническая основа Stage 2 (MCP-инструмент, OpenCode Skill,
 порт Autopilot). Здесь зафиксированы факты о том, как планирование зависимостей
 реально работает в DepLoom, какая headless-граница предложена для экосистемы,

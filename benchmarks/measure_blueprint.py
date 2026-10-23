@@ -28,7 +28,7 @@ import tempfile
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[0]
 VENV = ROOT / ".venv" / "Scripts" / "python.exe"
 PYTHON = str(VENV) if VENV.is_file() else sys.executable
 
@@ -104,7 +104,7 @@ def run_once(
 ) -> dict:
     argv = [
         PYTHON,
-        str(ROOT / "upgrade_blueprint.py"),
+        "-m", "deploom_mcp.blueprint",
         "--project", str(project),
         "--run-id", run_id,
         "--output-dir", str(output_dir),
@@ -113,8 +113,10 @@ def run_once(
     ]
     if cache_dir is not None:
         argv += ["--registry-metadata-cache", str(cache_dir)]
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(ROOT) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
     start = time.perf_counter()
-    proc = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+    proc = subprocess.run(argv, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
     wall = time.perf_counter() - start
     if proc.returncode != 0:
         raise RuntimeError(f"boundary failed rc={proc.returncode}: {proc.stdout} {proc.stderr[-2000:]}")
