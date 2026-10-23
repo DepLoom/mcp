@@ -82,6 +82,45 @@ class GetUpgradePlanValidationTests(unittest.TestCase):
         self.assertEqual(res["error"]["code"], "project-not-found")
 
 
+class GetUpgradePlanHardeningValidationTests(unittest.TestCase):
+    """Fail-closed input validation: NaN/Inf, ranges, registry URL, exclude."""
+
+    def _code(self, **kwargs) -> str:
+        res = get_upgrade_plan(project_path="C:/nope", **kwargs)
+        self.assertIs(res["ok"], False)
+        return res["error"]["code"]
+
+    def test_nan_deadline_is_invalid_deadline(self) -> None:
+        self.assertEqual(self._code(deadline_seconds=float("nan")), "invalid-deadline")
+
+    def test_inf_deadline_is_invalid_deadline(self) -> None:
+        self.assertEqual(self._code(deadline_seconds=float("inf")), "invalid-deadline")
+        self.assertEqual(self._code(deadline_seconds=float("-inf")), "invalid-deadline")
+
+    def test_min_lag_out_of_range_is_invalid_policy(self) -> None:
+        self.assertEqual(self._code(min_lag_ok_pct=150), "invalid-policy")
+        self.assertEqual(self._code(min_lag_ok_pct=-1), "invalid-policy")
+        self.assertEqual(self._code(min_lag_ok_pct=80.5), "invalid-policy")
+
+    def test_registry_url_with_credentials_is_rejected(self) -> None:
+        self.assertEqual(
+            self._code(registry="https://user:secret@registry.example.com/"),
+            "invalid-registry",
+        )
+
+    def test_registry_non_http_scheme_is_rejected(self) -> None:
+        self.assertEqual(self._code(registry="file:///tmp/reg"), "invalid-registry")
+        self.assertEqual(self._code(registry="not-a-url"), "invalid-registry")
+
+    def test_registry_ttl_negative_or_nan_is_rejected(self) -> None:
+        self.assertEqual(self._code(registry_metadata_ttl=-5.0), "invalid-registry")
+        self.assertEqual(self._code(registry_metadata_ttl=float("nan")), "invalid-registry")
+
+    def test_exclude_must_be_list_of_strings(self) -> None:
+        self.assertEqual(self._code(exclude="react"), "invalid-exclude")
+        self.assertEqual(self._code(exclude=["react", ""]), "invalid-exclude")
+
+
 class CompactProtocolTests(unittest.TestCase):
     def test_compact_protocol_carries_planning_only_semantics(self) -> None:
         blueprint = {
@@ -130,6 +169,59 @@ class CompactProtocolTests(unittest.TestCase):
         compact = compact_blueprint(blueprint)
         for dep in compact["dependencies"]:
             self.assertNotIn(dep["status"], RESERVED_VERIFIED)
+
+    def test_many_dependency_rows_are_bounded_with_explicit_truncation(self) -> None:
+        blueprint = {
+            "schemaVersion": 2,
+            "status": {"verificationStatus": "NOT_VERIFIED", "authority": "PLANNING_ONLY"},
+            "summary": {"totalDependencies": 250, "proposed": 250, "needsReview": 0,
+                        "statusCounts": {"PROPOSED": 250}},
+            "source": {"project": {"name": "app"}},
+            "run": {},
+            "recommendationGroups": [],
+            "dependencies": [{"package": f"pkg{i}", "status": "PROPOSED"} for i in range(250)],
+        }
+        compact = compact_blueprint(blueprint, max_inline_rows=50)
+        self.assertTrue(compact["truncation"]["truncated"])
+        self.assertEqual(compact["truncation"]["inlineDependencies"], 50)
+        self.assertEqual(compact["truncation"]["totalDependencies"], 250)
+        self.assertEqual(len(compact["dependencies"]), 50)
+        # The status summary stays complete even though rows were clipped.
+        self.assertEqual(compact["summary"]["statusCounts"], {"PROPOSED": 250})
+
+    def test_small_plan_reports_no_truncation(self) -> None:
+        blueprint = {
+            "schemaVersion": 2,
+            "status": {"verificationStatus": "NOT_VERIFIED", "authority": "PLANNING_ONLY"},
+            "summary": {"totalDependencies": 2},
+            "source": {"project": {"name": "app"}},
+            "run": {},
+            "recommendationGroups": [],
+            "dependencies": [{"package": "a", "status": "PROPOSED"},
+                             {"package": "b", "status": "NO_CHANGE"}],
+        }
+        compact = compact_blueprint(blueprint)
+        self.assertFalse(compact["truncation"]["truncated"])
+        self.assertEqual(len(compact["dependencies"]), 2)
+
+    def test_draft_partial_sets_partial_replan_required(self) -> None:
+        blueprint = {
+            "schemaVersion": 2,
+            "status": {"draftStatus": "DRAFT_PARTIAL", "verificationStatus": "NOT_VERIFIED",
+                       "authority": "PLANNING_ONLY",
+                       "partialReason": "deadline budget exhausted"},
+            "summary": {"processed": 5, "processedTotal": 9},
+            "source": {"project": {"name": "app"}},
+            "run": {},
+            "recommendationGroups": [],
+            "dependencies": [],
+        }
+        compact = compact_blueprint(blueprint)
+        self.assertTrue(compact["partial"]["partial"])
+        self.assertTrue(compact["partial"]["replanRequired"])
+        self.assertEqual(compact["partial"]["processed"], 5)
+        self.assertEqual(compact["partial"]["processedTotal"], 9)
+        self.assertEqual(compact["status"]["draftStatus"], "DRAFT_PARTIAL")
 
 
 class MCPStdioRoundTripTests(unittest.IsolatedAsyncioTestCase):
