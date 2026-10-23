@@ -88,27 +88,35 @@ checkout and no Desktop installation is required.
 
 List of published tools: exactly one — `get_upgrade_plan`.
 
-### `get_upgrade_plan` (concept)
+### `get_upgrade_plan` (contract)
 
 ```jsonc
 {
   "project_path": "/abs/path/to/project",   // read-only; a package.json is required
-  "goal": "yellow",                          // "yellow" | "green"  (default "yellow")
-  "exclude": ["react|do not touch in this pass"],  // optional
-  "constraints": null,                       // NOT supported in v0.1 -> structured error
-  "deadline_seconds": 60                    // optional, clamped to [5, 600]
+  "target_level": "yellow",                  // "yellow" | "green"  (default "yellow")
+  "min_lag_ok_pct": 80,                      // minimum registry-lag % for a clean proposal
+  "deadline_seconds": 20,                     // default 20, clamped to [5, 600]
+  "include_prerelease": false,               // allow prerelease targets
+  "registry": null,                          // optional npm registry; default from the core
+  "registry_metadata_ttl": 3600,             // packument TTL seconds for the shared cache
+  "output_dir": null                         // optional; MUST be outside the project
 }
 ```
 
-The response is a **compact** representation of the Upgrade Blueprint (status,
-identity, policy, summary, recommendation groups, warnings, artifact paths).
-The full Blueprint and raw planner artifacts are written under a controlled
-artifact directory whose paths are returned; an AI agent reads them with its
-own file tools.
+The response is a **compact** representation of the Upgrade Blueprint
+(`protocol=upgrade-blueprint`, run, status, summary, recommendation groups,
+compact dependency rows, artifact paths) plus planning boundaries. The full
+Blueprint and raw planner artifacts are written under a controlled artifact
+directory whose paths are returned; an AI agent reads them with its own file
+tools.
 
-The plan is always `NOT_VERIFIED / PLANNING_ONLY / UNKNOWN / UNPROVEN`. See
+The response is always `NOT_VERIFIED / PLANNING_ONLY / UNKNOWN / UNPROVEN`: a
+`PROPOSED` verdict means "this upgrade **can** be proposed", not "already
+updated", and dependencies flagged `needsReview` must be confirmed with the
+project owner first. Machine-readable errors use `{"ok": false, "error":
+{code, message, ...}}`; see
 [`docs/STAGE_02_MCP_SERVER.md`](docs/STAGE_02_MCP_SERVER.md) for the full
-contract, error codes, partial-plan handling and cancellation semantics.
+contract, error codes and partial-plan handling.
 
 ## Connecting OpenCode
 

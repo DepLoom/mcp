@@ -20,6 +20,9 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/DepLoom/mcp"
 
+[project.scripts]
+deploom-mcp = "deploom_mcp.server:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
