@@ -1,0 +1,3 @@
+[submodule "upstream/deploom"]
+	path = upstream/deploom
+	url = https://github.com/AlexanderLevenskikh/deploom.git
