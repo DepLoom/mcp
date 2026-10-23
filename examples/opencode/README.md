@@ -44,4 +44,9 @@ then arrives in the agent's tool list automatically.
 Ask the agent, e.g.: "Propose an upgrade plan for `C:\proj` at yellow level."
 The agent calls `get_upgrade_plan`, receives the compact protocol, reads the
 artifact paths with its own file tools, and (per the honesty contract) confirms
-with you before acting on anything flagged `needsReview`.
+with you before acting on anything flagged `needsReview`. To skip a package,
+pass `exclude: ["<pkg>", ...]`; the boundary forwards it to the planner as
+`--exclude-dependency <pkg>|reason`. If the reply contains a `truncation` block,
+only up to 100 dependency rows were inlined — open the full blueprint from
+`artifacts` for the rest.
+

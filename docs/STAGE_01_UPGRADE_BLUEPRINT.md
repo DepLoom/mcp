@@ -1,4 +1,4 @@
-# Stage 1: Upstream Blueprint — headless planning boundary
+﻿# Stage 1: Upstream Blueprint — headless planning boundary
 
 > Repository note: этот документ и связанные артефакты Stage 1 перенесены из
 > `AlexanderLevenskikh/deploom` в самостоятельный репозиторий `DepLoom/mcp`.
@@ -241,3 +241,45 @@ HTTP-deadlock (~0.75 c/пакет), а не в кэш. Числа честно �
 6. **Не расширять `main()` генератора**: новый планировщик/порты — в отдельных
    модулях поверх существующих python-функций (edge boundary), как сделано в
    `upgrade_blueprint.py`.
+
+## I. Стабилизационный патч (P0–P2) — что изменилось в границе
+
+Граница переехала в пакет `src/deploom_mcp/blueprint.py` (не корневой модуль).
+Стабилизационный патч перед Stage 3 добавил fail-closed проверки на выходной
+границе; всё это зафиксировано тестами `tests/test_blueprint_hardening.py`
+против **fake-core** (`tests/fixtures/fake_core/dependency_live_roadmap_generator.py`),
+без сети:
+
+- **Контракт статусов — fail-closed**: из `result.json` принимаются только
+  `DRAFT_READY` / `DRAFT_PARTIAL`; `NOT_VERIFIED` / `PLANNING_ONLY` / вердикт
+  вне планировочного словаря → `contract-violation`, планирование отказано.
+- **plan.json обязателен**: отсутствие → `plan-missing`, невалидная структура
+  (proposals/counts) → `plan-invalid`. До патча план был опциональным.
+- **Хэш-верификация**: `plan.json` и `prompt.md` сверяются с SHA-256,
+  объявленным планировщиком (`publish_draft_result` пишет их атомарно);
+  расхождение → `hash-mismatch`, артефакт не возвращается как достоверный.
+- **JSON Schema на выходе**: blueprint валидируется против
+  `contracts/upgrade-blueprint.schema.json` до `ok=true` (`jsonschema` — теперь
+  runtime-зависимость); сбой → `schema-missing` / `schema-validator-unavailable`
+  / `schema-invalid`. До патча схема проверялась только в тестах.
+- **Fs-изоляция на границе записи**: `resolve_output_outside()` запрещает
+  output/cache внутри проекта и его родителей (`output-inside-project`);
+  каталог запуска уникален на вызов (`run-<hash>-<n>`, exclusive mkdir), путь
+  без изменений при `--run-id` → `output-conflict`, повторная запись в
+  существующие артефакты невозможна.
+- **Исключения**: `exclude`/`--exclude-dependency <pkg>|reason` применяются до
+  планирования (как в Desktop-вызове); пустой reason — `invalid-exclude`.
+- **Solver components**: канонический источник — манифест; fallback — обёртка
+  `{"components": [...]}` из `solver-components.json`.
+- **inputFiles**: относительные имена резолвятся от корня проекта, не от CWD.
+- **Async + отмена**: `generate_upgrade_blueprint_async(..., cancel_event)`;
+  отмена/таймаут убивают всё дерево процессов и возвращают `DRAFT_PARTIAL`
+  (если часть плана уже есть) вместо ложной ошибки. Общий runner —
+  `src/deploom_mcp/process_runner.py` (Windows `taskkill /T /F`, POSIX killpg,
+  bounded output).
+
+Новые коды ошибок границы: `plan-missing`, `plan-invalid`, `contract-violation`,
+`hash-mismatch`, `schema-missing`, `schema-validator-unavailable`,
+`schema-invalid`, `output-conflict`. Полный список и форма ответа — в
+`STAGE_02_MCP_SERVER.md`.
+

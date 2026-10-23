@@ -97,11 +97,18 @@ List of published tools: exactly one — `get_upgrade_plan`.
   "min_lag_ok_pct": 80,                      // minimum registry-lag % for a clean proposal
   "deadline_seconds": 20,                     // default 20, clamped to [5, 600]
   "include_prerelease": false,               // allow prerelease targets
-  "registry": null,                          // optional npm registry; default from the core
+  "registry": null,                          // optional npm registry; must be an http(s) URL
   "registry_metadata_ttl": 3600,             // packument TTL seconds for the shared cache
-  "output_dir": null                         // optional; MUST be outside the project
+  "output_dir": null,                        // optional; MUST be outside the project
+  "exclude": null                            // optional [pkg, ...]; passed as --exclude-dependency pkg|reason
 }
 ```
+
+All inputs are validated fail-closed before any work starts: non-finite
+deadlines, out-of-range `min_lag_ok_pct`, registries with credentials, invalid
+TTLs and malformed `exclude` lists are rejected with machine-readable error
+codes (`invalid-deadline`, `invalid-policy`, `invalid-registry`,
+`invalid-exclude`) instead of being forwarded to the planner.
 
 The response is a **compact** representation of the Upgrade Blueprint
 (`protocol=upgrade-blueprint`, run, status, summary, recommendation groups,
@@ -109,6 +116,13 @@ compact dependency rows, artifact paths) plus planning boundaries. The full
 Blueprint and raw planner artifacts are written under a controlled artifact
 directory whose paths are returned; an AI agent reads them with its own file
 tools.
+
+The inline dependency rows are **bounded** (default 100): when there are more,
+a `truncation` block reports the clipped count while `summary.statusCounts`
+stays complete. A deadline-exhausted or client-cancelled run returns a
+`DRAFT_PARTIAL` plan with `partial.replanRequired=true`, not a spurious
+failure. Because the tool is async, client cancellation reliably kills the
+whole planner process tree.
 
 The response is always `NOT_VERIFIED / PLANNING_ONLY / UNKNOWN / UNPROVEN`: a
 `PROPOSED` verdict means "this upgrade **can** be proposed", not "already
@@ -130,9 +144,14 @@ repository never modifies global OpenCode configuration.
 .venv/Scripts/python -m unittest discover -s tests -v
 ```
 
-The suite covers unit projection tests, real MCP protocol tests over stdio, and
-a production-boundary test that runs the **real** pinned planner against a real
-fixture. CI runs the same suite on a clean checkout.
+The suite covers unit projection tests, real MCP protocol tests over stdio, a
+production-boundary test that runs the **real** pinned planner against a real
+fixture, and 17+ deterministic hardening tests that run the boundary against a
+**fake planner core** (`tests/fixtures/fake_core/`, no network) to pin down the
+contract validator, hash verification, JSON Schema check, filesystem write
+guards, exclusions and the subprocess runner lifecycle. CI runs the same suite
+on a clean checkout across Windows/Linux and Python 3.12/3.13, then a
+`scripts/smoke_stdio.py` startup/clean-stdout check.
 
 ## Updating the Core
 
