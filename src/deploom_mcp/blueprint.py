@@ -28,16 +28,20 @@ Guarantees this boundary provides:
 from __future__ import annotations
 
 import argparse
+import asyncio
+import hashlib
 import json
+import math
 import os
-import subprocess
 import sys
 import tempfile
 import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
+
+from deploom_mcp.process_runner import ProcessRun, run_process, run_process_async
 
 BLUEPRINT_SCHEMA_VERSION = 2
 KIND = "upgrade-blueprint"
@@ -79,6 +83,19 @@ NEEDS_REVIEW = (
 
 GENERATOR_BASENAME = "dependency_live_roadmap_generator.py"
 
+# Git-tracked JSON Schema for the published blueprint; validated at runtime
+# before a successful result is returned (fail-closed).
+CONTRACTS_DIRNAME = "contracts"
+BLUEPRINT_SCHEMA_FILENAME = "upgrade-blueprint.schema.json"
+
+# Draft statuses the planning-only boundary may publish. Anything else means an
+# unexpected/manifest mode that this adapter must NOT guess about (fail-closed).
+PLANNING_DRAFT_STATUSES = ("DRAFT_READY", "DRAFT_PARTIAL")
+
+# Default exclusion reason used when the caller gives package names only.
+# The planner's --exclude-dependency contract requires an explicit reason.
+DEFAULT_EXCLUSION_REASON = "explicit scope exclusion from the planning request (get_upgrade_plan)"
+
 
 def _default_core_dir() -> Path:
     """Standalone repository layout: the pinned planning core lives at
@@ -89,12 +106,18 @@ def _default_core_dir() -> Path:
 
 @dataclass(frozen=True)
 class BlueprintPolicy:
-    """The policy the planner was asked to satisfy (yellow/green closure)."""
+    """The policy the planner was asked to satisfy (yellow/green closure).
+
+    ``exclusions`` are package names excluded from planning scope; they are
+    passed to the planner as real ``--exclude-dependency`` overrides (applied
+    BEFORE planning), never filtered out of the answer afterwards.
+    """
 
     target_level: str = "yellow"
     min_lag_ok_pct: int = 80
     intent: Optional[Dict[str, Any]] = None
     acceptance_policy: Optional[Dict[str, Any]] = None
+    exclusions: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -299,6 +322,20 @@ def transcode_upgrade_blueprint(
     by_project = manifest.get("inputFilesByProject") or {}
     input_files = by_project.get(project_name) or next(iter(by_project.values()), []) if by_project else []
     source_inputs = [str(x.get("name") or "") for x in input_files if isinstance(x, dict) and x.get("name")]
+    project_resolved = Path(project_path).resolve()
+    input_files_abs = []
+    for name in source_inputs:
+        p = Path(name)
+        if p.is_absolute():
+            input_files_abs.append(str(p))
+        else:
+            # Project-relative names ("package.json", "./package.json") are
+            # relative to the analysed project, NOT to the process CWD.
+            input_files_abs.append(str((project_resolved / p).resolve()))
+    input_files_unique: List[str] = []
+    for value in input_files_abs:
+        if value not in input_files_unique:
+            input_files_unique.append(value)
 
     return {
         "schemaVersion": BLUEPRINT_SCHEMA_VERSION,
@@ -314,8 +351,8 @@ def transcode_upgrade_blueprint(
             "generator": GENERATOR_BASENAME,
         },
         "source": {
-            "project": {"name": project_name, "path": str(Path(project_path).resolve())},
-            "inputFiles": [str(Path(p).resolve()) for p in source_inputs],
+            "project": {"name": project_name, "path": str(project_resolved)},
+            "inputFiles": input_files_unique,
             "inputHashes": manifest.get("inputHashes") or {},
         },
         "policy": {
@@ -391,6 +428,132 @@ def _error(code: str, message: str, detail: Optional[str] = None) -> Dict[str, A
     return {"code": code, "message": message, "detail": detail}
 
 
+def validate_planning_contract(manifest: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    """Fail-closed planning-only contract check on a Draft manifest.
+
+    Returns an error dict when the manifest claims anything other than
+    planning-only semantics, so an unexpected/proven upstream mode can never be
+    silently copied into a "successful" blueprint. Unset status fields are
+    treated as absent (the safe defaults are NOT_VERIFIED/PLANNING_ONLY/UNKNOWN
+    in the projection); a non-empty value that is not the allowed one is a
+    contract violation.
+    """
+    allowed = {
+        "verificationStatus": "NOT_VERIFIED",
+        "authority": "PLANNING_ONLY",
+        "compatibility": "UNKNOWN",
+    }
+    for field, expected in allowed.items():
+        value = manifest.get(field)
+        if value is None:
+            continue
+        if not isinstance(value, str) or value != expected:
+            return _error(
+                "contract-violation",
+                f"planner manifest violates the planning-only contract: "
+                f"{field}={value!r}, expected {expected!r}",
+                f"manifest field {field}",
+            )
+    status = manifest.get("status")
+    if status is None:
+        return _error(
+            "contract-violation",
+            "planner manifest does not declare a draft status",
+            "manifest field status",
+        )
+    if not isinstance(status, str) or status not in PLANNING_DRAFT_STATUSES:
+        return _error(
+            "contract-violation",
+            f"planner manifest declares an unhandled draft status {status!r}; "
+            f"allowed: {', '.join(PLANNING_DRAFT_STATUSES)}",
+            "manifest field status",
+        )
+    return None
+
+
+def _schema_path() -> Path:
+    return Path(__file__).resolve().parents[2] / CONTRACTS_DIRNAME / BLUEPRINT_SCHEMA_FILENAME
+
+
+def _validate_blueprint_schema(blueprint: Mapping[str, Any], schema_path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+    """Runtime JSON Schema validation of the final blueprint (fail-closed).
+
+    The published blueprint MUST conform to the shipped schema before a
+    successful result is returned. ``jsonschema`` is a runtime dependency of
+    this boundary; if it is unavailable the check fails closed instead of
+    silently skipping.
+    """
+    path = Path(schema_path) if schema_path else _schema_path()
+    if not path.is_file():
+        return _error("schema-missing", f"upgrade-blueprint JSON Schema not found at {path}")
+    try:
+        import jsonschema
+    except ImportError:
+        return _error(
+            "schema-validator-unavailable",
+            "jsonschema is a required runtime dependency of the blueprint boundary",
+        )
+    try:
+        schema = _read_json(path)
+        jsonschema.validate(blueprint, schema)
+    except jsonschema.ValidationError as exc:
+        where = ".".join(str(p) for p in exc.absolute_path) or "<root>"
+        return _error(
+            "schema-invalid",
+            f"blueprint failed JSON Schema validation: {_as_text(exc.message)} (at {where})",
+        )
+    except (OSError, ValueError) as exc:
+        return _error("schema-invalid", f"cannot read blueprint JSON Schema: {exc}")
+    return None
+
+
+def _stable_sha256_bytes(raw: bytes) -> str:
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _verify_published_hash(kind: str, declared: Any, path: Optional[Path]) -> Optional[Dict[str, Any]]:
+    """Verify one published artifact hash (plan/prompt) against the file bytes.
+
+    The planner hashes the plan/prompt JSON as their exact on-disk bytes
+    (stable_sha256_bytes, no normalisation). A declared hash MUST match those
+    bytes; a missing declared hash is not an error (edge cases), but a missing
+    file while a hash is declared is a broken artifact set.
+    """
+    if not declared:
+        return None
+    if path is None or not path.is_file():
+        return _error(
+            "hash-mismatch",
+            f"{kind} hash declared but the artifact file is missing",
+            f"declared {kind} hash {declared!r}",
+        )
+    actual = _stable_sha256_bytes(path.read_bytes())
+    if actual != declared:
+        return _error(
+            "hash-mismatch",
+            f"{kind} file content does not match the manifest {kind} hash",
+            f"declared={declared} actual={actual}",
+        )
+    return None
+
+
+def _read_plan(plan_path: Path) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Read and structurally validate plan.json (mandatory artifact)."""
+    if not plan_path.is_file():
+        return None, _error("plan-missing", f"plan.json was not published at {plan_path}")
+    try:
+        plan = _read_json(plan_path)
+    except (OSError, ValueError) as exc:
+        return None, _error("plan-invalid", f"plan.json is not valid JSON: {exc}")
+    if not isinstance(plan, dict):
+        return None, _error("plan-invalid", "plan.json must be a JSON object")
+    if not isinstance(plan.get("proposals"), list):
+        return None, _error("plan-invalid", "plan.json must contain a 'proposals' array")
+    if not isinstance(plan.get("counts"), dict):
+        return None, _error("plan-invalid", "plan.json must contain a 'counts' object")
+    return plan, None
+
+
 def _prepare_argv_full(
     generator: Path,
     projects_file: Path,
@@ -423,6 +586,8 @@ def _prepare_argv_full(
     ]
     if options.registry:
         argv += ["--registry", options.registry]
+    for package in policy.exclusions:
+        argv += ["--exclude-dependency", f"{package}|{DEFAULT_EXCLUSION_REASON}"]
     if options.include_prerelease:
         argv += ["--include-prerelease"]
     if options.max_candidates is not None:
@@ -462,6 +627,389 @@ def _exec_env(policy: BlueprintPolicy, run_id: str, workspace_id: str, project_i
     return env
 
 
+def resolve_output_outside(project: Path, out: Path) -> Optional[Path]:
+    """Return the resolved output dir if it is NOT inside/above the project.
+
+    ``None`` means the output directory would overlap the analysed project
+    (as ancestor, descendant or the same directory), which is unsafe: the
+    boundary guarantees the project is only ever read.
+    """
+    try:
+        project.resolve().relative_to(out.resolve())
+        return None
+    except ValueError:
+        pass
+    try:
+        out.resolve().relative_to(project.resolve())
+        return None
+    except ValueError:
+        return out.resolve()
+
+
+def _make_unique_run_dir(base: Path, run_id: str) -> Tuple[Path, str]:
+    """Create a per-run directory exclusively; never overwrite another run.
+
+    If the exact run directory already exists (a collided run id), a short
+    suffix is appended until an unused directory is found. Raises
+    ``BlueprintError`` with ``output-conflict`` when exhausted.
+    """
+    for attempt in range(16):
+        candidate = base / run_id
+        try:
+            candidate.mkdir(parents=True, exist_ok=False)
+            return candidate, run_id
+        except FileExistsError:
+            if not candidate.is_dir():
+                return candidate, run_id
+            run_id = f"{run_id}-{attempt + 1}"
+    raise BlueprintError(
+        "output-conflict",
+        f"could not allocate a unique run directory under {base}",
+    )
+
+
+@dataclass
+class _PreparedRun:
+    generator: Path
+    interpreter: str
+    purl: Path
+    project_name: str
+    run_id: str
+    workspace_id: str
+    project_id: str
+    argv: List[str]
+    env: Dict[str, str]
+    timeout: float
+    run_root: Path
+    artifacts_dir: Path
+    state_dir: Path
+    manifest_path: Path
+    plan_path: Path
+    prompt_path: Path
+    solver_path: Path
+    policy: BlueprintPolicy
+    options: BlueprintOptions
+
+
+def _validate_boundary_inputs(pol: BlueprintPolicy, opts: BlueprintOptions) -> Optional[Dict[str, Any]]:
+    """Light fail-closed validation of policy/options numeric knobs.
+
+    The MCP layer performs its own richer input validation first; this guard
+    protects the headless CLI path (and any embedding) from NaN/Inf numbers
+    that would otherwise flow into the planner with undefined semantics.
+    """
+    deadline = opts.draft_deadline_seconds
+    if isinstance(deadline, (int, float)) and (not math.isfinite(float(deadline)) or float(deadline) <= 0):
+        return _error("invalid-deadline", "draft_deadline_seconds must be a finite positive number")
+    if not isinstance(pol.min_lag_ok_pct, int) or not (0 <= pol.min_lag_ok_pct <= 100):
+        return _error("invalid-policy", "min_lag_ok_pct must be an integer in [0, 100]")
+    return None
+
+
+def _prepare_generation(
+    project_path: str,
+    pol: BlueprintPolicy,
+    opts: BlueprintOptions,
+    project_name: Optional[str],
+    run_id: Optional[str],
+) -> Tuple[Optional[Dict[str, Any]], Optional[_PreparedRun]]:
+    """Resolve every input and build the child invocation (pure, no subprocess)."""
+    guard = _validate_boundary_inputs(pol, opts)
+    if guard is not None:
+        return guard, None
+
+    if opts.generator_path:
+        generator = Path(opts.generator_path).resolve()
+    elif opts.core_dir:
+        generator = Path(opts.core_dir).resolve() / GENERATOR_BASENAME
+    else:
+        generator = _default_core_dir() / GENERATOR_BASENAME
+    if not generator.is_file():
+        return (
+            _error(
+                "core-not-found",
+                f"pinned planning core not found at {generator}; "
+                "ensure the submodule is initialized (git submodule update --init --recursive)",
+            ),
+            None,
+        )
+    interpreter = str(Path(opts.python).resolve()) if opts.python else sys.executable
+
+    purl = Path(project_path).expanduser().resolve().absolute()
+    if not purl.exists() or not purl.is_dir():
+        return _error("project-not-found", f"project directory does not exist: {purl}"), None
+    if not (purl / "package.json").is_file():
+        return _error("invalid-project", f"no package.json found in {purl}"), None
+
+    project_name = project_name or purl.name
+
+    # --- output isolation (fail-closed at the write boundary) -------------
+    run_id = run_id or f"run-{uuid.uuid4().hex[:12]}"
+    if opts.output_dir:
+        base = Path(opts.output_dir).expanduser().resolve()
+        if resolve_output_outside(purl, base) is None:
+            return (
+                _error(
+                    "output-inside-project",
+                    f"output_dir {base} must not be inside or above the analysed project {purl}",
+                ),
+                None,
+            )
+    else:
+        base = Path(tempfile.gettempdir())
+        run_base = Path(tempfile.gettempdir()) / f"deploom-blueprint-{run_id}"
+        if resolve_output_outside(purl, run_base) is None:
+            return (
+                _error(
+                    "output-inside-project",
+                    f"managed output {run_base} overlaps the analysed project {purl}",
+                ),
+                None,
+            )
+        base = run_base
+    try:
+        run_root, run_id = _make_unique_run_dir(base, run_id)
+    except BlueprintError as exc:
+        return _error(exc.code, str(exc)), None
+
+    if opts.registry_metadata_cache:
+        cache_path = Path(opts.registry_metadata_cache).expanduser().resolve()
+        if resolve_output_outside(purl, cache_path) is None:
+            return (
+                _error(
+                    "output-inside-project",
+                    f"registry metadata cache {cache_path} must not be inside the analysed "
+                    f"project {purl}",
+                ),
+                None,
+            )
+
+    workspace_id = opts.workspace_id or f"ws-{project_name}-{run_id[4:]}"
+    project_id = project_name
+
+    control = run_root / "exec"
+    control.mkdir(parents=True, exist_ok=True)
+    artifacts_dir = run_root / "artifacts"
+    state_dir = run_root / "state"
+    history_dir = run_root / "history"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    state_dir.mkdir(parents=True, exist_ok=True)
+    history_dir.mkdir(parents=True, exist_ok=True)
+
+    projects_file = control / "projects.txt"
+    projects_file.write_text(str(purl) + "\n", encoding="utf-8", newline="\n")
+
+    argv = _prepare_argv_full(
+        generator, projects_file, artifacts_dir, state_dir, history_dir,
+        run_id, workspace_id, project_id, pol, opts,
+    )
+    env = _exec_env(pol, run_id, workspace_id, project_id, opts)
+
+    timeout = opts.run_timeout_seconds
+    if timeout is None:
+        timeout = max(float(opts.draft_deadline_seconds) * 2 + 30, 120.0)
+    timeout_deviation = not (isinstance(timeout, (int, float)) and math.isfinite(float(timeout)) and timeout > 0)
+    if timeout_deviation or (isinstance(timeout, (int, float)) and float(timeout) > 3600):
+        timeout = max(float(opts.draft_deadline_seconds) * 2 + 30, 120.0)
+
+    draft_dir = artifacts_dir / "runs" / run_id / "draft"
+    return None, _PreparedRun(
+        generator=generator,
+        interpreter=interpreter,
+        purl=purl,
+        project_name=project_name,
+        run_id=run_id,
+        workspace_id=workspace_id,
+        project_id=project_id,
+        argv=argv,
+        env=env,
+        timeout=float(timeout),
+        run_root=run_root,
+        artifacts_dir=artifacts_dir,
+        state_dir=state_dir,
+        manifest_path=draft_dir / "result.json",
+        plan_path=draft_dir / "plan.json",
+        prompt_path=draft_dir / "prompt.md",
+        solver_path=draft_dir / "solver-components.json",
+        policy=pol,
+        options=opts,
+    )
+
+
+def _result_from_prepare(guard: Dict[str, Any], run_id: str, start: float) -> UpgradeBlueprintResult:
+    return UpgradeBlueprintResult(
+        ok=False, run_id=run_id, draft_status=None, blueprint=None,
+        blueprint_path=None, artifacts_dir=None, plan_path=None, manifest_path=None,
+        elapsed=time.perf_counter() - start, python_version=_python_version(),
+        error=guard,
+    )
+
+
+def _finalize(prep: _PreparedRun, outcome: ProcessRun, start: float) -> UpgradeBlueprintResult:
+    """Turn one child outcome into the final UpgradeBlueprintResult (shared by
+    the sync and async paths). Verifies the plan, the planning-only contract,
+    the published hashes and the JSON Schema — fail-closed on every one."""
+    elapsed = time.perf_counter() - start
+    draft_dir = prep.manifest_path.parent
+
+    if outcome.timed_out:
+        return UpgradeBlueprintResult(
+            ok=False, run_id=prep.run_id, draft_status=None, blueprint=None,
+            blueprint_path=None, artifacts_dir=str(prep.artifacts_dir),
+            plan_path=str(prep.plan_path) if prep.plan_path.exists() else None,
+            manifest_path=str(prep.manifest_path) if prep.manifest_path.exists() else None,
+            elapsed=elapsed, python_version=_python_version(),
+            error=_error(
+                "generator-timeout",
+                f"planner exceeded the {prep.timeout:g}s subprocess budget",
+                outcome.stdout[-2000:] or None,
+            ),
+            stdout=outcome.stdout, stderr=outcome.stderr,
+        )
+    if outcome.returncode != 0:
+        detail = (outcome.stderr or outcome.stdout or "").strip()[-4000:]
+        return UpgradeBlueprintResult(
+            ok=False, run_id=prep.run_id, draft_status=None, blueprint=None,
+            blueprint_path=None, artifacts_dir=str(prep.artifacts_dir),
+            plan_path=str(prep.plan_path) if prep.plan_path.exists() else None,
+            manifest_path=str(prep.manifest_path) if prep.manifest_path.exists() else None,
+            elapsed=elapsed, python_version=_python_version(),
+            error=_error("generator-failed", f"planner exited with code {outcome.returncode}", detail),
+            stdout=outcome.stdout, stderr=outcome.stderr,
+        )
+    if not prep.manifest_path.is_file():
+        return UpgradeBlueprintResult(
+            ok=False, run_id=prep.run_id, draft_status=None, blueprint=None,
+            blueprint_path=None, artifacts_dir=str(prep.artifacts_dir),
+            plan_path=None, manifest_path=None,
+            elapsed=elapsed, python_version=_python_version(),
+            error=_error("manifest-missing", f"Draft manifest not published at {prep.manifest_path}"),
+            stdout=outcome.stdout, stderr=outcome.stderr,
+        )
+
+    try:
+        manifest = _read_json(prep.manifest_path)
+    except (OSError, ValueError) as exc:
+        return UpgradeBlueprintResult(
+            ok=False, run_id=prep.run_id, draft_status=None, blueprint=None,
+            blueprint_path=None, artifacts_dir=str(prep.artifacts_dir),
+            plan_path=str(prep.plan_path) if prep.plan_path.exists() else None,
+            manifest_path=str(prep.manifest_path),
+            elapsed=elapsed, python_version=_python_version(),
+            error=_error("manifest-invalid", f"cannot read published Draft artifact result.json: {exc}"),
+            stdout=outcome.stdout, stderr=outcome.stderr,
+        )
+
+    plan, error = _read_plan(prep.plan_path)
+    if error is not None:
+        return UpgradeBlueprintResult(
+            ok=False, run_id=prep.run_id, draft_status=None, blueprint=None,
+            blueprint_path=None, artifacts_dir=str(prep.artifacts_dir),
+            plan_path=str(prep.plan_path) if prep.plan_path.exists() else None,
+            manifest_path=str(prep.manifest_path),
+            elapsed=elapsed, python_version=_python_version(),
+            error=error, stdout=outcome.stdout, stderr=outcome.stderr,
+        )
+
+    contract_error = validate_planning_contract(manifest)
+    if contract_error is not None:
+        return UpgradeBlueprintResult(
+            ok=False, run_id=prep.run_id, draft_status=None, blueprint=None,
+            blueprint_path=None, artifacts_dir=str(prep.artifacts_dir),
+            plan_path=str(prep.plan_path), manifest_path=str(prep.manifest_path),
+            elapsed=elapsed, python_version=_python_version(),
+            error=contract_error, stdout=outcome.stdout, stderr=outcome.stderr,
+        )
+
+    declared_hashes = (manifest.get("hashes") or {})
+    for kind, path in (
+        ("plan", prep.plan_path),
+        ("prompt", prep.prompt_path),
+    ):
+        hash_error = _verify_published_hash(kind, declared_hashes.get(kind), path)
+        if hash_error is not None:
+            return UpgradeBlueprintResult(
+                ok=False, run_id=prep.run_id, draft_status=None, blueprint=None,
+                blueprint_path=None, artifacts_dir=str(prep.artifacts_dir),
+                plan_path=str(prep.plan_path), manifest_path=str(prep.manifest_path),
+                elapsed=elapsed, python_version=_python_version(),
+                error=hash_error, stdout=outcome.stdout, stderr=outcome.stderr,
+            )
+
+    artifacts = {
+        "manifest": str(prep.manifest_path),
+        "plan": str(prep.plan_path),
+        "prompt": (manifest.get("artifacts") or {}).get("prompt", str(prep.prompt_path)),
+        "summary": (manifest.get("artifacts") or {}).get("summary", str(draft_dir / "summary.md")),
+        "solverComponents": (manifest.get("artifacts") or {}).get("solverComponents", str(prep.solver_path)),
+    }
+    blueprint_path = prep.run_root / "upgrade-blueprint.json"
+    blueprint = transcode_upgrade_blueprint(
+        plan, manifest,
+        project_path=str(prep.purl),
+        project_name=prep.project_name,
+        policy=prep.policy,
+        artifacts=artifacts,
+        blueprint_path=str(blueprint_path),
+    )
+    return _complete_blueprint(prep, manifest, artifacts, blueprint_path, blueprint, elapsed, outcome)
+
+
+def _complete_blueprint(
+    prep: _PreparedRun,
+    manifest: Dict[str, Any],
+    artifacts: Dict[str, str],
+    blueprint_path: Path,
+    blueprint: Dict[str, Any],
+    elapsed: float,
+    outcome: ProcessRun,
+) -> UpgradeBlueprintResult:
+    """Canonical solver-components source, schema validation and final write.
+
+    The manifest's ``solverComponents`` list is the canonical source; when the
+    manifest does not carry it, the planner's ``solver-components.json``
+    ``{"components": [...]}`` envelope is used. This is planning evidence, never
+    a proof of parallel-safe installation (the blueprint still marks
+    parallelExecutionSafety=UNPROVEN).
+    """
+    components = list(manifest.get("solverComponents") or [])
+    if not components and prep.solver_path.is_file():
+        try:
+            solver_envelope = _read_json(prep.solver_path)
+        except (OSError, ValueError):
+            solver_envelope = {}
+        file_components = list(solver_envelope.get("components") or []) if isinstance(solver_envelope, dict) else []
+        if file_components:
+            components = file_components
+    blueprint["solverComponents"] = components
+
+    schema_error = _validate_blueprint_schema(blueprint)
+    if schema_error is not None:
+        return UpgradeBlueprintResult(
+            ok=False, run_id=prep.run_id, draft_status=None, blueprint=None,
+            blueprint_path=None, artifacts_dir=str(prep.artifacts_dir),
+            plan_path=str(prep.plan_path), manifest_path=str(prep.manifest_path),
+            elapsed=elapsed, python_version=_python_version(),
+            error=schema_error, stdout=outcome.stdout, stderr=outcome.stderr,
+        )
+    blueprint_path.write_text(_json_dumps(blueprint) + "\n", encoding="utf-8", newline="\n")
+
+    return UpgradeBlueprintResult(
+        ok=True,
+        run_id=prep.run_id,
+        draft_status=manifest.get("status"),
+        blueprint=blueprint,
+        blueprint_path=str(blueprint_path),
+        artifacts_dir=str(prep.artifacts_dir),
+        plan_path=str(prep.plan_path),
+        manifest_path=str(prep.manifest_path),
+        elapsed=elapsed,
+        python_version=_python_version(),
+        stdout=outcome.stdout,
+        stderr=outcome.stderr,
+    )
+
+
 def generate_upgrade_blueprint(
     project_path: str,
     *,
@@ -481,171 +1029,54 @@ def generate_upgrade_blueprint(
     pol = policy if policy is not None else BlueprintPolicy()
     start = time.perf_counter()
 
-    repo_root = Path(__file__).resolve().parent
-    if opts.generator_path:
-        generator = Path(opts.generator_path).resolve()
-    elif opts.core_dir:
-        generator = Path(opts.core_dir).resolve() / GENERATOR_BASENAME
-    else:
-        generator = _default_core_dir() / GENERATOR_BASENAME
-    if not generator.is_file():
-        return UpgradeBlueprintResult(
-            ok=False, run_id=run_id or "", draft_status=None, blueprint=None,
-            blueprint_path=None, artifacts_dir=None, plan_path=None, manifest_path=None,
-            elapsed=time.perf_counter() - start, python_version=_python_version(),
-            error=_error(
-                "core-not-found",
-                f"pinned planning core not found at {generator}; "
-                "ensure the submodule is initialized (git submodule update --init --recursive)",
-            ),
-        )
-    interpreter = str(Path(opts.python).resolve()) if opts.python else sys.executable
+    guard, prep = _prepare_generation(project_path, pol, opts, project_name, run_id)
+    if guard is not None:
+        return _result_from_prepare(guard, run_id or "", start)
+    assert prep is not None
 
-    purl = Path(project_path).expanduser().resolve().absolute()
-    if not purl.exists() or not purl.is_dir():
-        return UpgradeBlueprintResult(
-            ok=False, run_id=run_id or "", draft_status=None, blueprint=None,
-            blueprint_path=None, artifacts_dir=None, plan_path=None, manifest_path=None,
-            elapsed=0.0, python_version=_python_version(),
-            error=_error("project-not-found", f"project directory does not exist: {purl}"),
-        )
-    if not (purl / "package.json").is_file():
-        return UpgradeBlueprintResult(
-            ok=False, run_id=run_id or "", draft_status=None, blueprint=None,
-            blueprint_path=None, artifacts_dir=None, plan_path=None, manifest_path=None,
-            elapsed=0.0, python_version=_python_version(),
-            error=_error("invalid-project", f"no package.json found in {purl}"),
-        )
-
-    run_id = run_id or f"run-{uuid.uuid4().hex[:12]}"
-    project_name = project_name or purl.name
-    workspace_id = opts.workspace_id or f"ws-{project_name}-{run_id[4:]}"
-    project_id = project_name
-
-    if opts.output_dir:
-        out_root = Path(opts.output_dir).expanduser().resolve()
-    else:
-        out_root = Path(tempfile.gettempdir()) / f"deploom-blueprint-{run_id}"
-    out_root.mkdir(parents=True, exist_ok=True)
-    control = out_root / "exec"
-    control.mkdir(parents=True, exist_ok=True)
-    artifacts_dir = out_root / "artifacts"
-    state_dir = out_root / "state"
-    history_dir = out_root / "history"
-
-    projects_file = control / "projects.txt"
-    projects_file.write_text(str(purl) + "\n", encoding="utf-8", newline="\n")
-
-    argv = _prepare_argv_full(
-        generator, projects_file, artifacts_dir, state_dir, history_dir,
-        run_id, workspace_id, project_id, pol, opts,
+    outcome = run_process(
+        [prep.interpreter] + prep.argv,
+        cwd=str(prep.run_root),
+        env=prep.env,
+        timeout=prep.timeout,
     )
-    env = _exec_env(pol, run_id, workspace_id, project_id, opts)
+    return _finalize(prep, outcome, start)
 
-    timeout = opts.run_timeout_seconds
-    if timeout is None:
-        timeout = max(opts.draft_deadline_seconds * 2 + 30, 120.0)
 
-    try:
-        process = subprocess.run(
-            [interpreter] + argv,
-            cwd=str(control),
-            env=env,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired as exc:
-        return UpgradeBlueprintResult(
-            ok=False, run_id=run_id, draft_status=None, blueprint=None,
-            blueprint_path=None, artifacts_dir=str(artifacts_dir),
-            plan_path=None, manifest_path=None,
-            elapsed=time.perf_counter() - start, python_version=_python_version(),
-            error=_error(
-                "generator-timeout",
-                f"planner exceeded the {timeout:g}s subprocess budget",
-                (exc.stdout or "")[-2000:] if exc.stdout else None,
-            ),
-        )
-    elapsed = time.perf_counter() - start
+async def generate_upgrade_blueprint_async(
+    project_path: str,
+    *,
+    policy: Optional[BlueprintPolicy] = None,
+    options: Optional[BlueprintOptions] = None,
+    project_name: Optional[str] = None,
+    run_id: Optional[str] = None,
+    cancel_event: Optional[asyncio.Event] = None,
+) -> UpgradeBlueprintResult:
+    """Async counterpart of `generate_upgrade_blueprint`.
 
-    draft_dir = artifacts_dir / "runs" / run_id / "draft"
-    manifest_path = draft_dir / "result.json"
-    plan_path = draft_dir / "plan.json"
+    Runs the planner through the async process runner so an MCP server can
+    cooperate with cancellation: `cancel_event` (cooperative) and asyncio task
+    cancellation (e.g. server shutdown) both kill the whole child process tree
+    before returning/raising. All fail-closed validation is identical to the
+    sync path.
+    """
+    opts = options if options is not None else BlueprintOptions()
+    pol = policy if policy is not None else BlueprintPolicy()
+    start = time.perf_counter()
 
-    if process.returncode != 0:
-        detail = (process.stderr or process.stdout or "").strip()[-4000:]
-        return UpgradeBlueprintResult(
-            ok=False, run_id=run_id, draft_status=None, blueprint=None,
-            blueprint_path=None, artifacts_dir=str(artifacts_dir),
-            plan_path=str(plan_path) if plan_path.exists() else None,
-            manifest_path=str(manifest_path) if manifest_path.exists() else None,
-            elapsed=elapsed, python_version=_python_version(),
-            error=_error("generator-failed", f"planner exited with code {process.returncode}", detail),
-            stdout=process.stdout, stderr=process.stderr,
-        )
-    if not manifest_path.is_file():
-        return UpgradeBlueprintResult(
-            ok=False, run_id=run_id, draft_status=None, blueprint=None,
-            blueprint_path=None, artifacts_dir=str(artifacts_dir),
-            plan_path=None, manifest_path=None,
-            elapsed=elapsed, python_version=_python_version(),
-            error=_error("manifest-missing", f"Draft manifest not published at {manifest_path}"),
-            stdout=process.stdout, stderr=process.stderr,
-        )
+    guard, prep = _prepare_generation(project_path, pol, opts, project_name, run_id)
+    if guard is not None:
+        return _result_from_prepare(guard, run_id or "", start)
+    assert prep is not None
 
-    try:
-        manifest = _read_json(manifest_path)
-        plan = _read_json(plan_path) if plan_path.is_file() else {"proposals": [], "counts": {}, "unknowns": [], "conflicts": [], "unresolved": []}
-        solver_path = draft_dir / "solver-components.json"
-        solver_components = _read_json(solver_path) if solver_path.is_file() else {}
-    except (OSError, ValueError) as exc:
-        return UpgradeBlueprintResult(
-            ok=False, run_id=run_id, draft_status=None, blueprint=None,
-            blueprint_path=None, artifacts_dir=str(artifacts_dir),
-            plan_path=str(plan_path) if plan_path.exists() else None,
-            manifest_path=str(manifest_path),
-            elapsed=elapsed, python_version=_python_version(),
-            error=_error("manifest-invalid", f"cannot read published Draft artifacts: {exc}"),
-            stdout=process.stdout, stderr=process.stderr,
-        )
-
-    artifacts = {
-        "manifest": str(manifest_path),
-        "plan": str(plan_path),
-        "prompt": (manifest.get("artifacts") or {}).get("prompt", str(draft_dir / "prompt.md")),
-        "summary": (manifest.get("artifacts") or {}).get("summary", str(draft_dir / "summary.md")),
-        "solverComponents": (manifest.get("artifacts") or {}).get("solverComponents", str(draft_dir / "solver-components.json")),
-    }
-    blueprint_path = out_root / "upgrade-blueprint.json"
-    blueprint = transcode_upgrade_blueprint(
-        plan, manifest,
-        project_path=str(purl),
-        project_name=project_name,
-        policy=pol,
-        artifacts=artifacts,
-        blueprint_path=str(blueprint_path),
+    outcome = await run_process_async(
+        [prep.interpreter] + prep.argv,
+        cwd=str(prep.run_root),
+        env=prep.env,
+        timeout=prep.timeout,
+        cancel_event=cancel_event,
     )
-    if isinstance(solver_components, dict) and solver_components:
-        blueprint.setdefault("solverComponents", [])
-    blueprint_path.write_text(_json_dumps(blueprint) + "\n", encoding="utf-8", newline="\n")
-
-    return UpgradeBlueprintResult(
-        ok=True,
-        run_id=run_id,
-        draft_status=manifest.get("status"),
-        blueprint=blueprint,
-        blueprint_path=str(blueprint_path),
-        artifacts_dir=str(artifacts_dir),
-        plan_path=str(plan_path),
-        manifest_path=str(manifest_path),
-        elapsed=elapsed,
-        python_version=_python_version(),
-        stdout=process.stdout,
-        stderr=process.stderr,
-    )
+    return _finalize(prep, outcome, start)
 
 
 def _cli_summary(result: UpgradeBlueprintResult) -> str:
@@ -683,6 +1114,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--intent", default="", help="Path to JSON file with DEPLOOM_BASELINE_INTENT_JSON (policy).")
     parser.add_argument("--acceptance-policy", default="", help="Path to JSON file with DEPLOOM_ACCEPTANCE_POLICY_JSON.")
     parser.add_argument("--registry", default="", help="npm registry URL.")
+    parser.add_argument(
+        "--exclude", action="append", default=[],
+        help="Package name excluded from planning scope (repeatable; passed to the "
+        "planner as --exclude-dependency before planning, never filtered after).",
+    )
     parser.add_argument("--include-prerelease", action="store_true")
     parser.add_argument("--deadline-seconds", type=float, default=60.0, help="Draft hard deadline (default 60).")
     parser.add_argument("--max-candidates", type=int, default=3, help="Draft candidate cap (default 3).")
@@ -701,6 +1137,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         min_lag_ok_pct=args.min_lag_ok_pct,
         intent=_json_file(args.intent, "intent") if args.intent else None,
         acceptance_policy=_json_file(args.acceptance_policy, "acceptance-policy") if args.acceptance_policy else None,
+        exclusions=tuple(dict.fromkeys(args.exclude or [])),
     )
     out_dir = args.output_dir
     if not out_dir and args.json_out:
