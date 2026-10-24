@@ -3,8 +3,8 @@ name: deploom-upgrade
 description: Plan and safely execute JavaScript and TypeScript dependency upgrades using the DepLoom MCP get_upgrade_plan tool, isolated Git worktrees, exclusions and evidence-based verification. Use when the user asks to upgrade/update project dependencies, proposes an upgrade to a target level (yellow/green), says "don't touch <package>" / exclusions, or wants the build/tests verified after updating packages.
 metadata:
   version: "1.0.0"
-  source: https://github.com/DepLoom/mcp/tree/main/skills/deploom-upgrade
-  languages: ["javascript", "typescript"]
+  source: "https://github.com/DepLoom/mcp/tree/main/skills/deploom-upgrade"
+  languages: "javascript, typescript"
 ---
 
 # deploom-upgrade

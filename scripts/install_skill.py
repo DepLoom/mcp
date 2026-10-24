@@ -26,7 +26,9 @@ Guarantees:
   configuration stays a separate, explicit step.
 
 User-scope base can be redirected for tests/CI without touching ``HOME`` with
-``--config-home`` (or env ``DEPLOOM_SKILL_HOME``).
+``--config-home`` (or env ``DEPLOOM_SKILL_HOME``) — it replaces the home
+directory, so the client's normal relative path (``.config/opencode/skills``,
+``.claude/skills``, ``.agents/skills``) is still appended.
 """
 from __future__ import annotations
 
@@ -59,16 +61,14 @@ def _canonical_files(root: Path) -> list[Path]:
 
 
 def default_user_base(client: str, config_home: str | None) -> Path:
-    override = config_home or os.environ.get("DEPLOOM_SKILL_HOME")
-    if override:
-        return Path(override)
-    home = Path.home()
+    explicit = config_home or os.environ.get("DEPLOOM_SKILL_HOME")
+    base = Path(explicit) if explicit else Path.home()
     if client == "opencode":
-        return home / ".config" / "opencode" / "skills"
+        return base / ".config" / "opencode" / "skills"
     if client == "claude-code":
-        return home / ".claude" / "skills"
+        return base / ".claude" / "skills"
     if client == "codex":
-        return home / ".agents" / "skills"
+        return base / ".agents" / "skills"
     raise ValueError(client)
 
 
@@ -172,9 +172,12 @@ def main(argv: list[str] | None = None) -> int:
         print_mcp_config(args.client)
         return 0
 
-    if not args.client or not args.scope:
-        raise SystemExit("ERROR: --client and --scope are required (or --target with --scope project/user)\n"
-                         "usage: python scripts/install_skill.py --client opencode --scope project --project /path")
+    if not args.client and not args.target:
+        raise SystemExit("ERROR: --client (with --scope) or --target is required\n"
+                         "usage: python scripts/install_skill.py --client opencode --scope project --project /path\n"
+                         "       python scripts/install_skill.py --scope project --target /path/to/skill-dir")
+    if args.client and not args.scope and not args.target:
+        raise SystemExit("ERROR: --scope (project|user) is required when --client is given")
     if args.scope == "project" and not args.target and not args.project:
         raise SystemExit("ERROR: --project is required with --scope project (or pass --target)")
 
@@ -191,7 +194,10 @@ def main(argv: list[str] | None = None) -> int:
     if status == "installed":
         print("already installed with identical content (no changes)")
         if args.verify:
-            return 0 if not verify(canonical_root, target, files) else _verify_fail(files, target)
+            problems = verify(canonical_root, target, files)
+            if problems:
+                return _verify_fail(problems, target, canonical_root)
+            print(f"verify: ok ({len(files)} files byte-identical)")
         return 0
     if status in ("conflict", "partial-conflict") and not args.force:
         print(f"existing skill at {target / 'SKILL.md'} differs from canonical; "
