@@ -628,23 +628,91 @@ def _exec_env(policy: BlueprintPolicy, run_id: str, workspace_id: str, project_i
     return env
 
 
-def resolve_output_outside(project: Path, out: Path) -> Optional[Path]:
-    """Return the resolved output dir if it is NOT inside/above the project.
+def _expand_short_names(path_str: str) -> str:
+    """Canonicalize 8.3 short-name components to their long form on Windows
+    WITHOUT following reparse points.
 
-    ``None`` means the output directory would overlap the analysed project
-    (as ancestor, descendant or the same directory), which is unsafe: the
-    boundary guarantees the project is only ever read.
+    ``GetLongPathNameW`` expands each component's short name (``LEVENS~1`` ->
+    ``levenskikh``) but treats a junction/symlink entry as a plain directory
+    entry, so the reparse component survives on the lexical path -- exactly
+    what the filesystem guard needs to detect a route that passes THROUGH the
+    project. Non-existent tail components (fresh managed run dirs) are kept
+    verbatim. Identity on POSIX.
     """
+    if os.name != "nt":
+        return path_str
     try:
-        project.resolve().relative_to(out.resolve())
+        import ctypes
+    except Exception:  # pragma: no cover - defensive
+        return path_str
+    get_long = ctypes.windll.kernel32.GetLongPathNameW
+
+    def long_of(candidate: str) -> Optional[str]:
+        buf = ctypes.create_unicode_buffer(32768)
+        count = get_long(candidate, buf, len(buf))
+        if count and count < len(buf):
+            return buf[:count]
         return None
-    except ValueError:
-        pass
-    try:
-        out.resolve().relative_to(project.resolve())
-        return None
-    except ValueError:
-        return out.resolve()
+
+    drive, _ = os.path.splitdrive(os.path.abspath(path_str))
+    root = (drive + os.sep) if drive else os.sep
+    current = root
+    rest = os.path.abspath(path_str)
+    tail = rest[len(root):].lstrip("\\/")
+    for part in tail.split(os.sep):
+        candidate = os.path.join(current, part)
+        long_v = long_of(candidate)
+        current = long_v if long_v is not None else candidate
+    return current
+
+
+def _path_forms(path: Path) -> Tuple[str, str]:
+    """Normalized absolute path forms used by the filesystem guard.
+
+    Returns ``(lexical, real)``: both absolute and normalized; ``lexical`` keeps
+    symlink/junction components (``normpath``/``abspath`` only, no follow) while
+    8.3 short names are expanded so containment comparisons survive differing
+    spellings of the same directory; ``real`` follows them
+    (``os.path.realpath``). ``os.path.normcase`` makes the comparison
+    platform-correct (Windows drive letters, case folding, UNC; identity on
+    POSIX). Non-strict, so a not-yet-created directory is fine.
+    """
+    raw = os.path.expanduser(os.fspath(path))
+    lexical = os.path.normcase(_expand_short_names(os.path.abspath(os.path.normpath(raw))))
+    real = os.path.normcase(os.path.realpath(lexical))
+    return lexical, real
+
+
+def _is_within(child: str, parent: str) -> bool:
+    separ = os.sep
+    if parent != separ:
+        parent = parent.rstrip(separ)
+    if child == parent:
+        return True
+    return child.startswith(parent + separ)
+
+
+def _paths_overlap(a: str, b: str) -> bool:
+    """True when two (already normalized) paths stand in the ancestor /
+    descendant / equal relation -- the forbidden overlap direction."""
+    return _is_within(a, b) or _is_within(b, a)
+
+
+def resolve_output_outside(project: Path, out: Path) -> Optional[Path]:
+    """Return a safe (real, resolved) output path when ``out`` does NOT overlap
+    the analysed project; ``None`` when it does.
+
+    Overlap is checked on BOTH path forms of each side -- the lexical absolute
+    path (symlink/junction components preserved) and the real path after
+    follow-in -- so a symlink that routes through the project (in either
+    direction) cannot smuggle writes inside it. This single guard is shared by
+    the managed state root, the output root and the registry metadata cache.
+    """
+    for p_form in _path_forms(project):
+        for o_form in _path_forms(out):
+            if _paths_overlap(p_form, o_form):
+                return None
+    return Path(_path_forms(out)[1])
 
 
 def _make_unique_run_dir(base: Path, run_id: str) -> Tuple[Path, str]:
@@ -747,39 +815,38 @@ def _prepare_generation(
     # --- output isolation (fail-closed at the write boundary) -------------
     run_id = run_id or f"run-{uuid.uuid4().hex[:12]}"
     if opts.output_dir:
-        base = Path(opts.output_dir).expanduser().resolve()
-        if resolve_output_outside(purl, base) is None:
+        base_raw = Path(opts.output_dir).expanduser()
+        base = resolve_output_outside(purl, base_raw)
+        if base is None:
             return (
                 _error(
                     "output-inside-project",
-                    f"output_dir {base} must not be inside or above the analysed project {purl}",
+                    f"output_dir {base_raw} must not be inside or above the analysed project {purl}",
                 ),
                 None,
             )
     else:
-        base = Path(tempfile.gettempdir())
-        run_base = Path(tempfile.gettempdir()) / f"deploom-blueprint-{run_id}"
-        if resolve_output_outside(purl, run_base) is None:
+        base = resolve_output_outside(purl, Path(tempfile.gettempdir()) / f"deploom-blueprint-{run_id}")
+        if base is None:
             return (
                 _error(
                     "output-inside-project",
-                    f"managed output {run_base} overlaps the analysed project {purl}",
+                    f"managed output overlaps the analysed project {purl}",
                 ),
                 None,
             )
-        base = run_base
     try:
         run_root, run_id = _make_unique_run_dir(base, run_id)
     except BlueprintError as exc:
         return _error(exc.code, str(exc)), None
 
     if opts.registry_metadata_cache:
-        cache_path = Path(opts.registry_metadata_cache).expanduser().resolve()
-        if resolve_output_outside(purl, cache_path) is None:
+        cache_raw = Path(opts.registry_metadata_cache).expanduser()
+        if resolve_output_outside(purl, cache_raw) is None:
             return (
                 _error(
                     "output-inside-project",
-                    f"registry metadata cache {cache_path} must not be inside the analysed "
+                    f"registry metadata cache {cache_raw} must not be inside the analysed "
                     f"project {purl}",
                 ),
                 None,

@@ -111,7 +111,10 @@ codes (`invalid-deadline`, `invalid-policy`, `invalid-registry`,
 `invalid-exclude`) instead of being forwarded to the planner. Write boundaries
 are fail-closed too: an `output_dir` overlapping the project (`output-inside-project`)
 and a managed state overlapping the project (`state-inside-project`) are
-rejected **before any directory is created**.
+rejected **before any directory is created**. Overlap is checked on both the
+lexical absolute path (symlinks/junctions preserved) and the real path after
+following them, so a link that routes *through* the project cannot smuggle
+writes inside it.
 
 The response is a **compact** representation of the Upgrade Blueprint
 (`protocol=upgrade-blueprint`, run, status, summary, recommendation groups,
@@ -125,13 +128,22 @@ packages per group / 100 rows, capped at 512 KiB of serialized JSON): when
 there are more, the `truncation` block reports the exact clipped counts
 (`inlineGroups/totalGroups`, `inlinePackages/totalPackages`,
 `inlineDependencies/totalDependencies`, plus `byteLimit/bytes/limitsHit`)
-while `summary.statusCounts` stays complete. A deadline-exhausted or
-client-cancelled run returns a `DRAFT_PARTIAL` plan with
-`partial.replanRequired=true`, not a spurious failure. Because the tool is
-async, client cancellation reliably kills the whole planner process tree —
-verified over a real stdio session (`notifications/cancelled` from the SDK's
-per-request read-timeout abandon path; see
-[`docs/STAGE_02_MCP_SERVER.md`](docs/STAGE_02_MCP_SERVER.md)).
+while `summary.statusCounts` stays complete. The budget bounds the serialized
+**payload** and `truncation.bytes` equals its exact final size (the test
+suite re-serializes the response and asserts equality); if even the minimal
+required payload cannot fit, the call fails closed with
+`response-too-large`. The response also carries the policy that was actually
+**applied** (`policy.{targetLevel,minLagOkPct,exclusions,policyHash}`), with a
+request-vs-applied mismatch surfaced as `policyDiscrepancy`.
+
+A deadline-exhausted run returns a `DRAFT_PARTIAL` plan with
+`partial.replanRequired=true`; that partial result is produced by the planner
+itself, **not** by client cancellation. Because the tool is async, client
+cancellation (e.g. the SDK's per-request read-timeout abandon, which sends
+`notifications/cancelled`) reliably kills the whole planner process tree —
+verified over a real stdio session; the interrupt yields no manufactured
+partial blueprint, only the tree-kill cleanup, and the server session stays
+alive (see [`docs/STAGE_02_MCP_SERVER.md`](docs/STAGE_02_MCP_SERVER.md)).
 
 The response is always `NOT_VERIFIED / PLANNING_ONLY / UNKNOWN / UNPROVEN`: a
 `PROPOSED` verdict means "this upgrade **can** be proposed", not "already

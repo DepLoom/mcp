@@ -15,8 +15,16 @@ Hardening contract of this boundary:
   async process runner, so asyncio/anyio task cancellation (including server
   shutdown and client disconnect) kills the whole child process tree;
 * honestly bounded response: the compact protocol caps inlined dependency
-  rows; a larger plan stays fully on disk in the artifact files and the
-  response says so explicitly (`truncation`), it never silently drops data;
+  rows, groups and per-group package lists; the whole serialized payload --
+  including the ``truncation`` block -- must fit the byte budget
+  (``truncation.bytes`` is the exact final size, 512 KiB default). A larger
+  plan stays fully on disk in the artifact files and the response says so
+  explicitly, it never silently drops data; if even the minimal payload cannot
+  fit, the tool fails closed with ``response-too-large``;
+* applied policy is returned: the compact response carries the `policy` that
+  was actually applied (targetLevel, minLagOkPct, exclusions, policyHash) from
+  the produced blueprint, and a request-vs-applied mismatch is surfaced as
+  ``policyDiscrepancy`` instead of being hidden;
 * exclusions are real planning scope: `exclude` is passed to the planner as
   `--exclude-dependency` BEFORE planning (never filtered out afterwards);
 * honest statuses: every response carries `authority=PLANNING_ONLY`, a
@@ -44,6 +52,7 @@ from mcp_types import CallToolResult, TextContent
 
 from deploom_mcp import __version__
 from deploom_mcp.blueprint import (
+    BlueprintError,
     BlueprintOptions,
     BlueprintPolicy,
     generate_upgrade_blueprint,
@@ -91,7 +100,10 @@ server = MCPServer(name=SERVER_NAME, version=__version__)
 def _state_dir() -> Path:
     env = os.environ.get("DEPLOOM_MCP_STATE_DIR")
     if env:
-        return Path(env).expanduser().resolve()
+        # Lexical absolute path: symlink/junction components are preserved on
+        # purpose so the filesystem guard can reject a state route that passes
+        # THROUGH the analysed project (see resolve_output_outside).
+        return Path(os.path.abspath(os.path.expanduser(env)))
     return Path.home() / ".deploom-mcp"
 
 
@@ -185,7 +197,7 @@ def _build_request(
 
     out: Optional[str] = None
     if output_dir:
-        candidate = Path(output_dir).expanduser().resolve()
+        candidate = Path(os.path.abspath(os.path.expanduser(output_dir)))
         if resolve_output_outside(purl, candidate) is None:
             return (
                 _error(
@@ -230,11 +242,62 @@ def _build_request(
     return None, {"purl": purl, "options": options, "policy": policy}
 
 
-def _result_from_planning(result) -> Dict[str, Any]:
+def _policy_snapshot(requested: BlueprintPolicy) -> Dict[str, Any]:
+    """The agent-facing policy knobs exactly as the caller requested them."""
+    return {
+        "targetLevel": requested.target_level,
+        "minLagOkPct": requested.min_lag_ok_pct,
+        "exclusions": list(requested.exclusions),
+    }
+
+
+def _policy_discrepancy(
+    requested: Dict[str, Any], applied: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """Detect a mismatch between the REQUESTED policy and the policy the
+    blueprint actually carries, instead of silently hiding it.
+
+    Only the fields both sides define are compared; ``policyHash`` is
+    planner-applied evidence and therefore excluded from the conflict check.
+    """
+    mismatched: List[str] = []
+    for field in ("targetLevel", "minLagOkPct"):
+        req = requested.get(field)
+        applied_value = applied.get(field)
+        if req is not None and applied_value is not None and req != applied_value:
+            mismatched.append(field)
+    if set(requested.get("exclusions") or []) != set(applied.get("exclusions") or []):
+        mismatched.append("exclusions")
+    if not mismatched:
+        return None
+    return {
+        "requested": dict(requested),
+        "applied": {k: applied.get(k) for k in ("targetLevel", "minLagOkPct", "exclusions", "policyHash")},
+        "mismatchedFields": sorted(mismatched),
+        "message": "the plan was produced under a policy that differs from the requested one "
+        "(see policy.applied); do not act on rows expecting the requested policy",
+    }
+
+
+def _result_from_planning(result, requested: Optional[BlueprintPolicy] = None) -> Dict[str, Any]:
     if not result.ok:
         err = result.error or _error("internal-error", "planner failed without a machine-readable error")
         return {"ok": False, "runId": result.run_id, "error": err}
-    return {"ok": True, **compact_blueprint(result.blueprint or {})}
+    try:
+        payload = compact_blueprint(result.blueprint or {})
+    except BlueprintError as exc:
+        return {
+            "ok": False,
+            "runId": result.run_id,
+            "error": {"code": exc.code, "message": str(exc), "detail": exc.detail},
+        }
+    response = {"ok": True, **payload}
+    if requested is not None:
+        applied = payload.get("policy") or {}
+        discrepancy = _policy_discrepancy(_policy_snapshot(requested), applied)
+        if discrepancy is not None:
+            response["policyDiscrepancy"] = discrepancy
+    return response
 
 
 def _compact_payload(
@@ -287,6 +350,7 @@ def _compact_payload(
     is_partial = draft_status == "DRAFT_PARTIAL"
     processed = summary.get("processed")
     processed_total = summary.get("processedTotal")
+    policy = blueprint.get("policy") or {}
     payload = {
         "protocol": KIND,
         "schemaVersion": blueprint.get("schemaVersion"),
@@ -309,6 +373,16 @@ def _compact_payload(
             "processed": processed,
             "processedTotal": processed_total,
             "replanRequired": is_partial,
+        },
+        "policy": {
+            # Literally the policy that was APPLIED, taken from the produced
+            # blueprint -- never re-invented from the request arguments. Only
+            # the agent-facing knobs are exposed; intent / acceptance policy /
+            # registry internals stay out of the compact response.
+            "targetLevel": policy.get("targetLevel"),
+            "minLagOkPct": policy.get("minLagOkPct"),
+            "exclusions": list(policy.get("exclusions") or []),
+            "policyHash": policy.get("policyHash"),
         },
         "summary": {
             "totalDependencies": summary.get("totalDependencies"),
@@ -341,6 +415,24 @@ def _serialized_bytes(payload: Dict[str, Any]) -> int:
     return len(json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
 
 
+def _finalize_byte_count(payload: Dict[str, Any]) -> int:
+    """Set ``payload.truncation.bytes`` to the exact size of the fully
+    serialized payload and return it.
+
+    ``bytes`` participates in the payload it measures, so the value is the
+    fixed point of ``size = len(serialize(payload))``; the loop converges
+    because only the digit count of ``bytes`` (and ``limitsHit``) influence the
+    result once set. Terminates deterministically for realistic sizes (guard
+    against pathological non-convergence)."""
+    for _ in range(32):
+        current = payload["truncation"]["bytes"]
+        size = _serialized_bytes(payload)
+        payload["truncation"]["bytes"] = size
+        if size == current:
+            return size
+    return _serialized_bytes(payload)
+
+
 def compact_blueprint(
     blueprint: Dict[str, Any],
     max_inline_rows: int = DEFAULT_INLINE_ROWS,
@@ -351,69 +443,91 @@ def compact_blueprint(
     """Project a full blueprint into the compact agent-facing protocol.
 
     Dependency rows, recommendation groups and per-group package lists are
-    bounded (``max_inline_*``) and the whole serialized response must fit
-    ``max_response_bytes``: when it does not, the display caps are reduced
-    deterministically (packages -> groups -> rows) until it does. The full plan
-    is always in the artifact files and the response recaps every reduction in
-    ``truncation``, so a client never mistakes a clipped answer for the whole
-    picture. The package -> verdict/status counts stay complete regardless.
+    bounded (``max_inline_*``) and the WHOLE serialized response -- including
+    the ``truncation`` block -- must fit ``max_response_bytes``: when it does
+    not, the display caps are reduced deterministically (packages -> groups ->
+    rows) until it does, and ``truncation.bytes`` always equals the exact size
+    of the final JSON payload (``ensure_ascii=False, indent=2``), never a
+    pre-truncation estimate.
+
+    The cap applies to the serialized **payload** (the text in the tool result
+    content / the structuredContent object), not to the full MCP transport
+    envelope that wraps it. The complete plan is always in the artifact files
+    and the response recaps every reduction in ``truncation``, so a client
+    never mistakes a clipped answer for the whole picture; the package ->
+    verdict/status counts stay complete regardless.
+
+    Raises ``BlueprintError("response-too-large", ...)`` when even the minimal
+    required payload (protocol/status/summary/run/policy/artifacts/partial/
+    truncation with zero display rows) physically cannot fit the budget --
+    a fail-closed outcome rather than shipping a known-too-large answer.
     """
     rows_cap = max(0, int(max_inline_rows))
     groups_cap = max(0, int(max_inline_groups))
     packages_cap = max(0, int(max_packages_per_group))
     budget = max(1, int(max_response_bytes))
 
-    payload, metrics = _compact_payload(
-        blueprint,
-        max_inline_rows=rows_cap,
-        max_inline_groups=groups_cap,
-        max_packages_per_group=packages_cap,
-    )
-    first_serialized = _serialized_bytes(payload)
-    bytes_reduced = first_serialized > budget
-    while bytes_reduced:
-        # Least-valuable content first: package lists, then groups, then rows.
-        if packages_cap > 0:
-            packages_cap = max(0, packages_cap // 2)
-        elif groups_cap > 0:
-            groups_cap = max(0, groups_cap // 2)
-        elif rows_cap > 0:
-            rows_cap = max(0, rows_cap // 2)
-        else:
-            break  # already minimal; cannot shrink further without empty content
+    # True once the byte budget ever forces content off the wire; persists for
+    # the whole projection so `truncation.limitsHit` stays truthful even after
+    # later shrink rounds bring the payload back under the budget.
+    bytes_forced = False
+    first_build = True
+
+    while True:
         payload, metrics = _compact_payload(
             blueprint,
             max_inline_rows=rows_cap,
             max_inline_groups=groups_cap,
             max_packages_per_group=packages_cap,
         )
-        bytes_reduced = _serialized_bytes(payload) > budget
+        limits_hit: List[str] = []
+        if metrics["inlineRows"] < metrics["totalRows"]:
+            limits_hit.append("rows")
+        if metrics["inlineGroups"] < metrics["totalGroups"]:
+            limits_hit.append("groups")
+        if metrics["inlinePackages"] < metrics["totalPackages"]:
+            limits_hit.append("packages")
 
-    final_bytes = _serialized_bytes(payload)
-    limits_hit: List[str] = []
-    if metrics["inlineRows"] < metrics["totalRows"]:
-        limits_hit.append("rows")
-    if metrics["inlineGroups"] < metrics["totalGroups"]:
-        limits_hit.append("groups")
-    if metrics["inlinePackages"] < metrics["totalPackages"]:
-        limits_hit.append("packages")
-    if first_serialized > budget:
-        limits_hit.append("bytes")
-    truncated = bool(limits_hit)
+        payload["truncation"] = {
+            "truncated": True,  # finalized below once limitsHit is known
+            "inlineDependencies": metrics["inlineRows"],
+            "totalDependencies": metrics["totalRows"],
+            "inlineGroups": metrics["inlineGroups"],
+            "totalGroups": metrics["totalGroups"],
+            "inlinePackages": metrics["inlinePackages"],
+            "totalPackages": metrics["totalPackages"],
+            "byteLimit": budget,
+            "bytes": 0,
+            "limitsHit": [],
+        }
+        base_size = _finalize_byte_count(payload)
+        if first_build:
+            bytes_forced = base_size > budget
+            first_build = False
+        if base_size > budget:
+            bytes_forced = True
+        if bytes_forced:
+            limits_hit.append("bytes")
+        payload["truncation"]["limitsHit"] = sorted(limits_hit)
+        payload["truncation"]["truncated"] = bool(limits_hit)
+        final_size = _finalize_byte_count(payload)
+        if final_size <= budget:
+            return payload
 
-    payload["truncation"] = {
-        "truncated": truncated,
-        "inlineDependencies": metrics["inlineRows"],
-        "totalDependencies": metrics["totalRows"],
-        "inlineGroups": metrics["inlineGroups"],
-        "totalGroups": metrics["totalGroups"],
-        "inlinePackages": metrics["inlinePackages"],
-        "totalPackages": metrics["totalPackages"],
-        "byteLimit": budget,
-        "bytes": final_bytes,
-        "limitsHit": sorted(limits_hit),
-    }
-    return payload
+        if not (packages_cap or groups_cap or rows_cap):
+            # Nothing left to clip -- the minimal required payload does not fit.
+            from deploom_mcp.blueprint import BlueprintError
+            raise BlueprintError(
+                "response-too-large",
+                f"minimal required response ({final_size} bytes) exceeds the "
+                f"{budget}-byte budget; cannot return a truthful compact plan",
+            )
+        if packages_cap > 0:
+            packages_cap = max(0, packages_cap // 2)
+        elif groups_cap > 0:
+            groups_cap = max(0, groups_cap // 2)
+        else:
+            rows_cap = max(0, rows_cap // 2)
 
 
 def get_upgrade_plan(
@@ -446,7 +560,7 @@ def get_upgrade_plan(
         return {"ok": False, "error": error}
     assert req is not None
     result = generate_upgrade_blueprint(str(req["purl"]), policy=req["policy"], options=req["options"])
-    return _result_from_planning(result)
+    return _result_from_planning(result, req["policy"])
 
 
 @server.tool(
@@ -495,7 +609,7 @@ async def get_upgrade_plan_tool(
     result = await generate_upgrade_blueprint_async(
         str(req["purl"]), policy=req["policy"], options=req["options"]
     )
-    return _result(_result_from_planning(result))
+    return _result(_result_from_planning(result, req["policy"]))
 
 
 def _result(payload: Dict[str, Any]) -> CallToolResult:

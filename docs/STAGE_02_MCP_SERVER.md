@@ -56,12 +56,28 @@ the response's `policy.exclusions`.
 
 ### Cancellation
 
-Because the tool is async, client cancellation propagates as task
-cancellation. The boundary responds to a `cancel_event` by killing the whole
-Core process tree (Windows: `taskkill /T /F`; POSIX: `killpg`), waiting for a
-bounded drain, and — if the draft was already partially produced — returns a
-`DRAFT_PARTIAL` plan with `partial.replanRequired=true` instead of a spurious
-failure. If planning never started, the client receives `cancelled`.
+Planning runs as a long-lived async child process, so four distinct ways a run
+can end without a final `DRAFT_READY` plan must not be confused:
+
+* **DRAFT_PARTIAL is a planner-produced result**, not a cancellation artifact.
+  It appears only when the Core *itself* published a partially-computed draft
+  (typically its own planning deadline): the response has
+  `status.draftStatus="DRAFT_PARTIAL"` and `partial.partial=true` with
+  `partial.replanRequired=true`.
+* **Client cancellation (interrupt)** — the client abandons the request (the
+  MCP SDK's per-request `read_timeout_seconds` sends `notifications/cancelled`).
+  The boundary responds to the cancel event by killing the whole Core process
+  tree (Windows: `taskkill /T /F`; POSIX: `killpg`) and draining output. A
+  client interrupt does **not** manufacture a `DRAFT_PARTIAL` plan: a partial
+  blueprint is returned only if the planner published one before the interrupt
+  was handled. If planning never started, the client receives `cancelled`;
+  otherwise the abandoned handler raises `CancelledError`. The server session
+  stays alive for subsequent calls.
+* **Planner/run timeout** — the boundary's own subprocess budget (`draft
+  deadline` + margin) is exceeded: the whole tree is killed and the call fails
+  closed with `generator-timeout`.
+* **Server shutdown / disconnect** — in-flight handlers are cancelled and the
+  same tree-kill/drain cleanup runs; no partial blueprint is emitted.
 
 This is validated end-to-end over a **real stdio session** with the official
 MCP client SDK: a slow planner fixture (see `tests/fixtures/slow_core/`) writes
@@ -86,10 +102,15 @@ analysed project.
 
 The managed state is fail-closed too: it is resolved **without creating it**,
 and if it overlaps the analysed project in either direction (state inside the
-project, or the project nested inside the state), the request is rejected with
-`state-inside-project` **before anything is materialised** — the test suite
-asserts a full tree snapshot is unchanged after a rejected request. The
-registry metadata cache is created only after all validation passes.
+project, or the project nested inside the state) the request is rejected with
+`state-inside-project` **before anything is materialised**. Overlap is checked
+on both the lexical absolute path (symlinks/junctions preserved) and the real
+path after following them, and on the platform-correct case so a link that
+routes *through* the project cannot smuggle writes inside it. The same guard
+covers the explicit `output_dir` (`output-inside-project`) and the registry
+metadata cache. The test suite asserts a full tree snapshot is unchanged after
+a rejected request; the registry metadata cache is created only after all
+validation passes.
 
 ## Response (compact protocol)
 
@@ -97,6 +118,11 @@ On success the tool returns a compact, agent-friendly payload
 (`ok: true, protocol: "upgrade-blueprint", ...`) with:
 
 * `run` — `runId`, `projectId`, project name;
+* `policy` — the policy that was actually **applied** (`targetLevel`,
+  `minLagOkPct`, `exclusions`, `policyHash`), taken verbatim from the produced
+  blueprint, never re-derived from the request; a request-vs-applied mismatch
+  (e.g. the planner resolved a different scope) is surfaced as
+  `policyDiscrepancy` instead of being hidden;
 * `status` — `draftStatus`, `verificationStatus`, `authority`,
   `compatibility`, `parallelExecutionSafety`, `partialReason`;
 * `summary` — `totalDependencies`, `proposed`, `needsReview`, `statusCounts`;
@@ -107,12 +133,20 @@ On success the tool returns a compact, agent-friendly payload
   inlineGroups, totalGroups, inlinePackages, totalPackages, byteLimit, bytes,
   limitsHit}` when the payload is clipped to the deterministic display budget
   (default 50 groups / 50 packages per group / 100 rows, capped at 512 KiB of
-  serialized JSON). Budget is enforced deterministically: caps are reduced
-  step-wise (packages → groups → rows) until the exact on-wire bytes fit, so
-  the same plan always yields the same response; `summary.statusCounts`
-  stays complete regardless;
+  serialized JSON). The budget bounds the serialized **payload** (the exact
+  `json.dumps(..., ensure_ascii=False, indent=2)` text, including the
+  `truncation` block itself — duplicated in the tool result `content` and
+  `structuredContent`), not the whole MCP transport envelope. `bytes` always
+  equals the exact final size (never a pre-truncation estimate; the test suite
+  re-serializes the response and asserts equality). Budget is enforced
+  deterministically: caps are reduced step-wise (packages → groups → rows)
+  until the exact on-wire bytes fit, so the same plan always yields the same
+  response; `summary.statusCounts` stays complete regardless. If even the
+  minimal required payload cannot fit the budget, the call fails closed with
+  `response-too-large` rather than returning an oversized answer;
 * `partial` — `{partial, replanRequired, processed, processedTotal, reason}`
-  when the draft is only partially computed (deadline/cancellation);
+  when the draft itself was only partially computed (planner deadline /
+  `DRAFT_PARTIAL`; a client interrupt does not manufacture this block);
 * `artifacts` — paths to the full Blueprint, manifest, plan, prompt, summary
   and solver components, so an agent can read the detail with its own tools;
 * `honesty` / `boundaryNote` — the planning-only disclaimer.

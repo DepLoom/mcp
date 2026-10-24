@@ -40,9 +40,12 @@ from deploom_mcp.server import (  # noqa: E402
     KIND,
     MIN_DEADLINE_SECONDS,
     TOOL_NAME,
+    _result_from_planning,
     compact_blueprint,
     get_upgrade_plan,
 )
+
+from deploom_mcp.blueprint import BlueprintError, BlueprintPolicy, UpgradeBlueprintResult  # noqa: E402
 
 RESERVED_VERIFIED = {"CONSTRAINT_SATISFIED", "MATERIALIZED", "PROJECT_VERIFIED"}
 
@@ -215,6 +218,106 @@ class ManagedStateIsolationTests(unittest.TestCase):
         after = _tree_snapshot(self._tmp)
         self.assertEqual(before, after)
 
+    def test_symlinked_state_external_target_reached_via_project_is_rejected(self) -> None:
+        # The state dir stays OUTSIDE the project, but the only path to it
+        # passes through the project (the link lives inside `proj`). The guard
+        # must compare the unresolved lexical route too, not only the resolved
+        # target, otherwise writes could land under the analysed subtree.
+        proj = self._make_project()
+        real = self._tmp / "external-state"
+        real.mkdir()
+        link = proj / "state-link"
+        try:
+            _create_dir_link(link, real)
+        except OSError as exc:  # pragma: no cover - host cannot create dir links
+            self.skipTest(f"cannot create directory link: {exc}")
+        os.environ[self.STATE_ENV] = str(link)
+        before = _tree_snapshot(self._tmp)
+
+        res = get_upgrade_plan(project_path=str(proj), output_dir=str(self._tmp / "out"))
+
+        self.assertIs(res["ok"], False)
+        self.assertEqual(res["error"]["code"], "state-inside-project")
+        after = _tree_snapshot(self._tmp)
+        self.assertEqual(before, after)
+
+    def test_symlinked_state_living_outside_whose_target_is_inside_project_is_rejected(self) -> None:
+        # The reverse direction: the external state path itself is a link whose
+        # TARGET is inside the project. Resolution therefore lands under the
+        # analysed subtree and must be rejected as state-inside-project.
+        proj = self._make_project()
+        link = self._tmp / "external-link"
+        try:
+            _create_dir_link(link, proj)
+        except OSError as exc:  # pragma: no cover - host cannot create dir links
+            self.skipTest(f"cannot create directory link: {exc}")
+        os.environ[self.STATE_ENV] = str(link)
+        before = _tree_snapshot(self._tmp)
+
+        res = get_upgrade_plan(project_path=str(proj), output_dir=str(self._tmp / "out"))
+
+        self.assertIs(res["ok"], False)
+        self.assertEqual(res["error"]["code"], "state-inside-project")
+        after = _tree_snapshot(self._tmp)
+        self.assertEqual(before, after)
+
+    def test_symlinked_output_dir_routed_through_project_is_rejected(self) -> None:
+        # output_dir reached via a link INSIDE the project: although the real
+        # target is outside, the lexical route crosses the project, so the
+        # guard must fail closed (output-inside-project, not state).
+        proj = self._make_project()
+        real = self._tmp / "external-out"
+        real.mkdir()
+        link = proj / "out-link"
+        try:
+            _create_dir_link(link, real)
+        except OSError as exc:  # pragma: no cover - host cannot create dir links
+            self.skipTest(f"cannot create directory link: {exc}")
+        os.environ.pop(self.STATE_ENV, None)
+        before = _tree_snapshot(self._tmp)
+
+        res = get_upgrade_plan(project_path=str(proj), output_dir=str(link))
+
+        self.assertIs(res["ok"], False)
+        self.assertEqual(res["error"]["code"], "output-inside-project")
+        after = _tree_snapshot(self._tmp)
+        self.assertEqual(before, after)
+
+    def test_independent_external_state_dir_remains_allowed(self) -> None:
+        # Regression guard: rejecting symlink routes must NOT over-block a
+        # legitimately external state directory (ordinary, non-overlapping).
+        proj = self._make_project()
+        state = self._tmp / "external-state"
+        state.mkdir()
+        generator = (
+            ROOT / "tests" / "fixtures" / "fake_core" / "dependency_live_roadmap_generator.py"
+        )
+        if not generator.is_file():
+            self.skipTest("fake planner core missing")
+        save = os.environ.get("DEPLOOM_MCP_GENERATOR_PATH")
+        os.environ["DEPLOOM_MCP_GENERATOR_PATH"] = str(generator)
+        os.environ[self.STATE_ENV] = str(state)
+        self.addCleanup(self._restore_env)
+        if save is None:
+            self.addCleanup(os.environ.pop, "DEPLOOM_MCP_GENERATOR_PATH", None)
+        else:
+            self.addCleanup(os.environ.__setitem__, "DEPLOOM_MCP_GENERATOR_PATH", save)
+
+        res = get_upgrade_plan(project_path=str(proj), output_dir=str(self._tmp / "out"))
+
+        self.assertTrue(res["ok"], res.get("error"))
+        self.assertTrue(res["run"]["runId"])
+        self.assertTrue(state.is_dir(), "external state dir must be usable, not blocked")
+        # The managed run rooted in the explicit output dir must have been
+        # materialized on disk (writes really happened outside the project).
+        out = self._tmp / "out"
+        run_dirs = [p for p in out.glob("run-*") if p.is_dir()] if out.is_dir() else []
+        self.assertTrue(run_dirs, "managed run dir must exist under the output root")
+        self.assertFalse(
+            any("proj" in str(p).lower() for p in run_dirs),
+            "run dir must not sit inside the project",
+        )
+
     def test_concurrent_calls_share_state_without_clobbering(self) -> None:
         # A shared managed-state root that overlaps the project must be rejected
         # identically by concurrent callers, before any write can leak.
@@ -248,6 +351,29 @@ def _remove_tree(path: Path) -> None:
     import shutil
 
     shutil.rmtree(path, ignore_errors=True)
+
+
+def _create_dir_link(link: Path, target: Path) -> None:
+    """Best-effort directory link for fs-guard tests: a symlink when the host
+    allows it (Linux, privileged CI runners), a junction otherwise (Windows
+    without Developer Mode). Raises OSError when neither works."""
+    try:
+        link.symlink_to(target, target_is_directory=True)
+        return
+    except OSError:
+        pass
+    import subprocess
+    import sys
+
+    if sys.platform == "win32":
+        proc = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+            capture_output=True, text=True,
+        )
+        if proc.returncode == 0:
+            return
+        raise OSError(f"junction creation failed: {proc.stderr.strip()}")
+    raise OSError("directory link creation unsupported on this host")
 
 class CompactProtocolTests(unittest.TestCase):
     def test_compact_protocol_carries_planning_only_semantics(self) -> None:
@@ -413,6 +539,167 @@ class CompactProtocolTests(unittest.TestCase):
         self.assertEqual(compact["truncation"]["limitsHit"], [])
         self.assertEqual(compact["truncation"]["totalDependencies"], 4)
         self.assertEqual(len(compact["dependencies"]), 4)
+
+    # --- P1: the reported size IS the final serialized size -----------------
+
+    @staticmethod
+    def _serialized(payload: Dict[str, Any]) -> int:
+        return len(json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
+
+    def test_reported_bytes_equals_actual_serialized_size(self) -> None:
+        compact = compact_blueprint(self._huge_blueprint())
+        self.assertEqual(compact["truncation"]["bytes"], self._serialized(compact))
+        self.assertLessEqual(compact["truncation"]["bytes"], compact["truncation"]["byteLimit"])
+
+    def test_reported_bytes_exact_across_scales(self) -> None:
+        for rows in (100, 1000, 10000):
+            bp = self._huge_blueprint(groups=50, packages_per_group=50, rows=rows)
+            compact = compact_blueprint(bp)
+            self.assertEqual(
+                compact["truncation"]["bytes"],
+                self._serialized(compact),
+                f"reported bytes must match the final payload size at rows={rows}",
+            )
+            budget = compact["truncation"]["byteLimit"]
+            self.assertLessEqual(compact["truncation"]["bytes"], budget)
+            # status/counts/partial/run/policy/artifacts survive the reduction
+            self.assertEqual(compact["summary"]["statusCounts"], {"PROPOSED": rows})
+            self.assertIn("policy", compact)
+            self.assertIn("run", compact)
+            self.assertIn("artifacts", compact)
+
+    def test_byte_reduction_is_closed_and_deterministic(self) -> None:
+        bp = self._huge_blueprint(
+            groups=120, packages_per_group=120, rows=30000,
+        )
+        bp["dependencies"][0]["package"] = "пэкэдж-с-длинным-именем-«юникод»-версия-2.0.0"
+        bp["recommendationGroups"][0]["packages"] = [
+            "пэкэдж-с-длинным-именем-«юникод»-версия-2.0.0" for _ in range(120)
+        ]
+        compact = compact_blueprint(bp, max_response_bytes=4096)
+        self.assertEqual(compact["truncation"]["bytes"], self._serialized(compact))
+        self.assertLessEqual(compact["truncation"]["bytes"], 4096)
+        self.assertIn("bytes", compact["truncation"]["limitsHit"])
+        again = compact_blueprint(bp, max_response_bytes=4096)
+        self.assertEqual(again, compact)
+
+    def test_minimal_payload_over_budget_fails_closed(self) -> None:
+        from deploom_mcp.blueprint import BlueprintError
+
+        with self.assertRaises(BlueprintError) as cm:
+            compact_blueprint(self._huge_blueprint(rows=1), max_response_bytes=200)
+        self.assertEqual(cm.exception.code, "response-too-large")
+
+    def test_response_too_large_becomes_structured_error_in_result(self) -> None:
+        from unittest import mock
+
+        result = UpgradeBlueprintResult(
+            ok=True, run_id="run-x", draft_status="DRAFT_READY",
+            blueprint=self._huge_blueprint(rows=1), blueprint_path=None,
+            artifacts_dir=None, plan_path=None, manifest_path=None,
+            elapsed=0.5, python_version="3.12",
+        )
+        with mock.patch(
+            "deploom_mcp.server.compact_blueprint",
+            side_effect=BlueprintError("response-too-large", "too big"),
+        ):
+            res = _result_from_planning(result)
+        self.assertIs(res["ok"], False)
+        self.assertEqual(res["error"]["code"], "response-too-large")
+        self.assertEqual(res["runId"], "run-x")
+
+    def test_payload_reserializes_stably(self) -> None:
+        compact = compact_blueprint(self._huge_blueprint(rows=5000))
+        text = json.dumps(compact, ensure_ascii=False, indent=2).encode("utf-8")
+        reparsed = json.loads(text.decode("utf-8"))
+        self.assertEqual(compact, reparsed)
+        self.assertEqual(len(text), compact["truncation"]["bytes"])
+
+
+class AppliedPolicyProtocolTests(unittest.TestCase):
+    """P1: the compact response must carry the APPLIED policy, verbatim from
+    the blueprint, and surface request-vs-applied mismatches."""
+
+    POLICY = {
+        "targetLevel": "yellow",
+        "minLagOkPct": 80,
+        "exclusions": ["react"],
+        "policyHash": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    }
+
+    def _blueprint(self, policy: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        return {
+            "schemaVersion": 2,
+            "kind": "upgrade-blueprint",
+            "status": {"draftStatus": "DRAFT_READY", "verificationStatus": "NOT_VERIFIED",
+                       "authority": "PLANNING_ONLY"},
+            "summary": {"totalDependencies": 1, "proposed": 0, "needsReview": 0,
+                        "statusCounts": {"NO_CHANGE": 1}},
+            "source": {"project": {"name": "app"}},
+            "run": {"runId": "run-x", "projectId": "app"},
+            "recommendationGroups": [],
+            "dependencies": [],
+            "policy": dict(policy) if policy is not None else dict(self.POLICY),
+            "artifacts": {"plan": "C:/out/plan.json"},
+            "blueprintFile": "C:/out/bp.json",
+        }
+
+    def test_applied_policy_is_echoed_verbatim(self) -> None:
+        compact = compact_blueprint(self._blueprint())
+        self.assertEqual(compact["policy"], self.POLICY)
+        self.assertEqual(compact["policy"]["exclusions"], ["react"])
+
+    def test_empty_exclusions_render_as_empty_list(self) -> None:
+        policy = dict(self.POLICY, exclusions=[])
+        compact = compact_blueprint(self._blueprint(policy))
+        self.assertEqual(compact["policy"]["exclusions"], [])
+        self.assertEqual(compact["policy"]["policyHash"], policy["policyHash"])
+
+    def test_missing_policy_renders_named_fields_without_fabrication(self) -> None:
+        bp = self._blueprint()
+        del bp["policy"]
+        compact = compact_blueprint(bp)
+        self.assertEqual(compact["policy"]["targetLevel"], None)
+        self.assertEqual(compact["policy"]["minLagOkPct"], None)
+        self.assertEqual(compact["policy"]["exclusions"], [])
+        self.assertEqual(compact["policy"]["policyHash"], None)
+
+    def test_no_discrepancy_when_requested_matches_applied(self) -> None:
+        requested = BlueprintPolicy(target_level="yellow", min_lag_ok_pct=80, exclusions=("react",))
+        res = _result_from_planning(self._to_result(), requested)
+        self.assertTrue(res["ok"])
+        self.assertNotIn("policyDiscrepancy", res)
+        self.assertEqual(res["policy"], self.POLICY)
+
+    def test_requested_vs_applied_discrepancy_is_surfaced(self) -> None:
+        requested = BlueprintPolicy(target_level="green", min_lag_ok_pct=60, exclusions=())
+        res = _result_from_planning(self._to_result(), requested)
+        self.assertTrue(res["ok"], "the plan still succeeds; the mismatch must be reported, not fatal")
+        disc = res["policyDiscrepancy"]
+        self.assertIsNotNone(disc)
+        self.assertEqual(disc["requested"]["targetLevel"], "green")
+        self.assertEqual(disc["requested"]["minLagOkPct"], 60)
+        self.assertEqual(disc["applied"]["targetLevel"], "yellow")
+        self.assertIn("targetLevel", disc["mismatchedFields"])
+        self.assertIn("minLagOkPct", disc["mismatchedFields"])
+        self.assertIn("exclusions", disc["mismatchedFields"])
+        # The APPLIED policy block stays literal, not silently aligned to request.
+        self.assertEqual(res["policy"]["targetLevel"], "yellow")
+
+    def test_exclusion_only_mismatch_is_detected(self) -> None:
+        requested = BlueprintPolicy(target_level="yellow", min_lag_ok_pct=80, exclusions=("vue",))
+        res = _result_from_planning(self._to_result(), requested)
+        disc = res["policyDiscrepancy"]
+        self.assertEqual(disc["mismatchedFields"], ["exclusions"])
+
+    def _to_result(self) -> UpgradeBlueprintResult:
+        return UpgradeBlueprintResult(
+            ok=True, run_id="run-x", draft_status="DRAFT_READY",
+            blueprint=self._blueprint(), blueprint_path="C:/out/bp.json",
+            artifacts_dir="C:/out", plan_path="C:/out/plan.json",
+            manifest_path="C:/out/result.json",
+            elapsed=0.5, python_version="3.12",
+        )
 
 
 class MCPStdioRoundTripTests(unittest.IsolatedAsyncioTestCase):
