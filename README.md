@@ -44,7 +44,8 @@ Deployment topology and contracts are described in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 The boundary contract is detailed in
 [`docs/STAGE_01_UPGRADE_BLUEPRINT.md`](docs/STAGE_01_UPGRADE_BLUEPRINT.md);
-the MCP server in [`docs/STAGE_02_MCP_SERVER.md`](docs/STAGE_02_MCP_SERVER.md).
+the MCP server in [`docs/STAGE_02_MCP_SERVER.md`](docs/STAGE_02_MCP_SERVER.md);
+the universal agent skill in [`docs/STAGE_03_UNIVERSAL_SKILL.md`](docs/STAGE_03_UNIVERSAL_SKILL.md).
 
 ## Repository layout
 
@@ -53,10 +54,35 @@ upstream/deploom/          pinned planning core (Git submodule, commit 9e20107)
 src/deploom_mcp/           Python package (blueprint adapter + MCP server)
 contracts/                 Upgrade Blueprint JSON Schema (v2)
 tests/                     unit, protocol and production-boundary tests
+tests/fixtures/            fake planning core + skill/installer fixtures
+skills/deploom-upgrade/    canonical Agent Skill (skill + references + examples)
+integrations/              per-client adapters (opencode / claude-code / codex)
 benchmarks/                Stage 1 + Stage 2 performance measurements
 docs/                      architecture and stage documentation
 examples/opencode/         OpenCode configuration example
 ```
+
+## Deploom-upgrade Agent Skill
+
+[`skills/deploom-upgrade/`](skills/deploom-upgrade/SKILL.md) is a single,
+client-neutral skill for opencode / Claude Code / Codex that lays out the full
+workflow — preflight, `get_upgrade_plan`, safety gates, worktree execution,
+verification and a single evidence report. Install it with
+[`scripts/install_skill.py`](scripts/install_skill.py)
+(byte-identical, idempotent, dry-run/verify supported):
+
+```bash
+python scripts/install_skill.py --client opencode      # project scope by default
+python scripts/install_skill.py --client codex --scope user
+python scripts/install_skill.py --client claude-code --scope user --dry-run
+```
+
+The skill is verified against opencode 1.17.14 (real E2E pilot, 12/12 checks:
+see [`docs/STAGE_03_UNIVERSAL_SKILL.md`](docs/STAGE_03_UNIVERSAL_SKILL.md));
+Claude Code and Codex paths are implemented and unit-tested but **NOT_VERIFIED**
+on this host (see the stage doc). The skill never edits
+`upstream/deploom`, never writes MCP configuration itself, and never commits,
+pushes or merges.
 
 ## Requirements
 
@@ -155,7 +181,9 @@ contract, error codes and partial-plan handling.
 
 ## Connecting OpenCode
 
-See [`examples/opencode/README.md`](examples/opencode/README.md). The example
+See [`examples/opencode/README.md`](examples/opencode/README.md) (pointer to
+[`integrations/opencode/README.md`](integrations/opencode/README.md), which
+covers both the MCP server and the `deploom-upgrade` skill). The example
 config is meant to be copied into your own OpenCode configuration; this
 repository never modifies global OpenCode configuration.
 
@@ -167,12 +195,15 @@ repository never modifies global OpenCode configuration.
 
 The suite covers unit projection tests, real MCP protocol tests over stdio, a
 production-boundary test that runs the **real** pinned planner against a real
-fixture, and 17+ deterministic hardening tests that run the boundary against a
+fixture, 17+ deterministic hardening tests that run the boundary against a
 **fake planner core** (`tests/fixtures/fake_core/`, no network) to pin down the
 contract validator, hash verification, JSON Schema check, filesystem write
-guards, exclusions and the subprocess runner lifecycle. CI runs the same suite
-on a clean checkout across Windows/Linux and Python 3.12/3.13, then a
-`scripts/smoke_stdio.py` startup/clean-stdout check.
+guards, exclusions and the subprocess runner lifecycle, and 20 offline
+skill/installer tests (`tests/test_skill_contract.py`,
+`tests/test_skill_install.py`). CI runs the same suite on a clean checkout
+across Windows/Linux and Python 3.12/3.13, a `scripts/smoke_stdio.py`
+startup/clean-stdout check, and an installer smoke on all four install
+configs.
 
 ## Updating the Core
 
