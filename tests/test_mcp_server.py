@@ -14,21 +14,29 @@ Two layers:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import sys
 import tempfile
 import unittest
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Optional
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from mcp import ClientSession, StdioServerParameters, stdio_client  # noqa: E402
+from mcp.shared.exceptions import MCPError  # noqa: E402
+from mcp.shared.jsonrpc_dispatcher import REQUEST_TIMEOUT  # noqa: E402
 
 from deploom_mcp.server import (  # noqa: E402
     DEFAULT_DEADLINE_SECONDS,
+    DEFAULT_INLINE_GROUPS,
+    DEFAULT_INLINE_ROWS,
+    DEFAULT_PACKAGES_PER_GROUP,
     KIND,
     MIN_DEADLINE_SECONDS,
     TOOL_NAME,
@@ -120,6 +128,126 @@ class GetUpgradePlanHardeningValidationTests(unittest.TestCase):
         self.assertEqual(self._code(exclude="react"), "invalid-exclude")
         self.assertEqual(self._code(exclude=["react", ""]), "invalid-exclude")
 
+
+def _tree_snapshot(root: Path) -> Dict[str, str]:
+    """Path -> sha256 for every file under root (deterministic key order)."""
+    import hashlib
+
+    snapshot: Dict[str, str] = {}
+    for p in sorted(root.rglob("*")):
+        if p.is_file():
+            snapshot[str(p.relative_to(root))] = hashlib.sha256(p.read_bytes()).hexdigest()
+    return snapshot
+
+
+class ManagedStateIsolationTests(unittest.TestCase):
+    """P1-fs: the managed state dir must never overlap the analysed project,
+    and a rejected request must not create anything on disk."""
+
+    STATE_ENV = "DEPLOOM_MCP_STATE_DIR"
+
+    def setUp(self) -> None:
+        self._tmp = Path(tempfile.mkdtemp(prefix="ub-mcp-state-iso-"))
+        self._saved_env = os.environ.get(self.STATE_ENV)
+        os.environ.pop(self.STATE_ENV, None)
+        self.addCleanup(self._restore_env)
+        self.addCleanup(_remove_tree, self._tmp)
+
+    def _restore_env(self) -> None:
+        if self._saved_env is None:
+            os.environ.pop(self.STATE_ENV, None)
+        else:
+            os.environ[self.STATE_ENV] = self._saved_env
+
+    def _make_project(self) -> Path:
+        proj = self._tmp / "proj"
+        proj.mkdir(parents=True)
+        (proj / "package.json").write_text(json.dumps({"name": "app", "version": "1.0.0"}), encoding="utf-8")
+        return proj
+
+    def test_state_dir_inside_project_is_rejected_without_side_effects(self) -> None:
+        proj = self._make_project()
+        state = proj / "deploom-state"
+        os.environ[self.STATE_ENV] = str(state)
+        before = _tree_snapshot(self._tmp)
+
+        res = get_upgrade_plan(project_path=str(proj), output_dir=str(self._tmp / "out"))
+
+        self.assertIs(res["ok"], False)
+        self.assertEqual(res["error"]["code"], "state-inside-project")
+        self.assertIn("must not overlap", res["error"]["message"])
+        self.assertNotIn("runId", [k for k in res if k != "ok"])
+        after = _tree_snapshot(self._tmp)
+        self.assertEqual(before, after, "a rejected request must not create any file or directory")
+
+    def test_project_nested_inside_state_dir_is_rejected(self) -> None:
+        # State root is an ancestor of the project: managed writes could land
+        # inside the subtree under analysis, so both overlap directions fail.
+        proj = self._tmp / "work" / "proj"
+        proj.mkdir(parents=True)
+        (proj / "package.json").write_text(json.dumps({"name": "app"}), encoding="utf-8")
+        os.environ[self.STATE_ENV] = str(self._tmp / "work")
+        before = _tree_snapshot(self._tmp)
+
+        res = get_upgrade_plan(project_path=str(proj), output_dir=str(self._tmp / "out"))
+
+        self.assertIs(res["ok"], False)
+        self.assertEqual(res["error"]["code"], "state-inside-project")
+        after = _tree_snapshot(self._tmp)
+        self.assertEqual(before, after)
+
+    def test_symlinked_state_inside_project_is_rejected(self) -> None:
+        proj = self._make_project()
+        real = self._tmp / "real-state"
+        real.mkdir()
+        link = proj / "state-link"
+        try:
+            link.symlink_to(real, target_is_directory=True)
+        except OSError as exc:  # pragma: no cover - Windows may lack symlink privileges
+            self.skipTest(f"cannot create symlink: {exc}")
+        os.environ[self.STATE_ENV] = str(link)
+        before = _tree_snapshot(self._tmp)
+
+        res = get_upgrade_plan(project_path=str(proj), output_dir=str(self._tmp / "out"))
+
+        self.assertIs(res["ok"], False)
+        self.assertEqual(res["error"]["code"], "state-inside-project")
+        after = _tree_snapshot(self._tmp)
+        self.assertEqual(before, after)
+
+    def test_concurrent_calls_share_state_without_clobbering(self) -> None:
+        # A shared managed-state root that overlaps the project must be rejected
+        # identically by concurrent callers, before any write can leak.
+        proj = self._make_project()
+        os.environ[self.STATE_ENV] = str(proj / "state")
+        before = _tree_snapshot(self._tmp)
+        codes = []
+        errors = []
+
+        def worker() -> None:
+            try:
+                res = get_upgrade_plan(project_path=str(proj), output_dir=str(self._tmp / "out"))
+                codes.append(res["error"]["code"] if not res["ok"] else "UNEXPECTED_OK")
+            except Exception as exc:  # pragma: no cover
+                errors.append(f"exc:{exc}")
+
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futs = [pool.submit(worker) for _ in range(4)]
+            for fut in futs:
+                fut.result()
+
+        self.assertEqual(errors, [], f"unexpected per-call exceptions: {errors}")
+        self.assertEqual(codes, ["state-inside-project"] * 4)
+        after = _tree_snapshot(self._tmp)
+        self.assertEqual(before, after, "concurrent rejected calls must not create anything")
+
+
+def _remove_tree(path: Path) -> None:
+    import shutil
+
+    shutil.rmtree(path, ignore_errors=True)
 
 class CompactProtocolTests(unittest.TestCase):
     def test_compact_protocol_carries_planning_only_semantics(self) -> None:
@@ -223,16 +351,79 @@ class CompactProtocolTests(unittest.TestCase):
         self.assertEqual(compact["partial"]["processedTotal"], 9)
         self.assertEqual(compact["status"]["draftStatus"], "DRAFT_PARTIAL")
 
+    @staticmethod
+    def _huge_blueprint(groups: int = 80, packages_per_group: int = 80, rows: int = 6000) -> Dict[str, Any]:
+        recommendation_groups = [
+            {"group": g, "count": packages_per_group, "needsReview": False,
+             "packages": sorted(f"pkg{g}-{p}" for p in range(packages_per_group))}
+            for g in range(groups)
+        ]
+        deps = [{"package": f"pkg{i % groups}-{i % packages_per_group}", "status": "PROPOSED",
+                 "current": "1.0.0", "target": "2.0.0", "group": i % groups,
+                 "needsReview": False} for i in range(rows)]
+        return {
+            "schemaVersion": 2,
+            "kind": "upgrade-blueprint",
+            "status": {"draftStatus": "DRAFT_READY", "verificationStatus": "NOT_VERIFIED",
+                       "authority": "PLANNING_ONLY"},
+            "summary": {"totalDependencies": rows, "proposed": rows, "needsReview": 0,
+                        "statusCounts": {"PROPOSED": rows}},
+            "source": {"project": {"name": "app"}},
+            "run": {"runId": "run-big"},
+            "recommendationGroups": recommendation_groups,
+            "dependencies": deps,
+            "blueprintFile": "C:/state/out/bp.json",
+            "artifacts": {"plan": "C:/state/out/plan.json"},
+        }
+
+    def test_groups_and_package_lists_are_bounded_with_explicit_truncation(self) -> None:
+        compact = compact_blueprint(self._huge_blueprint())
+        trunc = compact["truncation"]
+        self.assertTrue(trunc["truncated"])
+        self.assertEqual(trunc["totalDependencies"], 6000)
+        self.assertEqual(trunc["inlineDependencies"], DEFAULT_INLINE_ROWS)
+        self.assertLessEqual(trunc["inlineGroups"], DEFAULT_INLINE_GROUPS)
+        self.assertEqual(trunc["totalGroups"], 80)
+        self.assertLessEqual(trunc["inlineGroups"], 50)
+        for group in compact["recommendationGroups"]:
+            self.assertLessEqual(len(group["packages"]), DEFAULT_PACKAGES_PER_GROUP)
+            self.assertLessEqual(len(group["packages"]), 50)
+        self.assertIn("rows", trunc["limitsHit"])
+        self.assertIn("groups", trunc["limitsHit"])
+        self.assertIn("packages", trunc["limitsHit"])
+        # Counts and artifact pointers stay complete even when display is clipped.
+        self.assertEqual(compact["summary"]["statusCounts"], {"PROPOSED": 6000})
+        self.assertEqual(compact["artifacts"]["plan"], "C:/state/out/plan.json")
+
+    def test_byte_budget_is_enforced_deterministically(self) -> None:
+        bp = self._huge_blueprint(groups=200, packages_per_group=200, rows=20000)
+        first = compact_blueprint(bp, max_response_bytes=4096)
+        second = compact_blueprint(bp, max_response_bytes=4096)
+        self.assertLessEqual(first["truncation"]["bytes"], first["truncation"]["byteLimit"])
+        self.assertIn("bytes", first["truncation"]["limitsHit"])
+        self.assertEqual(first, second, "byte-budget reduction must be deterministic")
+        # The protocol envelope and the complete counts survive any reduction.
+        self.assertEqual(first["protocol"], KIND)
+        self.assertEqual(first["summary"]["statusCounts"], {"PROPOSED": 20000})
+
+    def test_small_plan_never_truncates(self) -> None:
+        blueprint = self._huge_blueprint(groups=2, packages_per_group=3, rows=4)
+        compact = compact_blueprint(blueprint)
+        self.assertFalse(compact["truncation"]["truncated"])
+        self.assertEqual(compact["truncation"]["limitsHit"], [])
+        self.assertEqual(compact["truncation"]["totalDependencies"], 4)
+        self.assertEqual(len(compact["dependencies"]), 4)
+
 
 class MCPStdioRoundTripTests(unittest.IsolatedAsyncioTestCase):
     """Boot the real server over stdio via the official MCP client SDK."""
 
-    async def _session(self, state_dir: Path):
+    async def _session(self, state_dir: Path, extra_env: Optional[Mapping[str, str]] = None):
         params = StdioServerParameters(
             command=sys.executable,
             args=["-m", "deploom_mcp"],
             cwd=str(ROOT),
-            env={**os.environ, "DEPLOOM_MCP_STATE_DIR": str(state_dir)},
+            env={**os.environ, "DEPLOOM_MCP_STATE_DIR": str(state_dir), **(extra_env or {})},
         )
         async with stdio_client(params) as (read, write):
             async with ClientSession(read, write) as session:
@@ -319,6 +510,97 @@ class MCPStdioRoundTripTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.is_error)
         payload = json.loads(result.content[0].text)
         self.assertEqual(payload["error"]["code"], "project-not-found")
+
+    async def test_state_dir_inside_project_rejected_over_stdio_without_side_effects(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ub-mcp-statetool-") as tmp:
+            root = Path(tmp)
+            proj = root / "proj"
+            proj.mkdir()
+            (proj / "package.json").write_text(json.dumps({"name": "app", "version": "1.0.0"}), encoding="utf-8")
+            before = _tree_snapshot(root)
+
+            state = proj / "state"  # managed state NESTED inside the analysed project
+            async for session in self._session(state):
+                result = await session.call_tool(TOOL_NAME, {"project_path": str(proj)})
+            after = _tree_snapshot(root)
+
+            self.assertTrue(result.is_error)
+            payload = json.loads(result.content[0].text)
+            self.assertIs(payload["ok"], False)
+            self.assertEqual(payload["error"]["code"], "state-inside-project")
+            self.assertEqual(before, after, "rejected request must not create the state dir or anything else")
+            self.assertFalse(state.exists(), "managed state dir must never be materialised inside the project")
+
+    async def test_cancelling_call_tool_kills_planner_and_session_survives(self) -> None:
+        """P2-cancel: a `notifications/cancelled` sent over real stdio (via the
+        SDK's per-request read-timeout abandon path) must kill the running
+        planner process tree; the same session must keep serving new requests."""
+        slow_fixture = ROOT / "tests" / "fixtures" / "slow_core" / "dependency_live_roadmap_generator.py"
+        self.assertTrue(slow_fixture.is_file(), f"slow-core fixture missing: {slow_fixture}")
+        with tempfile.TemporaryDirectory(prefix="ub-mcp-cancel-") as tmp:
+            root = Path(tmp)
+            proj = root / "proj"
+            proj.mkdir()
+            (proj / "package.json").write_text(
+                json.dumps({"name": "app", "version": "1.0.0", "dependencies": {"uuid": "^10.0.0"}}),
+                encoding="utf-8",
+            )
+            marker = root / "marker.txt"
+            mode_file = root / "mode.txt"
+            mode_file.write_text("slow", encoding="utf-8")
+            env = {
+                "DEPLOOM_MCP_GENERATOR_PATH": str(slow_fixture),
+                "SLOW_CORE_MARKER": str(marker),
+                "SLOW_CORE_MODE_FILE": str(mode_file),
+            }
+            state = root / "state"
+            async for session in self._session(state, extra_env=env):
+                # The SDK sends `notifications/cancelled` when a request hits its
+                # own read-timeout deadline (courtesy-cancel abandon path). Fire
+                # it well after the planner is provably alive but far before the
+                # server's 120 s planner timeout.
+                call = asyncio.ensure_future(session.call_tool(
+                    TOOL_NAME, {"project_path": str(proj)}, read_timeout_seconds=15.0,
+                ))
+
+                # Wait until the planner is provably alive: the fixture appends a
+                # heartbeat line ~every 50 ms, so >=3 lines mean it is mid-run.
+                for _ in range(400):
+                    if marker.is_file() and len(marker.read_text(encoding="utf-8").strip().splitlines()) >= 3:
+                        break
+                    await asyncio.sleep(0.05)
+                else:
+                    call.cancel()
+                    with contextlib.suppress(BaseException):
+                        await call
+                    self.fail("planner never started (heartbeat marker never appeared)")
+
+                # The abandoned request raises MCPError with the SDK's timeout
+                # code client-side, while the server cancels the handler and the
+                # async process runner kills the whole planner child tree.
+                # Propagation is not instant (kill completes a few hundred ms
+                # after the client-side raise), so wait a bounded grace, then
+                # require the heartbeat marker to stop growing.
+                with self.assertRaises(MCPError) as cm:
+                    await call
+                self.assertEqual(cm.exception.code, REQUEST_TIMEOUT)
+
+                await asyncio.sleep(1.0)  # grace for cancel -> scope.cancel -> child kill
+                count_after_cancel = len(marker.read_text(encoding="utf-8").strip().splitlines())
+                await asyncio.sleep(0.5)
+                count_later = len(marker.read_text(encoding="utf-8").strip().splitlines())
+                self.assertEqual(
+                    count_after_cancel, count_later,
+                    "planner kept running after cancellation (heartbeat marker still growing)",
+                )
+
+                # Same server session must still serve a fresh, successful call.
+                mode_file.write_text("ok", encoding="utf-8")
+                result = await session.call_tool(TOOL_NAME, {"project_path": str(proj)})
+            self.assertFalse(result.is_error, result.content[0].text if hasattr(result, "content") else "?")
+            payload = json.loads(result.content[0].text)
+            self.assertTrue(payload["ok"], payload.get("error"))
+            self.assertEqual(payload["status"]["draftStatus"], "DRAFT_READY")
 
 
 if __name__ == "__main__":

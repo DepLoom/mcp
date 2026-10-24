@@ -65,6 +65,15 @@ MAX_DEADLINE_SECONDS = 600.0
 # plan is always on disk (artifacts), so this bounds context, never data.
 DEFAULT_INLINE_ROWS = 100
 
+# P2 (deterministic response size): display-priority groups and the packages
+# inside each group are also bounded, and the whole serialized response must
+# fit a byte budget before it is returned. All reductions are pure truncation
+# of display lists -- status counts, per-project health and artifact paths stay
+# complete -- and are recapped in `truncation.limitsHit`.
+DEFAULT_INLINE_GROUPS = 50
+DEFAULT_PACKAGES_PER_GROUP = 50
+MAX_RESPONSE_BYTES = 512 * 1024  # 512 KiB deterministic cap on the JSON response
+
 HONESTY_NOTE = (
     "Planning-only: authority=PLANNING_ONLY (nothing was installed or verified). "
     "A PROPOSED verdict means 'this upgrade can be proposed', NOT 'already updated'. "
@@ -160,7 +169,19 @@ def _build_request(
             if name not in exclusions:
                 exclusions.append(name)
 
-    state = _ensure_state_dir()
+    # Resolve (but do NOT create) the managed state location. Every write the
+    # boundary performs -- run artifacts, registry metadata cache, exclusive
+    # run dirs -- lives under here or under the explicit output_dir, so the
+    # state root must not overlap the analysed project (which is read-only).
+    state = _state_dir()
+    if resolve_output_outside(purl, state) is None:
+        return (
+            _error(
+                "state-inside-project",
+                f"managed state dir {state} must not overlap the analysed project {purl}",
+            ),
+            None,
+        )
 
     out: Optional[str] = None
     if output_dir:
@@ -174,7 +195,12 @@ def _build_request(
                 None,
             )
         out = str(candidate)
-    else:
+
+    # All overlap validation passed: only now create managed directories (and
+    # resolve the permission fallback), so a rejected request writes nothing.
+    state = _ensure_state_dir()
+
+    if out is None:
         out = str(state / "artifacts" / f"run-{os.urandom(6).hex()}")
 
     cache_dir = state / "registry-metadata-cache"
@@ -190,6 +216,11 @@ def _build_request(
         registry_metadata_cache=str(cache_dir) if cache_dir else None,
         registry_metadata_ttl=ttl,
         output_dir=out,
+        # Test/ops escape hatches: point the planner subprocess at a different
+        # generator (or interpreter) without changing the tool's public
+        # signature. Never populated by tool arguments, only by environment.
+        generator_path=os.environ.get("DEPLOOM_MCP_GENERATOR_PATH") or None,
+        python=os.environ.get("DEPLOOM_MCP_PYTHON") or None,
     )
     policy = BlueprintPolicy(
         target_level=target_level,
@@ -206,32 +237,41 @@ def _result_from_planning(result) -> Dict[str, Any]:
     return {"ok": True, **compact_blueprint(result.blueprint or {})}
 
 
-def compact_blueprint(blueprint: Dict[str, Any], max_inline_rows: int = DEFAULT_INLINE_ROWS) -> Dict[str, Any]:
-    """Project a full blueprint into the compact agent-facing protocol.
+def _compact_payload(
+    blueprint: Dict[str, Any],
+    *,
+    max_inline_rows: int,
+    max_inline_groups: int,
+    max_packages_per_group: int,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Build the compact payload for the given display caps.
 
-    Dependency rows above ``max_inline_rows`` are NOT inlined; the full plan is
-    in the artifact files and the response flags the truncation explicitly
-    (``truncation``), so a client never mistakes a clipped answer for the whole
-    picture. The package -> verdict/status counts stay complete regardless.
+    Returns ``(payload_without_truncation, metrics)`` where ``metrics`` carries
+    the counts the caller needs to describe truncation honestly.
     """
     status = blueprint.get("status") or {}
     summary = blueprint.get("summary") or {}
     source = blueprint.get("source") or {}
     project = source.get("project") or {}
     run = blueprint.get("run") or {}
+
+    all_groups = blueprint.get("recommendationGroups") or []
+    total_groups = len(all_groups)
+    total_packages = sum(len(list(g.get("packages") or [])) for g in all_groups)
+
     groups = []
-    for group in blueprint.get("recommendationGroups") or []:
+    for group in all_groups[:max_inline_groups]:
         groups.append({
             "group": group.get("group"),
             "count": group.get("count"),
             "needsReview": bool(group.get("needsReview")),
-            "packages": list(group.get("packages") or []),
+            "packages": list((group.get("packages") or [])[:max_packages_per_group]),
         })
+    inline_packages = sum(len(g["packages"]) for g in groups)
 
     all_rows = blueprint.get("dependencies") or []
     total_rows = len(all_rows)
-    truncated = total_rows > max_inline_rows
-    rows = all_rows[:max_inline_rows] if truncated else all_rows
+    rows = all_rows[:max_inline_rows]
     dependencies = []
     for row in rows:
         dependencies.append({
@@ -247,7 +287,7 @@ def compact_blueprint(blueprint: Dict[str, Any], max_inline_rows: int = DEFAULT_
     is_partial = draft_status == "DRAFT_PARTIAL"
     processed = summary.get("processed")
     processed_total = summary.get("processedTotal")
-    return {
+    payload = {
         "protocol": KIND,
         "schemaVersion": blueprint.get("schemaVersion"),
         "run": {
@@ -276,11 +316,6 @@ def compact_blueprint(blueprint: Dict[str, Any], max_inline_rows: int = DEFAULT_
             "needsReview": summary.get("needsReview"),
             "statusCounts": summary.get("statusCounts") or {},
         },
-        "truncation": {
-            "truncated": truncated,
-            "inlineDependencies": len(rows),
-            "totalDependencies": total_rows,
-        },
         "recommendationGroups": groups,
         "dependencies": dependencies,
         "artifacts": {
@@ -290,6 +325,95 @@ def compact_blueprint(blueprint: Dict[str, Any], max_inline_rows: int = DEFAULT_
         "honesty": HONESTY_NOTE,
         "boundaryNote": PLANNING_BOUNDARY_NOTE,
     }
+    metrics = {
+        "inlineRows": len(dependencies),
+        "totalRows": total_rows,
+        "inlineGroups": len(groups),
+        "totalGroups": total_groups,
+        "inlinePackages": inline_packages,
+        "totalPackages": total_packages,
+    }
+    return payload, metrics
+
+
+def _serialized_bytes(payload: Dict[str, Any]) -> int:
+    # Measure the exact wire form the server emits (indent=2, ensure_ascii=False).
+    return len(json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
+
+
+def compact_blueprint(
+    blueprint: Dict[str, Any],
+    max_inline_rows: int = DEFAULT_INLINE_ROWS,
+    max_inline_groups: int = DEFAULT_INLINE_GROUPS,
+    max_packages_per_group: int = DEFAULT_PACKAGES_PER_GROUP,
+    max_response_bytes: int = MAX_RESPONSE_BYTES,
+) -> Dict[str, Any]:
+    """Project a full blueprint into the compact agent-facing protocol.
+
+    Dependency rows, recommendation groups and per-group package lists are
+    bounded (``max_inline_*``) and the whole serialized response must fit
+    ``max_response_bytes``: when it does not, the display caps are reduced
+    deterministically (packages -> groups -> rows) until it does. The full plan
+    is always in the artifact files and the response recaps every reduction in
+    ``truncation``, so a client never mistakes a clipped answer for the whole
+    picture. The package -> verdict/status counts stay complete regardless.
+    """
+    rows_cap = max(0, int(max_inline_rows))
+    groups_cap = max(0, int(max_inline_groups))
+    packages_cap = max(0, int(max_packages_per_group))
+    budget = max(1, int(max_response_bytes))
+
+    payload, metrics = _compact_payload(
+        blueprint,
+        max_inline_rows=rows_cap,
+        max_inline_groups=groups_cap,
+        max_packages_per_group=packages_cap,
+    )
+    first_serialized = _serialized_bytes(payload)
+    bytes_reduced = first_serialized > budget
+    while bytes_reduced:
+        # Least-valuable content first: package lists, then groups, then rows.
+        if packages_cap > 0:
+            packages_cap = max(0, packages_cap // 2)
+        elif groups_cap > 0:
+            groups_cap = max(0, groups_cap // 2)
+        elif rows_cap > 0:
+            rows_cap = max(0, rows_cap // 2)
+        else:
+            break  # already minimal; cannot shrink further without empty content
+        payload, metrics = _compact_payload(
+            blueprint,
+            max_inline_rows=rows_cap,
+            max_inline_groups=groups_cap,
+            max_packages_per_group=packages_cap,
+        )
+        bytes_reduced = _serialized_bytes(payload) > budget
+
+    final_bytes = _serialized_bytes(payload)
+    limits_hit: List[str] = []
+    if metrics["inlineRows"] < metrics["totalRows"]:
+        limits_hit.append("rows")
+    if metrics["inlineGroups"] < metrics["totalGroups"]:
+        limits_hit.append("groups")
+    if metrics["inlinePackages"] < metrics["totalPackages"]:
+        limits_hit.append("packages")
+    if first_serialized > budget:
+        limits_hit.append("bytes")
+    truncated = bool(limits_hit)
+
+    payload["truncation"] = {
+        "truncated": truncated,
+        "inlineDependencies": metrics["inlineRows"],
+        "totalDependencies": metrics["totalRows"],
+        "inlineGroups": metrics["inlineGroups"],
+        "totalGroups": metrics["totalGroups"],
+        "inlinePackages": metrics["inlinePackages"],
+        "totalPackages": metrics["totalPackages"],
+        "byteLimit": budget,
+        "bytes": final_bytes,
+        "limitsHit": sorted(limits_hit),
+    }
+    return payload
 
 
 def get_upgrade_plan(

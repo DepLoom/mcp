@@ -70,6 +70,22 @@ def _make_project(root: Path) -> Path:
     return proj
 
 
+def _make_project_with_react(root: Path) -> Path:
+    """A real-npm project with `react`, whose exclusion must take effect INSIDE
+    the real planner (not be filtered by the adapter afterwards)."""
+    proj = root / "proj-react"
+    _write(proj / "package.json", json.dumps({
+        "name": "ub-react-test", "version": "1.0.0",
+        "dependencies": {"uuid": "^10.0.0", "is-number": "^7.0.0", "react": "^18.0.0"},
+    }, indent=2))
+    lock = {"name": "ub-react-test", "version": "1.0.0", "lockfileVersion": 3, "requires": True,
+            "packages": {"": {"name": "ub-react-test", "version": "1.0.0", "dependencies": {"uuid": "^10.0.0", "is-number": "^7.0.0", "react": "^18.0.0"}},
+                         "node_modules/uuid": {"version": "10.0.0"}, "node_modules/is-number": {"version": "7.0.0"},
+                         "node_modules/react": {"version": "18.2.0"}}}
+    _write(proj / "package-lock.json", json.dumps(lock, indent=2))
+    return proj
+
+
 class StatusVocabularyTests(unittest.TestCase):
     def test_all_draft_statuses_map_to_blueprint_vocabulary(self) -> None:
         draft_statuses = [
@@ -274,6 +290,49 @@ class HeadlessIntegrationTests(unittest.TestCase):
         result = generate_upgrade_blueprint(str(empty))
         self.assertFalse(result.ok)
         self.assertEqual(result.error["code"], "invalid-project")
+
+    def test_exclusions_reach_real_planner_and_stay_visible(self) -> None:
+        """Exclusions must be applied by the REAL planner (react removed from the
+        active scope with an EXCLUDED verdict), stay visible in the blueprint,
+        surface in policy.exclusions, and never leak onto peer packages."""
+        proj = _make_project_with_react(self._tmp)
+        before = _dir_snapshot(proj)
+
+        result = generate_upgrade_blueprint(
+            str(proj),
+            policy=BlueprintPolicy(target_level="yellow", min_lag_ok_pct=80, exclusions=("react",)),
+            options=BlueprintOptions(
+                output_dir=str(self._tmp / "out-x"),
+                draft_deadline_seconds=90.0,
+                draft_max_candidates=3,
+                registry_metadata_ttl=0.0,
+            ),
+            project_name="ub-react-test",
+            run_id="run-ub-it-excl",
+        )
+
+        self.assertTrue(result.ok, f"planning failed: {result.error} stderr={result.stderr[-2000:]}")
+        self.assertIsNotNone(result.blueprint)
+
+        after = _dir_snapshot(proj)
+        self.assertEqual(before, after, "generate_upgrade_blueprint must not write into the project directory")
+
+        bp = result.blueprint
+        self.assertEqual(bp["policy"]["exclusions"], ["react"], "applied exclusions must be exposed in policy")
+
+        by_pkg = {d["package"]: d for d in bp["dependencies"]}
+        self.assertIn("react", by_pkg, "EXCLUDED row must stay visible, not vanish")
+        self.assertEqual(by_pkg["react"]["status"], "EXCLUDED")
+        self.assertFalse(by_pkg["react"]["needsReview"], "EXCLUDED is a resolution, not a review item")
+
+        for other in ("uuid", "is-number"):
+            self.assertNotEqual(by_pkg[other]["status"], "EXCLUDED", f"{other} must not be collateral-excluded")
+
+        self.assertGreaterEqual(bp["summary"]["statusCounts"].get("EXCLUDED", 0), 1)
+        per_proj_excluded = sum(int(v.get("excluded") or 0) for v in bp["perProject"].values())
+        self.assertGreaterEqual(per_proj_excluded, 1, "health must count scope-excluded rows per project")
+        status_excluded = bp["summary"]["statusCounts"].get("EXCLUDED", 0)
+        self.assertEqual(per_proj_excluded, status_excluded, "health excludes and row-status excludes must agree")
 
 
 if __name__ == "__main__":

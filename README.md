@@ -108,7 +108,10 @@ All inputs are validated fail-closed before any work starts: non-finite
 deadlines, out-of-range `min_lag_ok_pct`, registries with credentials, invalid
 TTLs and malformed `exclude` lists are rejected with machine-readable error
 codes (`invalid-deadline`, `invalid-policy`, `invalid-registry`,
-`invalid-exclude`) instead of being forwarded to the planner.
+`invalid-exclude`) instead of being forwarded to the planner. Write boundaries
+are fail-closed too: an `output_dir` overlapping the project (`output-inside-project`)
+and a managed state overlapping the project (`state-inside-project`) are
+rejected **before any directory is created**.
 
 The response is a **compact** representation of the Upgrade Blueprint
 (`protocol=upgrade-blueprint`, run, status, summary, recommendation groups,
@@ -117,12 +120,18 @@ Blueprint and raw planner artifacts are written under a controlled artifact
 directory whose paths are returned; an AI agent reads them with its own file
 tools.
 
-The inline dependency rows are **bounded** (default 100): when there are more,
-a `truncation` block reports the clipped count while `summary.statusCounts`
-stays complete. A deadline-exhausted or client-cancelled run returns a
-`DRAFT_PARTIAL` plan with `partial.replanRequired=true`, not a spurious
-failure. Because the tool is async, client cancellation reliably kills the
-whole planner process tree.
+The inline rows are **bounded deterministically** (default 50 groups / 50
+packages per group / 100 rows, capped at 512 KiB of serialized JSON): when
+there are more, the `truncation` block reports the exact clipped counts
+(`inlineGroups/totalGroups`, `inlinePackages/totalPackages`,
+`inlineDependencies/totalDependencies`, plus `byteLimit/bytes/limitsHit`)
+while `summary.statusCounts` stays complete. A deadline-exhausted or
+client-cancelled run returns a `DRAFT_PARTIAL` plan with
+`partial.replanRequired=true`, not a spurious failure. Because the tool is
+async, client cancellation reliably kills the whole planner process tree —
+verified over a real stdio session (`notifications/cancelled` from the SDK's
+per-request read-timeout abandon path; see
+[`docs/STAGE_02_MCP_SERVER.md`](docs/STAGE_02_MCP_SERVER.md)).
 
 The response is always `NOT_VERIFIED / PLANNING_ONLY / UNKNOWN / UNPROVEN`: a
 `PROPOSED` verdict means "this upgrade **can** be proposed", not "already

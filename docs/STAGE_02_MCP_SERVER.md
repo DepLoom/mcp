@@ -40,11 +40,19 @@ registry_metadata_ttl=3600.0, output_dir=None, exclude=None)`
   be finite and `>= 0`, otherwise `invalid-registry`.
 * `output_dir` — optional artifact root; **MUST be outside the project**,
   otherwise `output-inside-project` (both "inside the project" and "a parent
-  of the project" orders are rejected).
+  of the project" orders are rejected). Managed-state overlap is a separate
+  guard: `state-inside-project` is raised before any directory is created
+  (see "Managed state").
 * `exclude` — optional list of packages to skip (passed to the planner as
   `--exclude-dependency <package>|reason`; an explicit reason is always
   attached). Must be a non-empty list of non-empty strings, otherwise
   `invalid-exclude`.
+
+`exclude` is applied by the **planner itself** (not filtered afterwards):
+excluded packages run through the real plan scope and are reported as
+`EXCLUDED` rows in the response (still visible, `needsReview=false`), they are
+excluded from the health denominator, and the exclusion list is echoed back in
+the response's `policy.exclusions`.
 
 ### Cancellation
 
@@ -55,12 +63,33 @@ bounded drain, and — if the draft was already partially produced — returns a
 `DRAFT_PARTIAL` plan with `partial.replanRequired=true` instead of a spurious
 failure. If planning never started, the client receives `cancelled`.
 
+This is validated end-to-end over a **real stdio session** with the official
+MCP client SDK: a slow planner fixture (see `tests/fixtures/slow_core/`) writes
+a heartbeat marker ~every 50 ms; the test abandons a live `tools/call` via the
+SDK's per-request `read_timeout_seconds` (which sends `notifications/cancelled`
+over the wire), then asserts the heartbeat stops growing within a bounded
+grace (the whole planner child tree is dead), that the session stays responsive
+and that a follow-up call in the same session succeeds.
+
+Test/ops escape hatch: the server never parses generator/interpreter from tool
+arguments, but reads them from the environment if set —
+`DEPLOOM_MCP_GENERATOR_PATH` (planner script path) and `DEPLOOM_MCP_PYTHON`
+(interpreter). The public tool signature is unchanged; the planner child never
+inherits stray `DEPLOOM_*` variables (`_exec_env` strips them).
+
 ### Managed state
 
 Planning metadata (packument cache) lives in a managed directory shared between
 calls: `$DEPLOOM_MCP_STATE_DIR` if set, else `~/.deploom-mcp`. Default output
 roots fall under `<managed>/artifacts/<run-id>`. Nothing is written into the
 analysed project.
+
+The managed state is fail-closed too: it is resolved **without creating it**,
+and if it overlaps the analysed project in either direction (state inside the
+project, or the project nested inside the state), the request is rejected with
+`state-inside-project` **before anything is materialised** — the test suite
+asserts a full tree snapshot is unchanged after a rejected request. The
+registry metadata cache is created only after all validation passes.
 
 ## Response (compact protocol)
 
@@ -74,9 +103,14 @@ On success the tool returns a compact, agent-friendly payload
 * `recommendationGroups` — display-priority groups (NOT a parallel-proof order);
 * `dependencies` — compact rows (`package`, `status`, `current`, `target`,
   `group`, `needsReview`);
-* `truncation` — `{truncated, inlineDependencies, totalDependencies}` when the
-  dependency rows are clipped to the inline budget (default 100 rows); the
-  `summary.statusCounts` stays complete regardless;
+* `truncation` — `{truncated, inlineDependencies, totalDependencies,
+  inlineGroups, totalGroups, inlinePackages, totalPackages, byteLimit, bytes,
+  limitsHit}` when the payload is clipped to the deterministic display budget
+  (default 50 groups / 50 packages per group / 100 rows, capped at 512 KiB of
+  serialized JSON). Budget is enforced deterministically: caps are reduced
+  step-wise (packages → groups → rows) until the exact on-wire bytes fit, so
+  the same plan always yields the same response; `summary.statusCounts`
+  stays complete regardless;
 * `partial` — `{partial, replanRequired, processed, processedTotal, reason}`
   when the draft is only partially computed (deadline/cancellation);
 * `artifacts` — paths to the full Blueprint, manifest, plan, prompt, summary

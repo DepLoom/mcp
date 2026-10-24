@@ -361,6 +361,7 @@ def transcode_upgrade_blueprint(
             "policyHash": manifest.get("policyHash"),
             "intent": policy.intent,
             "acceptancePolicy": policy.acceptance_policy,
+            "exclusions": list(policy.exclusions),
         },
         "status": {
             "draftStatus": manifest.get("status"),
