@@ -29,3 +29,8 @@ jobs:
         run: python scripts/smoke_stdio.py
       - name: Blueprint CLI smoke (network-free fake core)
         run: python -m deploom_mcp.blueprint --help
+      - name: Skill installer (portable, into runner temp, verified)
+        run: |
+          python scripts/install_skill.py --client opencode --scope project --project "${{ runner.temp }}/skill-project" --verify
+          python scripts/install_skill.py --client codex --scope user --config-home "${{ runner.temp }}/skill-home" --verify
+          python scripts/install_skill.py --client opencode --scope project --project "${{ runner.temp }}/skill-project" --dry-run

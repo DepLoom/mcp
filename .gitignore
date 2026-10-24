@@ -12,6 +12,7 @@ dist/
 # Local run artifacts
 /.output/
 /tmp/
+/users/
 *.log
 
 # OS
