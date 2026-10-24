@@ -1,0 +1,96 @@
+{
+  "stage": "03_4",
+  "title": "Stage 3.4 - real-world pilots (RU tech-lead report)",
+  "date": "2026-10-24",
+  "verdict": "PARTIALLY VALIDATED",
+  "summary": "A/B pilot of the deploom-upgrade skill (with real planning core) vs a bare agent on a real corporate frontend monorepo. Both produced identical clean minimal diffs (exactly 3 requested patch updates, strict exclusions honored, no major bumps; all project checks pass on independent post-run verification). The deploom variant completed the full pipeline in one pass (plan -> isolated worktree -> install -> verify -> structured evidence JSON); the bare-agent variant hit the wall-clock cap in a large npm install and did not finish verification itself. The skill's planner call degraded to needsReview=true because of a registry-metadata provider failure (registry-failed) and honestly requested user approval instead of fabricating targets, so the 'planner confirmed the targets' criterion is not met this run.",
+  "setup": {
+    "experiment": "controlled A/B, same baseline commit, same user request (RU), same model, same wall-clock budget per variant; only difference is DepLoom availability",
+    "project": "real corporate frontend monorepo (npm workspaces + lerna + webpack + jest, React 18, Node 20)",
+    "isolation": "two separate git worktrees (agent-only, deploom); original checkout never modified; skill used an additional TEMP-side isolated worktree",
+    "model": "kontur_ultra/ultra",
+    "client": "opencode headless --auto",
+    "registry": "configured npm registry (internal mirror; public npmjs unreachable in the environment)",
+    "task": "upgrade exactly postcss(8.x), @types/node(20.x), @types/react(18.x) to latest within major; 58 other dependencies strictly excluded; no commit/push",
+    "wallClockCapSeconds": 1500,
+    "targets": ["postcss", "@types/node", "@types/react"]
+  },
+  "planning": {
+    "scannedManifestPackages": 100,
+    "excluded": 97,
+    "proposedAfterExclusions": 3,
+    "coldSeconds": 33.4,
+    "warmSeconds": 30.0,
+    "draftStatus": "DRAFT_READY",
+    "needsReview": 0,
+    "proposedTargetsPlanner": { "postcss": "8.5.20", "@types/node": "20.19.28", "@types/react": "18.3.28" },
+    "appliedTargetsLive": { "postcss": "8.5.31", "@types/node": "20.19.43", "@types/react": "18.3.31" },
+    "observation": "planner target (metadata snapshot) is older than the live registry version; executor resolved with fresh npm view"
+  },
+  "runs": {
+    "deploom": {
+      "seconds": 1179.6,
+      "exit": 0,
+      "timedOut": false,
+      "transcriptBytes": 133681,
+      "changedTreeKind": "nested (skill-managed isolated worktree)",
+      "outcomeEvidence": "PARTIAL",
+      "planningGateInsideRun": { "draftStatus": "DRAFT_READY", "targetRowsStatus": "UNKNOWN_METADATA", "plannerRegistryState": "registry-failed (61/61)", "targetsSource": "user explicit instruction + direct npm view", "needsReview": true, "userApprovalRequired": true },
+      "applied": { "postcss": { "from": "8.5.15", "to": "8.5.31" }, "@types/node": { "from": "20.19.6", "to": "20.19.43" }, "@types/react": { "from": "18.3.1", "to": "18.3.31" } },
+      "exclusionViolation": false,
+      "majorBumps": [],
+      "artifactEvidence": true,
+      "verification": {
+        "install": "PASSED (npm ci, 2290 pkgs)",
+        "typecheck": "PASSED",
+        "lint:eslint": "PASSED (0 errors, 6 pre-existing warnings)",
+        "build": "PASSED (webpack)",
+        "tests": "PASSED (36 suites / 159 tests, test:unit)",
+        "testsScriptNote": "npm test does not exist in project; test:unit is the real script"
+      }
+    },
+    "agent-only": {
+      "seconds": 1500.3,
+      "exit": null,
+      "timedOut": true,
+      "transcriptBytes": 21655,
+      "changedTreeKind": "inplace (its own disposable worktree; no automatic isolation)",
+      "applied": { "postcss": { "from": "8.5.15", "to": "8.5.31" }, "@types/node": { "from": "20.19.6", "to": "20.19.43" }, "@types/react": { "from": "18.3.1", "to": "18.3.31" } },
+      "exclusionViolation": false,
+      "majorBumps": [],
+      "artifactEvidence": false,
+      "verificationByAgent": "NOT_VERIFIED within window (large npm install consumed the budget)",
+      "methodObserved": "npm view<major> -> latest; manual comparison of transitive closure; single full npm install"
+    }
+  },
+  "independentCheck": {
+    "description": "uniform bounded post-run checks in the changed worktree of each variant",
+    "deploom": { "bootstrap": "PASSED 9.0s", "typecheck": "PASSED 23.2s", "lint:eslint": "PASSED 100.5s", "build": "PASSED 79.7s", "test": "SKIPPED (no script)", "test:unit": "PASSED 22.4s" },
+    "agent-only": { "bootstrap": "PASSED 9.6s", "typecheck": "PASSED 41.4s", "lint:eslint": "PASSED 55.4s", "build": "PASSED 61.0s", "test": "SKIPPED (no script)", "test:unit": "PASSED 32.9s" }
+  },
+  "criteria": {
+    "H1_core_solves_real_task": "PARTIAL - real core produced a clean plan on the real monorepo/registry (DRAFT_READY, proposed=3) but the in-run planner call failed metadata (registry-failed) and fell back to needsReview; positive re-run required",
+    "H2_ab_value": "CONFIRMED - deploom delivered to a releasable result in one pass incl. full verification and evidence; bare agent did not finish verification itself within the same budget",
+    "H3_policy_and_exclusions": "CONFIRMED - no excluded dependency touched, no major bumps, lockfile consistent, diff == plan (both variants)",
+    "H4_verifiable_evidence": "CONFIRMED for deploom (evidence JSON); for agent-only evidence is absent - only independent check covers it"
+  },
+  "resilienceFindings": {
+    "degradation": "on registry-metadata failure the skill degraded to plan-on-user-instruction + direct registry lookup, marked needsReview=true and requested user approval - it did not fabricate targets",
+    "bareAgent": "performed the same direct registry lookup silently, without explicit risk flagging or evidence"
+  },
+  "z3Responsibility": {
+    "A_planner": "decides WHAT and to which version, applies exclusions and yellow policy, emits plan.json and planning gates (real core + MCP boundary)",
+    "B_agent": "applies decisions, runs install and verification (skill pipeline vs bare agent); deploom produced evidence and approval request, agent-only did neither",
+    "C_controller": "this run: diffs == plan, exclusion/major compliance, uniform verification in both worktrees, metrics capture; no violations found"
+  },
+  "negativeScenarios": {
+    "realBrokenCases": "NOT_RUN (budget constraints, care for corporate code)",
+    "syntheticPositiveAndNegative": "NOT_RUN in this window; covered by Stage 3 E2E (positive fixture 12/12) and contract boundary test suite - evidence committed in Stage 3; scheduled as follow-up"
+  },
+  "followUp": [
+    "repeat deploom positive run with working registry metadata (retries / larger planning deadline) to satisfy H1 fully",
+    "synchronize planner target (metadata snapshot) with live npm view",
+    "run synthetic pilots B/C and negative scenarios using Stage 3 harness",
+    "prod branch validation of the result on a real corporate task"
+  ]
+}
