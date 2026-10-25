@@ -30,7 +30,7 @@ Hardening contract of this boundary:
 * honest statuses: every response carries `authority=PLANNING_ONLY`, a
   `PROPOSED` verdict means "can be proposed", not "already updated", and
   `needsReview` items must be confirmed with the project owner first;
-* budget: default deadline 20 s (range 5..600), planning metadata cached in a
+* budget: default deadline 120 s (range 5..600), planning metadata cached in a
   managed directory shared between calls (`DEPLOOM_MCP_STATE_DIR`);
 * artifacts and output always live outside the analysed project
   (`output-inside-project` guard, enforced again at the write boundary).
@@ -64,9 +64,12 @@ SERVER_NAME = "deploom-mcp"
 TOOL_NAME = "get_upgrade_plan"
 KIND = "upgrade-blueprint"
 
-# Section H budget: default deadline 15..30 s. We default to 20 s and clamp to
-# a safe hard range so a client cannot hang the server on an absurd budget.
-DEFAULT_DEADLINE_SECONDS = 20.0
+# Section H budget: the default must leave headroom for a real project -- the
+# Stage 3.5 witness run (selfservice.shopping-cart-front, 61 deps) needed ~58 s
+# of planning at a 600 s budget, so 20 s would silently truncate every default
+# call into DRAFT_PARTIAL. We default to 120 s and clamp to a safe hard range
+# so a client cannot hang the server on an absurd budget.
+DEFAULT_DEADLINE_SECONDS = 120.0
 MIN_DEADLINE_SECONDS = 5.0
 MAX_DEADLINE_SECONDS = 600.0
 
