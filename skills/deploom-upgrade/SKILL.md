@@ -66,8 +66,12 @@ whole contract in context.
    feasibility. If any safety condition cannot be established → `BLOCKED`.
    See `references/preflight.md`.
 2. **Get upgrade blueprint** — call `get_upgrade_plan(project_path=…,
-   target_level=…, exclude=[…], …)`; read the compact response; open the full
-   blueprint artifact if `truncation` limited inline rows.
+   target_level=…, exclude=[…], deadline_seconds=…, registry=…, …)`. Pass an
+   explicit `deadline_seconds` so full-project scans finish inside the budget:
+   `20` (the contract default) is too small for workspaces with dozens of
+   packages — use `600` for a whole-repo scan, and pass the project `registry`
+   detected in preflight. Read the compact response; open the full blueprint
+   artifact if `truncation` limited inline rows.
    See `references/blueprint-contract.md`.
 3. **Safety gate** — validate planning authority, policy identity, source
    identity, partial/conflict handling and the exclusions contract. A failed
@@ -104,8 +108,18 @@ whole contract in context.
   `source.inputHashes` as opaque Core fingerprints — do not invent your own
   per-file hash). If inputs changed, re-plan before executing.
 - **Partial planning.** `draftStatus=DRAFT_PARTIAL` means the plan is
-  **not** complete: do not execute it as complete; re-plan (larger budget) or
-  STOP. Only `DRAFT_READY` plans may be executed.
+  **not** complete: do not execute it as complete. First re-plan **once** with a
+  larger `deadline_seconds` (up to `600` within the contract) — the usual cause
+  is the planner hitting its metadata budget, not a real conflict. Only
+  `DRAFT_READY` plans may be executed.
+- **Registry metadata failure.** If planning reports
+  `registry-failed` / `UNKNOWN_METADATA` on every package (planner subprocess
+  could not fetch packuments inside its budget), treat it as a budget/infra
+  problem: re-plan with a larger `deadline_seconds` (or after verifying the
+  `registry`), and only then evaluate the result. Never silently substitute
+  planner targets with your own `npm view` picks — any such manual selection is
+  a `needsReview` item that changes execution authority and must be presented
+  to the user for confirmation and recorded in the evidence report.
 - **Conflicts & needsReview.** Rows with `needsReview`, breaking changes,
   unknown dependencies, unresolved peers, missing metadata, or unproven safety
   conditions require user confirmation before action. Never decide for the user.

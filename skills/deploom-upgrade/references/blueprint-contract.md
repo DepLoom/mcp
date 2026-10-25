@@ -20,6 +20,10 @@ DepLoom/mcp repository; this file is the agent-facing digest.
   "exclude": null                            // optional [pkg, ...]; enforced BEFORE planning
 }
 ```
+> Note: the default `deadline_seconds: 20` is sized for small projects. For a
+> whole-repo scan (workspaces, dozens of direct deps, cold packument cache)
+> pass `deadline_seconds: 600`; if you still get `DRAFT_PARTIAL` or
+> `registry-failed`, re-plan once with the same `registry` before concluding.
 
 - Input validation is fail-closed: invalid args/goal/policy/deadline/registry/
   exclude are rejected before any work (`invalid-*` error codes).
