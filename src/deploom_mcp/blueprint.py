@@ -913,6 +913,62 @@ def _result_from_prepare(guard: Dict[str, Any], run_id: str, start: float) -> Up
     )
 
 
+def _resolved_version_from_note(note: str) -> Optional[str]:
+    """Extract the version after the solver's ``resolved=`` marker in a peer
+    resolution note: ``PEER_RESOLUTION_FALLBACK: desired=3.0.0; resolved=2.0.0``
+    -> ``2.0.0``; ``PEER_RESOLUTION_DEFERRED: ...; resolved=current 18.3.1`` ->
+    ``18.3.1`` (the ``current `` prefix is dropped: a deferred row must never
+    carry a target at all, so only the bare version matters for comparison)."""
+    marker = "resolved="
+    idx = note.find(marker)
+    if idx < 0:
+        return None
+    tail = note[idx + len(marker):].split(";", 1)[0].strip()
+    if tail.lower().startswith("current "):
+        tail = tail[len("current "):].strip()
+    return tail or None
+
+
+def _plan_consistency_error(plan: Mapping[str, Any]) -> Optional[Tuple[Any, Any, str]]:
+    """Fail-closed boundary invariant on a published Draft plan (P0 guard).
+
+    The Draft solver resolves only the "default" variant while the export reads
+    the chosen level (yellow/green); a stale pre-solver target must never be
+    exported. This check recomputes nothing -- it only refuses rows that
+    contradict the plan's own resolution diagnostics: a concrete target next to
+    a PEER_RESOLUTION_DEFERRED note (the solver proved "stay put", e.g.
+    react-dom @19.0.4 PROPOSED while the note resolved to current 18.3.1) is
+    impossible, and a PEER_RESOLUTION_FALLBACK target must equal the resolved
+    version. Returns (package, target, offending-note) or None.
+    """
+    conflicts_by_package: Dict[str, List[str]] = {}
+    for conflict in plan.get("conflicts") or []:
+        pkg = conflict.get("package")
+        note = str(conflict.get("note") or "")
+        if pkg:
+            conflicts_by_package.setdefault(pkg, []).append(note)
+    for proposal in plan.get("proposals") or []:
+        for entry in proposal.get("rows") or []:
+            target = entry.get("target")
+            if not target:
+                continue
+            pkg = entry.get("package")
+            notes = list(conflicts_by_package.get(pkg, []))
+            row_note = entry.get("conflict")
+            if row_note:
+                notes.append(str(row_note))
+            for note in notes:
+                if not note:
+                    continue
+                if "PEER_RESOLUTION_DEFERRED" in note:
+                    return (pkg, target, note)
+                if "PEER_RESOLUTION_FALLBACK" in note:
+                    resolved = _resolved_version_from_note(note)
+                    if resolved and resolved != target:
+                        return (pkg, target, note)
+    return None
+
+
 def _finalize(prep: _PreparedRun, outcome: ProcessRun, start: float) -> UpgradeBlueprintResult:
     """Turn one child outcome into the final UpgradeBlueprintResult (shared by
     the sync and async paths). Verifies the plan, the planning-only contract,
@@ -987,6 +1043,23 @@ def _finalize(prep: _PreparedRun, outcome: ProcessRun, start: float) -> UpgradeB
             plan_path=str(prep.plan_path), manifest_path=str(prep.manifest_path),
             elapsed=elapsed, python_version=_python_version(),
             error=contract_error, stdout=outcome.stdout, stderr=outcome.stderr,
+        )
+
+    consistency = _plan_consistency_error(plan)
+    if consistency is not None:
+        pkg, target, note = consistency
+        return UpgradeBlueprintResult(
+            ok=False, run_id=prep.run_id, draft_status=None, blueprint=None,
+            blueprint_path=None, artifacts_dir=str(prep.artifacts_dir),
+            plan_path=str(prep.plan_path), manifest_path=str(prep.manifest_path),
+            elapsed=elapsed, python_version=_python_version(),
+            error=_error(
+                "plan-inconsistent",
+                f"{pkg}: Draft plan exports target {target} while its own conflict "
+                f"note proves a different resolution ({note[:240]}); refusing to "
+                f"publish an impossible proposal",
+            ),
+            stdout=outcome.stdout, stderr=outcome.stderr,
         )
 
     declared_hashes = (manifest.get("hashes") or {})
