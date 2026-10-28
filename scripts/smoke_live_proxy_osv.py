@@ -185,7 +185,29 @@ def main() -> int:
                     )
                     if changed or len(list(project.iterdir())) != len(original):
                         raise RuntimeError("project dependency inputs changed during read-only planning")
+                    # Diagnostics are package-evidence fields only; never
+                    # dump proxy configuration or file paths containing secrets.
+                    plan_path = ((bp.get("artifacts") or {}).get("plan"))
+                    manifest_path = ((bp.get("artifacts") or {}).get("manifest"))
+                    plan_data = json.loads(Path(plan_path).read_text(encoding="utf-8")) if plan_path else {}
+                    manifest_data = json.loads(Path(manifest_path).read_text(encoding="utf-8")) if manifest_path else {}
+                    plan_rows = [x for p in (plan_data.get("proposals") or []) for x in (p.get("rows") or [])]
+                    first = plan_rows[0] if plan_rows else {}
+                    evidence_keys = (
+                        "package", "status", "current", "target", "currentVulns",
+                        "vulnEvidenceByVersion", "vuln_evidence_by_version",
+                        "scanState", "draftUnknown", "reason", "notes",
+                    )
                     result = {
+                        "diagnosticPlanRow": {key: first.get(key) for key in evidence_keys if key in first},
+                        "diagnosticManifestMetadata": {
+                            key: manifest_data.get("metadata", {}).get(key)
+                            for key in ("securityKnown", "securityUnknown", "securityTotal",
+                                        "osvUnknown", "metadataKnown", "metadataTotal",
+                                        "postPlanSecurityKnown", "postPlanSecurityUnknown",
+                                        "postPlanSecurityTotal", "postPlanGoal")
+                        },
+                        "diagnosticBlueprintAssessment": (bp.get("targetAssessment") or {}).get("aggregate") or {},
                         "status": "LIVE_OSV_CONFIRMED" if passed else "LIVE_OSV_UNVERIFIED",
                         "stage": "mcp-core-osv",
                         "mcpOk": bp.get("ok"),
