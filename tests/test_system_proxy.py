@@ -205,5 +205,72 @@ class SystemProxyStdioTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIs(await self._run(env, explicit), expected)
 
 
+    async def _audit_stdio(self, env_value: str | None, explicit: bool | None) -> tuple[bool, str]:
+        """Observe effective proxy policy after actual stdio -> audit worker.
+
+        Use conflicting canonical locks to stop before any npm/Yarn network
+        request; worker still records the effective option. This verifies the
+        cross-process contract without depending on network or installed CLIs.
+        """
+        with tempfile.TemporaryDirectory(prefix="deploom-audit-proxy-stdio-") as temp:
+            root = Path(temp)
+            project = root / "project"
+            project.mkdir()
+            (project / "package.json").write_text(
+                '{"name":"audit-proxy-stdio","private":true}', encoding="utf-8"
+            )
+            (project / "package-lock.json").write_text(
+                '{"lockfileVersion":3,"packages":{}}', encoding="utf-8"
+            )
+            (project / "yarn.lock").write_text(
+                '# yarn lockfile v1\n', encoding="utf-8"
+            )
+            before = {p.name: p.read_bytes() for p in project.iterdir()}
+            env = dict(os.environ)
+            env.pop("DEPLOOM_MCP_USE_SYSTEM_PROXY", None)
+            env["DEPLOOM_MCP_STATE_DIR"] = str(root / "state")
+            if env_value is not None:
+                env["DEPLOOM_MCP_USE_SYSTEM_PROXY"] = env_value
+            params = StdioServerParameters(
+                command=sys.executable, args=["-m", "deploom_mcp.audit_server"],
+                cwd=str(ROOT), env=env,
+            )
+            async with stdio_client(params) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    names = {tool.name for tool in (await session.list_tools()).tools}
+                    self.assertIn("audit_dependencies", names)
+                    request = {
+                        "project_path": str(project),
+                        "output_dir": str(root / "outside"),
+                        "deadline_seconds": 30,
+                    }
+                    if explicit is not None:
+                        request["use_system_proxy"] = explicit
+                    result = await session.call_tool("audit_dependencies", request)
+                    self.assertTrue(result.is_error)
+                    payload = result.structured_content
+                    self.assertEqual("ambiguous-lockfiles", payload["error"]["code"], payload)
+                    self.assertFalse(payload["security"]["complete"])
+                    self.assertEqual("UNKNOWN", payload["security"]["verdict"])
+                    self.assertEqual(before, {p.name: p.read_bytes() for p in project.iterdir()})
+                    self.assertFalse((project / "node_modules").exists())
+                    return (payload["network"]["useSystemProxy"],
+                            payload["network"]["source"])
+
+    async def test_audit_stdio_proxy_env_and_both_override_directions(self):
+        for env_value, explicit, expected, source in (
+            (None, None, False, "default"),
+            ("true", None, True, "environment"),
+            ("true", False, False, "tool"),
+            ("false", True, True, "tool"),
+        ):
+            with self.subTest(env=env_value, explicit=explicit):
+                self.assertEqual(
+                    (expected, source),
+                    await self._audit_stdio(env_value, explicit),
+                )
+
+
 if __name__ == "__main__":
     unittest.main()
