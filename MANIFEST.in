@@ -1,0 +1,5 @@
+include build_support.py
+include release-manifest.json
+include contracts/upgrade-blueprint.schema.json
+include scripts/install_skill.py scripts/skill_integrity.py scripts/check_skill.py
+global-exclude __pycache__ *.py[cod]

@@ -1,62 +1,37 @@
-# Example: blocked upgrade
+# Example: resolve the reason before retrying
 
-Three realistic ways a flow must stop with `BLOCKED` — never work around them.
+These are synthetic situations. They describe decisions, not successful runs.
 
-## 1. `policyDiscrepancy` present
+## Root proposal conflicts with a child
 
-`get_upgrade_plan(..., exclude=["react"])` returns `ok=true` but:
+A root plan proposes renderer 19; a child package requires renderer 18. The compact
+projection has a truncated-search row and the full artifact has the peer blocker.
+Read that evidence before asking whether renderer 19 is acceptable. Reconcile the
+whole graph; keep 18 or propose a coordinated remedy. Advisory mode cannot erase
+the peer constraint. Pinned mode cannot require a known-incompatible install.
+Independent updates may continue if their graph and authority are established.
 
-```jsonc
-"policyDiscrepancy": {
-  "requested": { "targetLevel": "yellow", "minLagOkPct": 80, "exclusions": ["react"] },
-  "applied":   { "targetLevel": "yellow", "minLagOkPct": 80,
-                 "exclusions": ["react", "lodash"], "policyHash": "…" },
-  "mismatchedFields": ["exclusions"],
-  "message": "..."
-}
-```
+## Candidate cap, not timeout
 
-**Agent behavior:** STOP execution even though `ok=true`.
+A targetless package has candidate coverage 3/29 with `draft_max_candidates=3`.
+Another call with the same inputs/cap and a 600-second deadline does not expand
+that coverage. Follow the targeted recovery: change the candidate budget within
+supported bounds or obtain the missing evidence. A true deadline interruption
+can justify one larger-time-budget retry; these are different causes.
 
-- Report: blocked by policy discrepancy — the planner applied an exclusion set
-  that differs from the request; acting on the rows could apply a policy the
-  user never asked for.
-- Do not reinterpret the plan; do not "correct" it silently. Ask the user how to
-  proceed (e.g. re-plan with the full intended exclusion list) and re-run the
-  gate on the new response.
+## Authorized manual fallback
 
-## 2. `DRAFT_PARTIAL` — the plan is not complete
+The user delegated stable same-major alternatives. A row remains
+CANDIDATE_SEARCH_TRUNCATED, but registry/peer/API evidence supports a concrete
+same-line proposal. In advisory mode, record it as `targetOrigin=manual` with the
+existing authority reference and remaining uncertainty. Apply only after the
+relevant graph gates pass; verify the final state. Do not re-ask for permission
+already granted or invent a solver/security verdict. If the user pinned targets,
+prepare the proposed revision and obtain the missing revised-target decision.
 
-```jsonc
-"status": { "draftStatus": "DRAFT_PARTIAL", "partialReason": "deadline budget..." },
-"partial": { "partial": true, "replanRequired": true, "processed": 40, "processedTotal": 300 }
-```
+## Changed source or policy
 
-**Agent behavior:** do **not** apply a partial plan as if it were complete.
-
-- Report: partial planning; only 40/300 dependencies processed, whole proposal
-  cannot be trusted for execution.
-- Re-plan with a larger `deadline_seconds` (within [5, 600]) once; if still
-  partial or the planner errors, stop and report the cause.
-
-## 3. Conflict / needsReview that requires the user
-
-`dependencies` contain a row with `status: "PROPOSED"` and
-`needsReview: true` plus `breakingChanges: ["drop of CommonJS export"]`, or a
-dependency is `PEER_UNRESOLVED` / `UNKNOWN_METADATA`.
-
-**Agent behavior:** the plan itself is valid, but acting on that dependency is a
-user decision.
-
-- Stop before touching it; present the exact row (package, from, to, reason,
-  notes) and ask for explicit confirmation.
-- `userApprovalRequired: true` in the evidence report; outcome `BLOCKED` for the
-  affected dependency, `PARTIAL` if the rest proceeded with consent.
-
-## Common to all three
-
-- Nothing is written to the original checkout; if a worktree was created for a
-  stopped execution, it is kept for inspection and reported (never deleted
-  automatically).
-- The evidence report records the stopping reason verbatim; the user gets a
-  clear "what blocked it and what I need from you" summary.
+A policy discrepancy, hash mismatch, unaccounted manifest change or exclusion
+violation blocks the affected execution. Correct the input/contract and re-plan;
+manual fallback does not bypass these conditions. Do not fabricate a full-project
+PASS if an independent subset completes while other work remains blocked.

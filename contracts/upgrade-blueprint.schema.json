@@ -42,7 +42,10 @@
           }
         },
         "inputFiles": { "type": "array", "items": { "type": "string" } },
-        "inputHashes": { "type": "object" }
+        "inputHashes": { "type": "object" },
+        "semanticInputHash": { "type": ["string", "null"] },
+        "semanticInputsByProject": { "type": "object" },
+        "inputCoverage": { "type": ["object", "null"] }
       }
     },
     "policy": {
@@ -53,7 +56,9 @@
         "policyHash": { "type": ["string", "null"] },
         "intent": { "type": ["object", "null"] },
         "acceptancePolicy": { "type": ["object", "null"] },
-        "exclusions": { "type": "array", "items": { "type": "string" } }
+        "exclusions": { "type": "array", "items": { "type": "string" } },
+        "decisionContract": { "$ref": "#/definitions/decisionContract" },
+        "coreContractSupport": { "enum": ["V1", "LEGACY"] }
       }
     },
     "status": {
@@ -95,6 +100,7 @@
         "properties": {
           "project": { "type": ["string", "null"] },
           "package": { "type": "string" },
+          "declarationId": { "type": "string" },
           "kind": { "type": ["string", "null"] },
           "requestedSpec": { "type": ["string", "null"] },
           "current": { "type": ["string", "null"] },
@@ -107,6 +113,8 @@
           },
           "needsReview": { "type": "boolean" },
           "reason": { "type": ["string", "null"] },
+          "nextAction": { "type": "string" },
+          "decisionReasons": { "type": "array", "items": { "$ref": "#/definitions/decisionEvidence" } },
           "group": { "type": ["integer", "null"] },
           "breakingChanges": { "type": "array", "items": { "type": "string" } },
           "migrationNotes": { "type": "array", "items": { "type": "string" } },
@@ -146,6 +154,18 @@
     "unresolved": { "type": "array", "items": { "type": "object" } },
     "perProject": { "type": "object" },
     "projections": { "type": "object" },
+    "targetAssessment": {
+      "description": "Published health of the exact final chosen/kept versions, distinct from current coverage and physical verification. Missing or invalid target evidence fails closed. A fully assessed policy violation can have evidenceComplete=true.",
+      "type": "object",
+      "required": ["scope", "aggregate", "projects", "evidenceComplete", "needsReview"],
+      "properties": {
+        "scope": { "const": "FINAL_PLANNED_ASSIGNMENT" },
+        "aggregate": { "type": "object" },
+        "projects": { "type": "object", "additionalProperties": { "type": "object" } },
+        "evidenceComplete": { "type": "boolean" },
+        "needsReview": { "type": "boolean" }
+      }
+    },
     "hashes": {
       "type": "object",
       "properties": {
@@ -163,9 +183,75 @@
         "solverComponents": { "type": "string" }
       }
     },
-    "blueprintFile": { "type": "string" }
+    "blueprintFile": { "type": "string" },
+    "decisionEvidence": { "type": "array", "items": { "$ref": "#/definitions/decisionEvidence" } },
+    "workspaceCoverage": {
+      "type": "object",
+      "required": ["mode", "reconciliationRequired", "jointAssignment", "discoveryComplete"],
+      "properties": {
+        "mode": { "const": "SINGLE_MANIFEST_PLANNING" },
+        "jointAssignment": { "const": "NOT_COMPUTED" },
+        "workspaceGraphCoverage": { "enum": ["PARTIAL", "SINGLE_PROJECT"] },
+        "reconciliationRequired": { "type": "boolean" },
+        "discoveryComplete": { "type": "boolean" },
+        "discoveredManifests": { "type": "array", "items": { "type": "string" } },
+        "evaluatedManifests": { "type": "array", "items": { "type": "string" } },
+        "unevaluatedManifests": { "type": "array", "items": { "type": "string" } },
+        "nextAction": { "type": "string" }
+      }
+    },
+    "runtimeProvenance": { "type": "object" },
+    "objectiveEvidence": { "type": "object" },
+    "planningOptions": { "type": "object" },
+    "identities": {
+      "type": "object",
+      "properties": {
+        "semanticInputHash": { "type": ["string", "null"] },
+        "policyDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "evidenceDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "decisionDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "evidenceScope": { "const": "PUBLISHED_PLANNING_EVIDENCE" }
+      }
+    },
+    "recovery": {
+      "type": "object",
+      "properties": {
+        "draftMaxCandidates": { "type": "integer", "minimum": 1, "maximum": 128 },
+        "previousEvidenceComparison": { "enum": ["NOT_PROVIDED", "UNCHANGED_EVIDENCE", "EVIDENCE_CHANGED"] },
+        "nextAction": { "type": "string" }
+      }
+    }
   },
   "definitions": {
+    "decisionContract": {
+      "type": "object",
+      "required": ["version", "targetMode", "objective", "mutablePackages", "approvedVersionLines"],
+      "properties": {
+        "version": { "const": 1 },
+        "targetMode": { "enum": ["pinned", "advisory"] },
+        "objective": { "enum": ["minimum-change-to-policy", "latest-compatible-in-approved-lines"] },
+        "mutablePackages": { "type": ["array", "null"], "items": { "type": "string" } },
+        "approvedVersionLines": {
+          "type": "object",
+          "additionalProperties": { "type": "array", "items": { "type": "integer", "minimum": 0 } }
+        }
+      }
+    },
+    "decisionEvidence": {
+      "type": "object",
+      "required": ["code", "severity", "message", "nextAction", "evidenceRef"],
+      "properties": {
+        "code": { "type": "string" },
+        "severity": { "enum": ["BLOCKER", "REVIEW", "INFO"] },
+        "package": { "type": ["string", "null"] },
+        "scope": { "enum": ["project", "aggregate"] },
+        "project": { "type": ["string", "null"] },
+        "message": { "type": "string" },
+        "nextAction": { "type": "string" },
+        "evidenceRef": { "type": "string" },
+        "lifecycle": { "enum": ["CURRENT_ROW", "ACTIVE_FINAL", "UNRESOLVED_LEGACY"] }
+      }
+    },
     "dependencyStatus": {
       "type": "string",
       "enum": [

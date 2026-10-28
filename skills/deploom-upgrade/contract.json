@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "name": "deploom-upgrade",
+  "contractVersion": "2.0.0",
+  "files": {
+    "SKILL.md": "2dffd51e19cd8969c1badc6327300085bb6b60e10f733ca7256d15b1d6541b9f",
+    "examples/blocked-upgrade.md": "b921b3ffd59d054ca69bddb7bc317450cc9c40d836cb1d44f5de86c9b974bfe4",
+    "examples/plan-only.md": "ccfaad2b5e5f00678ff019e5988bb32e95ac2b82b6050a8786ab87295ca6883b",
+    "examples/yellow-exclude-react.md": "379ccdd540513232fc5a2f396b2d9d3ee9cb4a420d7d27912ecd10c95b0da16b",
+    "references/blueprint-contract.md": "02f1ba108acdc7276ed803b838bd8b977d27ed559870685b74a3a97f6c540238",
+    "references/evidence-report.md": "05f2c264b402ab4dd4b98e4c69881c6070767b63278ac5a42549c834d271a1b1",
+    "references/execution-policy.md": "764abce1036c01510031b6d39ee9b6febb2e5219ba92c718ef5c4d3843eac29e",
+    "references/preflight.md": "db8b5081e2f36a1089e35a1b4ce429f4570ef822df81a134cb9f7a501239924f",
+    "references/verification-policy.md": "57d6d0dbb3d52816badfa582d416fb3504c4c1c2e78ef80eed64aaa57642318c",
+    "scripts/validate_evidence.py": "7e8fc003473b7e5d94a20a29d06bcba14844c699b787baf67c26305402a0bf3b"
+  },
+  "bundleSha256": "cdfd3be94cd0eba58125f2d5e2094807dbdca022cd29ff35160573d6091762a1"
+}

@@ -12,6 +12,7 @@ import hashlib
 import json
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -68,7 +69,13 @@ class InstallerTests(unittest.TestCase):
         target = self.project / ".opencode" / "skills" / "deploom-upgrade"
         self.assertTrue(target.is_dir())
         self.assert_installed_identical(target)
-        self.assertEqual(len(canonical_files()), len(list(target.rglob("*.md"))))
+        installed = [p for p in target.rglob("*") if p.is_file() and p.name != ".deploom-skill-install.json"]
+        self.assertEqual(len(canonical_files()), len(installed))
+        receipt = json.loads((target / ".deploom-skill-install.json").read_text(encoding="utf-8"))
+        contract = json.loads((CANONICAL / "contract.json").read_text(encoding="utf-8"))
+        self.assertEqual(receipt["bundleSha256"], contract["bundleSha256"])
+        self.assertEqual(receipt["files"], contract["files"])
+        self.assertEqual(receipt["loadedVerification"], "NOT_OBSERVED")
 
     def test_reinstall_is_idempotent(self) -> None:
         for _ in range(2):
@@ -127,6 +134,73 @@ class InstallerTests(unittest.TestCase):
         result = run_installer(self.project, "--scope", "project", "--target", str(custom))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assert_installed_identical(custom)
+
+    def test_stale_reference_is_not_hidden_by_identical_main_skill(self) -> None:
+        target = self.project / "skill"
+        first = run_installer(self.project, "--target", str(target), "--verify")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        stale = target / "references" / "execution-policy.md"
+        stale.write_text("stale policy\n", encoding="utf-8")
+        blocked = run_installer(self.project, "--target", str(target), "--verify")
+        self.assertEqual(blocked.returncode, 2)
+        self.assertEqual(stale.read_text(encoding="utf-8"), "stale policy\n")
+        fixed = run_installer(self.project, "--target", str(target), "--force", "--verify")
+        self.assertEqual(fixed.returncode, 0, fixed.stderr)
+        self.assert_installed_identical(target)
+
+    def test_missing_reference_requires_repair_even_when_main_is_identical(self) -> None:
+        target = self.project / "skill"
+        self.assertEqual(run_installer(self.project, "--target", str(target)).returncode, 0)
+        (target / "references" / "preflight.md").unlink()
+        self.assertEqual(run_installer(self.project, "--target", str(target)).returncode, 2)
+        fixed = run_installer(self.project, "--target", str(target), "--force", "--verify")
+        self.assertEqual(fixed.returncode, 0, fixed.stderr)
+
+    def test_dry_run_verify_does_not_claim_or_require_a_future_install(self) -> None:
+        target = self.project / "future-skill"
+        result = run_installer(self.project, "--target", str(target), "--dry-run", "--verify")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(target.exists())
+        self.assertNotIn("files byte-identical", result.stdout)
+
+    def test_modified_source_without_regenerated_manifest_is_rejected(self) -> None:
+        source = self.project / "source"
+        shutil.copytree(CANONICAL, source)
+        (source / "references" / "preflight.md").write_text("different source\n", encoding="utf-8")
+        target = self.project / "target"
+        result = run_installer(self.project, "--from-dir", str(source), "--target", str(target))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(target.exists())
+        self.assertIn("hash mismatch", result.stderr)
+
+    def test_foreign_extras_are_preserved_and_not_claimed_identical(self) -> None:
+        target = self.project / "skill"
+        target.mkdir()
+        (target / "foreign.txt").write_text("keep me", encoding="utf-8")
+        result = run_installer(self.project, "--target", str(target), "--force", "--verify")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unexpected file preserved", result.stderr)
+        self.assertEqual((target / "foreign.txt").read_text(), "keep me")
+        self.assertFalse((target / ".deploom-skill-install.json").exists())
+
+    def test_symlink_target_is_refused_without_writing_through_it(self) -> None:
+        real = self.project / "real"
+        real.mkdir()
+        link = self.project / "link"
+        try:
+            link.symlink_to(real, target_is_directory=True)
+        except OSError:
+            self.skipTest("symlink creation unavailable")
+        result = run_installer(self.project, "--target", str(link), "--force")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual(list(real.iterdir()), [])
+
+    def test_source_target_overlap_is_refused(self) -> None:
+        source = self.project / "source"
+        shutil.copytree(CANONICAL, source)
+        result = run_installer(self.project, "--from-dir", str(source), "--target", str(source), "--force")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("must not overlap", result.stderr)
 
 
 class InstallerDeterminismTests(unittest.TestCase):

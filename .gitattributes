@@ -1,0 +1,7 @@
+# Release fingerprints bind these canonical bytes on Windows and Unix.
+*.py text eol=lf
+/skills/deploom-upgrade/** text eol=lf
+/contracts/*.json text eol=lf
+/release-manifest.json text eol=lf
+/pyproject.toml text eol=lf
+/.gitattributes text eol=lf

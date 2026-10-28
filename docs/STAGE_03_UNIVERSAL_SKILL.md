@@ -1,5 +1,25 @@
 # STAGE 03 — Deploom-Upgrade universal Agent Skill
 
+## Current contract and historical evidence
+
+The remaining sections record the original 2026-10-24 Stage 3 delivery and pilot.
+Their test counts, file count, client versions and E2E PASS refer to that revision,
+not to the current Skill contract. The current canonical Skill is **2.0.0**;
+`skills/deploom-upgrade/contract.json` binds SKILL.md, all references/examples and
+the evidence validator by SHA-256. Its installer receipt identifies on-disk
+content and explicitly leaves loaded-client content `NOT_OBSERVED`.
+
+The new contract separates pinned/advisory authority, policy-minimal/latest
+objectives, compact decision completeness, workspace reconciliation, final-input
+installation evidence, targeted runtime checks and policy attainment. It uses
+progressive references; ordinary planning does not require an execution report.
+See [SKILL_CONTRACT_V2.md](SKILL_CONTRACT_V2.md) for verification and protocol.
+The new offline tests check contract/delivery/evidence consistency only. No real
+agent migration or client reload is claimed for version 2.0.0. The legacy E2E
+harness has its original evidence assertions and is not a v2 acceptance gate.
+
+## Historical Stage 3 record
+
 Date: 2026-10-24. Repo: `DepLoom/mcp`, branch `stage3-universal-skill`
 (merged to `main`).
 
@@ -86,7 +106,8 @@ Real plan (pinned Core through the real boundary):
 `kontur-fixture-b` PROPOSED 2.0.0→2.1.0, `kontur-fixture-c` EXCLUDED.
 No `policyDiscrepancy`; `truncation.truncated=false`.
 
-Pilot run: `opencode run -m kontur_ultra/ultra --auto --dir <fixture>` with the
+Pilot run: `opencode run -m <configured-provider/model> --auto --dir <fixture>`
+(provider identifier omitted from this public record), with the
 skill prompt (`scripts/e2e_prompt.md`). The model loaded the skill, ran the
 preflight, called `get_upgrade_plan` with `registry` + `exclude`, passed the
 safety gate, created an isolated worktree **outside** the project at the

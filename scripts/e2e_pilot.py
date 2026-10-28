@@ -240,9 +240,11 @@ def main() -> None:
     ap.add_argument("--out", required=True)
     ap.add_argument("--fixture", required=True)
     ap.add_argument("--port", type=int, default=4873)
-    ap.add_argument("--model", default="kontur_ultra/ultra")
+    ap.add_argument("--model", help="Configured provider/model identifier for pilot execution")
     ap.add_argument("--prompt", default=str(REPO / "scripts" / "e2e_prompt.md"))
     args = ap.parse_args()
+    if args.phase in ("all", "pilot") and not args.model:
+        ap.error("--model is required for phases that execute a model")
     out = pathlib.Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     fixture = pathlib.Path(args.fixture).resolve()

@@ -1,6 +1,8 @@
 # Stage 2: DepLoom MCP Server
 
-Status: **implemented (v0.1.0)**. Boundary reviewed — see `STAGE_01_UPGRADE_BLUEPRINT.md`.
+Status: **implemented (v0.2.0)**. Decision contract and limitations:
+[`DECISION_CONTRACT.md`](DECISION_CONTRACT.md). Historical boundary review:
+`STAGE_01_UPGRADE_BLUEPRINT.md`.
 
 ## What the server is
 
@@ -8,7 +10,7 @@ Status: **implemented (v0.1.0)**. Boundary reviewed — see `STAGE_01_UPGRADE_BL
 an MCP **stdio** transport, built on the official MCP SDK (`mcp>=2,<3`,
 `MCPServer`). The tool is an **async** MCP tool: it awaits the Stage 1 boundary
 (`generate_upgrade_blueprint_async` in `deploom_mcp.blueprint`), which runs
-the pinned Core (`upstream/deploom` submodule) as an isolated, read-only
+the pinned headless Core (bundled in wheels; `upstream/deploom` in a checkout) as an isolated, read-only
 subprocess. The same handler also exposes the **synchronous** wrapper
 `get_upgrade_plan` (kept as the internal entry for process-local tests).
 
@@ -23,7 +25,10 @@ deploom-mcp                 # console script after `pip install -e .`
 
 `get_upgrade_plan(project_path, target_level="yellow", min_lag_ok_pct=80,
 deadline_seconds=20.0, include_prerelease=False, registry=None,
-registry_metadata_ttl=3600.0, output_dir=None, exclude=None)`
+registry_metadata_ttl=3600.0, output_dir=None, exclude=None,
+target_mode="pinned", objective="minimum-change-to-policy",
+mutable_packages=None, approved_version_lines=None, draft_max_candidates=3,
+previous_evidence_digest=None)`
 
 * `project_path` (required, absolute) — the analysed project. Only ever read:
   the test suite asserts a byte-for-byte project snapshot before/after.
@@ -47,6 +52,14 @@ registry_metadata_ttl=3600.0, output_dir=None, exclude=None)`
   `--exclude-dependency <package>|reason`; an explicit reason is always
   attached). Must be a non-empty list of non-empty strings, otherwise
   `invalid-exclude`.
+* `target_mode`, `objective`, `mutable_packages`, `approved_version_lines` —
+  the version-selection contract. Core must acknowledge advanced requests;
+  unsupported or mismatching applied contracts fail closed. See
+  [`DECISION_CONTRACT.md`](DECISION_CONTRACT.md) for defaults and scope semantics.
+* `draft_max_candidates` — integer `1..128`, default `3`, for security-evidence
+  candidate search; independent of `deadline_seconds`.
+* `previous_evidence_digest` — optional lowercase SHA-256 from a previous plan,
+  to diagnose unchanged published evidence without implying a frozen registry.
 
 `exclude` is applied by the **planner itself** (not filtered afterwards):
 excluded packages run through the real plan scope and are reported as
@@ -127,19 +140,27 @@ On success the tool returns a compact, agent-friendly payload
   `compatibility`, `parallelExecutionSafety`, `partialReason`;
 * `summary` — `totalDependencies`, `proposed`, `needsReview`, `statusCounts`;
 * `recommendationGroups` — display-priority groups (NOT a parallel-proof order);
-* `dependencies` — compact rows (`package`, `status`, `current`, `target`,
-  `group`, `needsReview`);
+* `dependencies` — compact rows (`package`, `declarationId`, `status`,
+  `current`, `target`, `group`, `needsReview`, reason, evidence and next action);
+* `decisionEvidence` / `decisionCompleteness` — typed reasons, explicit
+  lifecycle, critical/blocker counts, artifact-read requirement and separate
+  projection/planning/evidence completeness;
+* `workspaceCoverage` — discovered/evaluated/unevaluated manifests, bounded
+  discovery status and reconciliation requirement; never a joint-solver claim;
+* `runtimeProvenance`, `identities`, `planningOptions`, `recovery`,
+  `objectiveEvidence` — actual component identity, semantic decision digests,
+  cap versus deadline, unchanged evidence and planning-only objective status;
 * `truncation` — `{truncated, inlineDependencies, totalDependencies,
   inlineGroups, totalGroups, inlinePackages, totalPackages, byteLimit, bytes,
   limitsHit}` when the payload is clipped to the deterministic display budget
-  (default 50 groups / 50 packages per group / 100 rows, capped at 512 KiB of
+  (default 50 groups / 50 packages per group / 100 rows / 50 critical reasons, capped at 512 KiB of
   serialized JSON). The budget bounds the serialized **payload** (the exact
   `json.dumps(..., ensure_ascii=False, indent=2)` text, including the
   `truncation` block itself — duplicated in the tool result `content` and
   `structuredContent`), not the whole MCP transport envelope. `bytes` always
   equals the exact final size (never a pre-truncation estimate; the test suite
   re-serializes the response and asserts equality). Budget is enforced
-  deterministically: caps are reduced step-wise (packages → groups → rows)
+  deterministically: caps are reduced step-wise (packages → groups → rows → evidence)
   until the exact on-wire bytes fit, so the same plan always yields the same
   response; `summary.statusCounts` stays complete regardless. If even the
   minimal required payload cannot fit the budget, the call fails closed with
@@ -169,8 +190,9 @@ parallelExecutionSafety = UNPROVEN
 Stable-meaning semantics:
 
 * `PROPOSED` — "this upgrade can be proposed", NOT "already updated".
-* `needsReview === true` — do NOT act on this row until the project owner
-  confirms the migration (breaks, minimum versions, security trade-offs).
+* `needsReview === true` — inspect the evidence (breaks, minimum versions,
+  security trade-offs) within the user's existing authority. Seek additional
+  approval only when the proposed action exceeds it.
 * The reserved verified statuses `CONSTRAINT_SATISFIED`, `MATERIALIZED`,
   `PROJECT_VERIFIED` never appear in a planning response (unit-tested).
 * `recommendationGroups` order is display priority, not a proof that groups can
@@ -184,6 +206,10 @@ Always machine-readable as `{"ok": false, "error": {"code", "message",
 * `invalid-args` — `project_path` not a non-empty string.
 * `invalid-goal` — `target_level` not `yellow`/`green`.
 * `invalid-policy` — `min_lag_ok_pct` not an integer in `[0, 100]`.
+* `invalid-intent` / `invalid-candidate-cap` / `invalid-evidence-digest` —
+  invalid decision contract, candidate limit or previous-evidence identity.
+* `decision-contract-unsupported` / `decision-contract-mismatch` — Core cannot
+  acknowledge the requested advanced decision contract or applied another one.
 * `invalid-deadline` — deadline non-finite (`NaN`/`±Inf`) or invalid.
 * `invalid-registry` — registry not an `http(s)` URL, carries credentials, or
   the TTL is finite-negative/`NaN`.
@@ -193,7 +219,7 @@ Always machine-readable as `{"ok": false, "error": {"code", "message",
   artifacts were written by an earlier, identical run).
 * `project-not-found` — project dir absent.
 * `invalid-project` — no `package.json`.
-* `core-not-found` — pinned submodule not initialized.
+* `core-not-found` — no usable bundled Core or initialized checkout Core.
 * `generator-failed` / `generator-timeout` — the Core subprocess failed or hit
   its (deadline-derived) subprocess budget.
 * `manifest-missing` / `manifest-invalid` — Core produced no/ill-formed

@@ -1,97 +1,80 @@
 # Execution policy
 
-Rules for applying a **`DRAFT_READY`** blueprint in `EXECUTE` mode. Nothing in
-this file is client-specific — the same rules apply in OpenCode, Claude Code and
-Codex.
+Apply changes only in `EXECUTE` mode and the authorized working copy. Reuse a
+supplied isolated checkout; otherwise prefer isolation and prove source identity.
+Never discard unrelated changes or publish/delete the work without authority.
 
-## Git isolation (mandatory)
+## Decide before applying
 
-Make every change in an isolated working copy; never edit the original checkout.
+Read source/policy identity, workspace coverage, conflicts, unknowns and recovery
+actions, even when all dependency rows fit in compact output. Reconcile shared
+assignments across root and children; a root proposal cannot overrule a known
+child constraint. Incomplete workspace coverage is not a whole-project verdict.
 
-1. From the **baseline** (the recorded `baselineCommit` / clean tree): create a
-   worktree at the same commit on a dedicated branch, e.g.
-   `git worktree add <path> -b deploom-upgrade-<runId>`.
-2. Record before touching anything:
-   - `baselineCommit` (HEAD SHA) and the branch;
-   - blueprint `runId`;
-   - the applied policy (`targetLevel`, `minLagOkPct`, `exclusions`, `policyHash`);
-   - the plan's `source.inputFiles`;
-   - the new worktree path.
-3. Never auto-run `git reset --hard`, `--force` push, or merge. Never delete the
-   worktree before the user has reviewed it and the evidence report exists.
+For each affected package, distinguish:
 
-### Source identity across the worktree
+| Kind | Treatment |
+|---|---|
+| Hard constraint | Preserve proven peer/engine constraints; resolve or re-plan a contradiction. User approval does not prove compatibility. |
+| User requirement | Preserve exclusions, explicit targets, version lines, scope and behavior. Ask only for a necessary new decision. |
+| Planner recommendation | In pinned mode keep the agreed target; in advisory mode justify an alternative inside authority. |
+| Search/evidence limitation | Retain UNKNOWN, missing coverage and candidate caps. Expand the relevant search or make a separately attributed proposal. |
 
-A blueprint is only valid for the project state it was planned against. A fresh
-worktree at `baselineCommit` is **not** automatically equivalent to what the
-planner saw — prove it:
+Write a decision record: package and declaration scope, original verdict,
+planner target, selected target, `targetOrigin`, reason, evidence references,
+authority reference and required verification. `needsReview=true` does not
+automatically require another question when the user already authorized this
+kind of change. Breaking-change notes are evidence for necessary adaptations,
+not new permission rules by themselves.
 
-- Collect the plan's `source.inputFiles` (absolute paths in the analysed
-  checkout).
-- Compare those files' bytes in the worktree against the state they had at
-  planning time. If the baseline was clean, they are identical to the commit
-  files — verify by hashing the same files in both checkouts.
-- If they differ (e.g. the original checkout was dirty or inputs changed after
-  planning), **re-plan inside the worktree** (`get_upgrade_plan` with the
-  worktree as `project_path`) and use that blueprint instead.
-- If identity cannot be proven, mark it unconfirmed in the evidence report; do
-  not present it as proven.
+## Pinned, advisory and manual fallback
 
-## Dependency application
+- **Pinned:** apply agreed targets exactly. A stale/contradictory target requires
+  re-planning or an explicit revised user decision; never obey it blindly or
+  silently pick a different version. Record the superseded plan and new target.
+- **Advisory:** choose a justified target inside approved lines/scope using
+  current configured-registry evidence and relevant compatibility checks.
+  Record deviations from the planner. Do not claim Core validated the choice.
+- For a targetless/UNKNOWN/capped row, preserve the planner status. Check stable
+  candidates, peers/engines, known security evidence and API/support notes.
+  A same-line fallback may use existing authority; otherwise prepare a concrete
+  proposal before asking. Broad peers do not prove runtime compatibility.
+- Do not infer latest from `POLICY_SATISFIED`, or incompatibility from a candidate
+  cap. Do not infer mandatory family synchronization from the peers of a new
+  companion when deciding whether the old companion must change. Ordinary
+  dependencies can have separate nested copies; a direct-version mismatch alone
+  is not proof of a peer-resolution failure.
+- Source/policy mismatch, unavailable MCP, exclusions and unresolved hard
+  constraints are not bypassed by fallback. Independent decisions may continue
+  only when their own graph and authorization are established.
 
-1. Select **actionable rows**: `status == PROPOSED` and not excluded by policy.
-   Skip `EXCLUDED`, `NO_CHANGE`, `POLICY_SATISFIED`, `DEFERRED` and anything
-   unconfirmed.
-2. For each actionable row, apply exactly the planner-recorded change
-   `current → target` into the manifest (in the worktree), using the package
-   manager's consistent syntax. **Never** pick alternative versions by hand in
-   place of the planner's decision.
-3. Update the lockfile with the project's own package manager, limiting to the
-   plan's scope (e.g. `npm install --save-exact-…` where appropriate; prefer
-   `npm install`/`yarn`/`pnpm install` and verify the resulting lockfile).
-4. Verify the **actual** installed versions (`npm ls`, `node -e`, or reading the
-   resolved lockfile entries / `node_modules`) match the plan `target`.
-5. Diff the manifest and lockfile against the plan rows; every changed
-   dependency must trace to a `PROPOSED` row. Anything else changed is an
-   anomaly — stop and report.
-6. If an install fails, record the error, revert that one step, and **re-plan**
-   (in the worktree) rather than improvising resolutions.
+## Apply and repair
 
-## Exclusions (mandatory)
+1. Retain baseline identities and the selected decision set before editing.
+2. Edit permitted declarations, including justified companions. Every changed
+   declaration maps to a planner or authorized manual decision, not necessarily
+   to a `PROPOSED` row. Count changed declarations and unique names separately.
+3. Update the lockfile with the project's package manager. Confirm installed
+   versions in each relevant workspace; do not treat a root copy as every copy.
+4. Preserve excluded direct declarations and their resolved versions. If the
+   user also froze transitive copies, audit that stronger condition separately;
+   the planner's direct exclusions do not guarantee it automatically.
+5. Diagnose install/compiler errors before choosing a remedy. Required source
+   annotations, exports or API adapters in previously untouched files are in
+   scope when the migration authorizes them. An unmodified file is not a reason
+   to label an otherwise repairable migration impossible.
+6. Keep at most three evidence-driven repair attempts per root cause by default.
+   Retry only when evidence or inputs changed. Do not remove validation, disable
+   checks, add blanket `any`, lower thresholds or invent a new scope rule for a
+   passing result. If repair cannot be completed, report the actual failure and
+   a concrete alternative within the user's fallback instructions.
+7. After any changed target, manifest, lockfile or environment, invalidate older
+   install evidence for the final state and re-run the required clean install.
+   After source/config changes, refresh affected checks. Retain earlier failures.
 
-- Keep the exclusion set intact end-to-end: planning scope (passed to
-  `get_upgrade_plan`), application scope, and audit.
-- Before and after execution, compare the excluded packages' entries in the
-  manifest **and** lockfile. If any other update would force the excluded
-  package to change → STOP and report instead of quietly changing it.
-- The planner guarantees exclusions for **direct** dependencies only. Do not
-  promise that transitive copies are untouched.
-
-## Code repair (bounded)
-
-Repair only what is necessary to restore compatibility after the upgrade.
-
-Banned:
-- disabling/deleting tests or checks to make them pass;
-- silently replacing TypeScript types with `any`;
-- removing safety checks;
-- re-architecting the project;
-- unbounded retry loops.
-
-Allowed: minimal, justified code changes that a breaking-change note implies.
-Each change must be explained and recorded (`file`, reason, attempt number).
-
-- At most **3 attempts** per root cause of an error.
-- After the third failed attempt, report `FAILED` with diagnostics; do not lower
-  the bar to force a green.
-
-## Stopping conditions
-
-Stop and report `BLOCKED` or `FAILED` (never silently continue) when:
-
-- `policyDiscrepancy` is present in the response;
-- `draftStatus != DRAFT_READY` (e.g. `DRAFT_PARTIAL`);
-- any excluded package would change;
-- the diff diverges from the plan;
-- a needed client permission is denied;
-- the repair budget is exhausted.
+Re-plan when meaningful planner inputs/constraints change, when the selected
+assignment conflicts across workspaces, or when a pinned decision is no longer
+applicable. Do not re-plan after each expected edit in an accepted transaction;
+finish its bounded application, audit the resulting state, then re-plan if the
+remaining decision set is no longer valid. Increasing a timeout without changing
+a candidate cap is not a recovery for truncated candidate search.

@@ -19,6 +19,8 @@ Behaviour is controlled by environment variables (never by the project):
   FAKE_GENERATOR_PARTIAL set to 1 to publish status DRAFT_PARTIAL
   FAKE_GENERATOR_SOLVER  "manifest" or "file" controlling where solver
                          components come from (default manifest)
+  FAKE_GENERATOR_CONTRACT "echo" or "mismatch" to exercise the applied
+                          decision-contract handshake; absent means legacy
 
 The manifest hashes are computed from the actual bytes written, so the
 fail-closed hash verification normally passes; `bad-hash` deliberately breaks
@@ -178,6 +180,13 @@ def main() -> int:
     _write(draft_dir / "solver-components.json", json.dumps(envelope, indent=2))
 
     manifest = build_manifest(draft_dir)
+    contract_mode = os.environ.get("FAKE_GENERATOR_CONTRACT")
+    if contract_mode:
+        manifest["decisionContract"] = json.loads(os.environ["DEPLOOM_BASELINE_INTENT_JSON"])
+        manifest["planningOptions"] = {"draftMaxCandidates": int(_arg("--draft-max-candidates", "3")),
+                                       "candidateCapScope": "SECURITY_EVIDENCE_SEARCH", "staticSolverDomainCap": None}
+        if contract_mode == "mismatch":
+            manifest["decisionContract"]["targetMode"] = "pinned"
     if MODE == "contract-violation":
         manifest["verificationStatus"] = "VERIFIED"
         manifest["authority"] = "ACTIONABLE"

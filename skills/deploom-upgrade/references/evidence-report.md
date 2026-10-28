@@ -1,94 +1,139 @@
 # Evidence report
 
-One client-neutral JSON format produced at the end of every walk-through
-(`PLAN_ONLY` or `EXECUTE`). The format is the same in OpenCode, Claude Code and
-Codex; only the `client` value (when determinable) differs.
+For executed migrations or explicitly requested evaluations, keep one concise
+decision/acceptance record and link existing logs; do not duplicate them across
+reports. The record indexes applicable deliverables required by the user or the
+Core execution workflow, including migration guides/reports; it does not replace
+them or repeat their full text. User instructions govern the task scope. Ordinary
+`PLAN_ONLY` work needs only a concise decision summary and does not execute Core
+migration or delivery instructions. The structured format below is optional for
+planning and is client-neutral.
+Validate its logical consistency with the bundled
+`scripts/validate_evidence.py`. The validator checks claims and input identities;
+it cannot prove that a reported command actually ran or that a supplied hash is
+correct. Retain the real logs and covered input files for review.
 
-## Outcome
+## Before execution
 
-`outcome` distinguishes the five cases:
+Record authority references, action, objective, `targetMode`, approved version
+lines, scope and exclusions. Define required checks in four separate categories:
+`install`, `checks`, `runtime`, `policy`. Keep the accepted criteria stable; record
+an explicitly authorized waiver instead of silently removing a failed criterion.
 
-- `PASSED` — full execute flow succeeded: gates passed, updates applied,
-  checks ran, plan verified.
-- `PARTIAL` — a subset of the plan was applied/verified; some rows remain.
-- `BLOCKED` — a safety gate or missing capability stopped the flow before
-  changes (or before applying changes).
-- `FAILED` — checks failed after changes and the repair budget was exhausted.
-- `INFRA_ERROR` — infrastructure failure (MCP unreachable, planner errored,
-  network, toolchain) — not a project decision.
-
-## Format
+Use this **plan-only skeleton** and fill actual identities when they are known:
 
 ```json
 {
+  "schemaVersion": 2,
   "workflow": "deploom-upgrade",
-  "client": "opencode",
+  "mode": "PLAN_ONLY",
+  "targetMode": "advisory",
+  "objective": "latest-compatible-in-approved-lines",
   "targetLevel": "yellow",
-  "outcome": "PASSED",
-  "baselineCommit": "cc10d36…",
-  "workingTree": "C:/…/.git/worktrees/deploom-upgrade-<runId>",
-  "blueprintRunId": "…",
-  "appliedPolicy": {
-    "targetLevel": "yellow",
-    "minLagOkPct": 80,
-    "exclusions": ["react"],
-    "policyHash": "…"
-  },
-  "updatedDependencies": [
-    {"package": "uuid", "from": "3.4.0", "to": "9.0.1", "needsReview": false}
-  ],
-  "skippedDependencies": [
-    {"package": "react", "status": "EXCLUDED", "reason": "user excluded react"},
-    {"package": "is-number", "status": "NO_CHANGE", "reason": "already satisfied"}
-  ],
-  "codeChanges": [
-    {"file": "src/legacy.js", "diffSummary": "adapt uuid v9 import", "reason": "breaking change", "attempt": 1}
-  ],
-  "verification": [
-    {"check": "install", "status": "PASSED", "command": "npm ci --registry=…",
-     "exitCode": 0, "elapsedMs": 1234, "note": "lockfile in sync"},
-    {"check": "build", "status": "PASSED", "command": "npm run build", "exitCode": 0},
-    {"check": "tests", "status": "NOT_RUN", "command": null, "note": "no test script"}
-  ],
-  "remainingRisks": [
-    "react transitive copies unconfirmed (planner guarantees direct deps only)"
-  ],
-  "userApprovalRequired": false
+  "completion": "COMPLETED",
+  "outcome": "PLAN_READY",
+  "authorities": [{"id": "task", "reference": "user request to propose updates"}],
+  "loadedSkill": {"contractVersion": "2.0.0", "sha256": null, "status": "UNKNOWN"},
+  "blueprintRunId": null,
+  "finalInputs": {"manifests": null, "lockfile": null, "environment": null, "source": null},
+  "acceptance": {"install": ["clean-install"], "checks": ["typecheck", "build", "tests"], "runtime": [], "policy": ["installed-policy"]},
+  "results": {"install": "NOT_RUN", "checks": "NOT_RUN", "runtime": "NOT_RUN", "policy": "NOT_RUN"},
+  "decisions": [],
+  "declarationChanges": [],
+  "deliverables": [],
+  "counts": {"changedDeclarations": 0, "updatedUniqueNames": 0, "addedUniqueNames": 0, "removedUniqueNames": 0},
+  "verification": [],
+  "remainingUnknowns": ["execution has not been requested"]
 }
 ```
 
-Rules for the format:
+`PLAN_READY` only means the requested analysis was completed. For execution, set
+`mode=EXECUTE`; completion and outcome remain separate. `PASSED` requires all
+accepted criteria on the final state. Otherwise use `PARTIAL`, `BLOCKED`,
+`FAILED`, `INFRA_ERROR` or `CANCELLED` according to the observed result. Interrupted
+or incomplete sessions must not claim a completed migration.
 
-- `client` is set only when the client can be identified reliably; otherwise
-  omit it (never invent a name).
-- For `PLAN_ONLY` runs: `outcome` is `BLOCKED` only when gates failed; otherwise
-  use `PASSED`/`PARTIAL` for a successfully produced and analyzed plan, set
-  `updatedDependencies`/`codeChanges` empty, `workingTree` null, and
-  `userApprovalRequired` true only if the analysis surfaced decisions for the
-  user (needsReview rows, exclusions).
-- `verification[]` entries follow the status vocabulary
-  `PASSED / FAILED / INCONCLUSIVE / NOT_RUN / NOT_AVAILABLE` with command, exit
-  code, elapsed, reason and artifact paths.
-- `userApprovalRequired` must be true whenever the user must decide before the
-  next step (needsReview rows, breaking changes, unproven conditions, unsafe
-  install scripts).
+## Decisions and changes
 
-## Mandatory user-facing report
+Example of a **synthetic manual proposal**, not a solver-approved result:
 
-Show the user, in plain language:
+```json
+{
+  "id": "utility-decision",
+  "package": "example-utility",
+  "project": "root",
+  "plannerStatus": "CANDIDATE_SEARCH_TRUNCATED",
+  "plannerTarget": null,
+  "selectedTarget": "1.4.2",
+  "targetOrigin": "manual",
+  "authorityRef": "task",
+  "evidence": ["registry-snapshot.json#/example-utility/1.4.2", "peer-review.json"],
+  "reason": "Stable same-line candidate inside delegated scope; planner coverage remains incomplete",
+  "requiredVerification": ["clean-install", "typecheck", "affected-runtime"]
+}
+```
 
-- what was updated (packages, versions) and to what;
-- what was excluded (and that it stayed untouched in manifest and lockfile);
-- what remained blocked or unconfirmed;
-- which files were changed (worktree diff summary);
-- which checks passed and which failed/skipped;
-- where the worktree and the full diff live;
-- whether a user decision is required and what exactly.
+The authority reference must cover this action. In pinned mode a manual
+alternative also records `revisedTargetAuthorization=true` and references the
+actual revised user decision. Never relabel the original UNKNOWN as compatible.
+Add approval only when existing authority does not cover the concrete proposal.
 
-## Boundaries
+Index required execution deliverables once in `deliverables`: each entry has
+`path`, `requiredBy` (the task/workflow reference), and `status=PRESENT|MISSING|NOT_VERIFIED`.
+For example, point to the required developer upgrade guide and migration report
+instead of copying their contents into JSON. Missing required delivery remains
+visible and cannot support an overall `PASSED` outcome. The validator checks the
+record's consistency; the caller must actually inspect the referenced files.
 
-- Never create a commit, push, PR, or merge automatically — stop at the report.
-- Never delete the worktree before the user reviewed it.
-- A successful plan is not presented as a successful migration; the report
-  states verification honestly even when `PASSED` applies only to what actually
-  ran.
+For every changed declaration record `file`, `section`, `package`, `from`, `to`
+and `decisionId`. Use null only for addition/removal. Count changed declarations
+separately from unique names with version changes, additions or removals. A name
+can occur in several workspaces; count it once per operation category. An
+unchanged row is never an upgrade; do not count a whole family as one name.
+
+## Check records and final inputs
+
+Each executed check has `check`, `kind`, `status`, `command`, observed `exitCode`,
+`startedAt`, `finishedAt` (ISO8601 with timezone), `log`, and `inputs`.
+
+- `kind=install` binds hashes for manifests, lockfile and environment. Record
+  `installMode=clean|frozen|incremental` from the actual command; only clean or
+  frozen installation can satisfy final-install acceptance.
+- `kind=checks|runtime|policy` also binds relevant source/config hashes.
+- Use the hashing method and covered paths recorded in preflight; exclude
+  generated files and node_modules from source identity. Unknown hashes stay
+  null and cannot support a final-state PASS claim.
+- A policy check additionally has `scopeComplete=true` only when the whole
+  intended final installed scope and requested criterion were actually checked.
+- Retain attempts in the record. A historical PASSED remains historically true
+  after an input change, but it does not satisfy final acceptance. The latest
+  executed attempt for an accepted check determines its current result.
+- `results.install/checks/runtime/policy` are independent. A successful build or
+  unit suite cannot supply runtime or policy evidence. Missing criteria remain
+  `NOT_VERIFIED`, `NOT_RUN` or `NOT_AVAILABLE` as applicable.
+
+Record baseline and final source/manifest/lock identities, actual installed
+versions, diff path, workspace coverage, exclusions, skipped/blocked packages,
+warning attribution and remaining unknowns. Do not fill a missing log, timestamp,
+exit code or duration from memory, a neighboring run, or a copied result.
+
+## Timing, usage and isolation
+
+Use first user message to original final response for session wall time; show
+instrumented command bounds separately. Preserve confirmed operator waits and
+infrastructure intervals, using interval unions when they overlap. Unknown gaps
+remain unknown; a long tool wall time is not proof of slow MCP/server work.
+
+Keep unique message token counters once, with input/output/reasoning/cache-read/
+cache-write separate. Do not add overlapping counters or convert a proxy zero
+cost to a monetary claim. Retain the original cutoff and separate later repairs.
+In blinded evaluation, use only the assigned slot and frozen shared inputs;
+reading another arm's versions, reports or metrics breaks that isolation.
+
+## User-facing summary
+
+State what changed and why, including planner/manual target origin and remaining
+work. Show separate install, project-check, runtime and policy results, the
+important failures/limitations, and where the diff/evidence live. Report source,
+installed and actually loaded Skill identity separately. A completed session is
+not by itself a verified migration or a proven policy improvement.
