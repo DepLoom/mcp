@@ -35,7 +35,7 @@ def release_manifest(root: Path) -> dict:
     files: dict[str, str] = {}
     for relative in git(core, "ls-files").splitlines():
         path = Path(relative)
-        selected = ((len(path.parts) == 1 and (path.suffix == ".py" or relative.endswith(".schema.json") or relative == "VERSION"))
+        selected = ((len(path.parts) == 1 and relative != "setup.py" and (path.suffix == ".py" or relative.endswith(".schema.json") or relative == "VERSION"))
                     or (path.parts[0] == "document_locales" and path.suffix == ".json"))
         if selected:
             source = core / relative
@@ -49,7 +49,7 @@ def release_manifest(root: Path) -> dict:
         "schemaVersion": 1,
         "mcpVersion": project["version"],
         "blueprintSchemaVersion": 2,
-        "core": {"repository": "https://github.com/AlexanderLevenskikh/deploom", "revision": revision,
+        "core": {"repository": "https://github.com/DepLoom/core", "revision": revision,
                  "version": (core / "VERSION").read_text(encoding="utf-8").strip(),
                  "contentSha256": inventory_digest(files), "files": files},
         "schemaSha256": digest((root / "contracts" / "upgrade-blueprint.schema.json").read_bytes()),

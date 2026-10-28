@@ -1,7 +1,7 @@
 {
   "blueprintSchemaVersion": 2,
   "core": {
-    "contentSha256": "ba5cee5db10228f34d9835852e1eaebf9dcd1447fe8c9895a365d56452308f39",
+    "contentSha256": "a516ac31c5129e49566c17e0be56310577fb9bb93320fb215389dd8820a4f887",
     "files": {
       "VERSION": "2698c63efcc74d9adc7a29889fc4ecc7fadfb58c4588db3f117f9d87cfaaff40",
       "analyze_verification_telemetry.py": "1ee235ef0b9cf275fe34c22cf16cb4049e88fb19953096ddaecbb73d7a700e6f",
@@ -56,7 +56,7 @@
       "document_locales/en.json": "13ad71aa6c1b9363a4868788c021ee3680158034803ee93bd55ebe3dd7ca0d34",
       "document_locales/ru.json": "138961b2f15433700cf2d99a35a05faba8c69c797d50c2353852d3e38eae5385",
       "draft_decision_contract.py": "a5f5698f072d5eee2f8b3e5773c5f87ed49e13350af89cafeb4293d034133c03",
-      "draft_input_identity.py": "29c42ae3541df914494044365638a688b016deacc36f758a354b28affc0d9968",
+      "draft_input_identity.py": "c97d065dc75f99d3d19d7d04cad1dce58e4a4d5b06b8488bc0eff645e228c5f1",
       "frontend_source_policy.py": "3f4976857ffba83462518b23b4c09f8bd03a3037f5d1421a067632e56c158f5a",
       "git_hook_policy.py": "8c03535c58151cf98d14088a8775636d496cbb02dda9c6bad432c51511a98710",
       "git_identity.py": "574990a240d64a95c36b6d8bdba1a31d1910806884d69f8b390a9ddf6d9bb25a",
@@ -94,7 +94,7 @@
       "package_manager_profile.py": "17c0aa5f01cd6d73b5bfee2c468fd36b42696b09e2f1c2d54c54f34a75e74efe",
       "package_manager_telemetry.py": "03dcb08777e3865113e91fdc04058b6298cc2ca165ff1516652e31d989740ec5",
       "peer_solver_model.py": "4b42a838cf4c30de72550a3789a47ca4d078b336e91a0ab8b9076e18942c917c",
-      "peer_solver_transition.py": "e607599213282411ad8e0f0a9977ef0afb14e1368ad66e42e6fa50f49f28e881",
+      "peer_solver_transition.py": "4dbfd4bf79810daeb556695a6d63b2148de803d4203a04541bb102d0575639e4",
       "peer_solver_z3.py": "ff01bb3daaf7f220025b9469001385bdb77516cc4b0ce3cea1d6620d30e60495",
       "planning_cache.py": "5b54a50d425ad82c1563a9b7f22f529dcbeee9c423d4092c637061b5fc144cd3",
       "prepared_workspace_fastpath.py": "906ac8374894b08ed4d0043fd69e5621cde5ee8ded2562b639dae33130720f8e",
@@ -137,8 +137,8 @@
       "workspace_noise.py": "0ed76379a5308cb8a5b053ed92293fdf4bd255c7799c6e77a644db8bac3af27a",
       "yarn_berry.py": "bd769e797823ff99129983f8295a52b5aac1f01f9be2c2a8eac9ffeaf20903d2"
     },
-    "repository": "https://github.com/AlexanderLevenskikh/deploom",
-    "revision": "b7f13c401e0e77906307eb2f7bd4dc61c57e2068",
+    "repository": "https://github.com/DepLoom/core",
+    "revision": "63674001ca56455f3d96d66d50c198f712400609",
     "version": "1.0.0-preview.20"
   },
   "mcpVersion": "0.2.0",
