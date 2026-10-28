@@ -2,8 +2,9 @@
 
 Headless upgrade-planning boundary and MCP server for the DepLoom ecosystem.
 
-DepLoom MCP exposes the Python planning Core through one tool,
-`get_upgrade_plan`. The Core is maintained in [`DepLoom/core`](https://github.com/DepLoom/core) and
+DepLoom MCP exposes the Python planning Core through `get_upgrade_plan`,
+and two read-only evidence-bound follow-up tools: `evaluate_assignment` and
+`explain_conflict`. They do not execute or re-solve a migration. The Core is maintained in [`DepLoom/core`](https://github.com/DepLoom/core) and
 pinned here as `upstream/deploom`; built wheels include that exact headless Core,
 the schema and the canonical Skill. Desktop and Electron are not required.
 
@@ -133,7 +134,28 @@ package checks. No Desktop installation is required.
 # .venv/bin/python -m deploom_mcp             # Linux/macOS
 ```
 
-List of published tools: exactly one — `get_upgrade_plan`.
+The default MCP server exposes **three tools**: `get_upgrade_plan`,
+`evaluate_assignment` and `explain_conflict`. The opt-in
+`python -m deploom_mcp.audit_server` adds `audit_dependencies` as a fourth.
+
+### Decision follow-up tools
+
+Use the full Blueprint path returned by
+`get_upgrade_plan.artifacts.blueprint` and optionally its
+`identities.decisionDigest` for a strict identity check.
+
+`evaluate_assignment` compares package names (or precise `declarationId`
+keys) to exact candidate versions. It detects out-of-scope changes,
+nonapproved major lines, pinned replan requirements and changed local files.
+An alternative target does **not** inherit original Z3, security or target
+policy evidence: the tool reports `UNKNOWN` rather than pretending to have
+re-solved the assignment. It is a constraint/authority **triage**, not an
+independent peer solver. `explain_conflict` retrieves typed original
+blockers/reviews with evidence pointers, project scope and next actions.
+
+[Complete decision follow-up contract](docs/DECISION_FOLLOWUPS.md).
+
+### `get_upgrade_plan` (contract)
 
 ### `get_upgrade_plan` (contract)
 

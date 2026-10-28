@@ -9,8 +9,8 @@ Run the audit-enabled server with the same interpreter/environment as MCP:
 python -m deploom_mcp.audit_server
 ```
 
-It exposes `get_upgrade_plan` **and** `audit_dependencies`. The ordinary
-`python -m deploom_mcp` remains planning-only. Do not change the executable,
+It exposes `get_upgrade_plan`, `evaluate_assignment`, `explain_conflict` and `audit_dependencies`. The ordinary
+`python -m deploom_mcp` remains planning/decision-evidence-only (no native package audit). Do not change the executable,
 tool list or commit midway through the frozen experiment.
 
 ## Request

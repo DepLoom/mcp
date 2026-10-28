@@ -1,4 +1,4 @@
-"""DepLoom MCP server: exposes `get_upgrade_plan` over MCP stdio.
+"""DepLoom MCP server: planning plus read-only decision evidence follow-ups.
 
 Stage 2 boundary, built on the official MCP SDK (`MCPServer`). It does NOT
 reimplement or extend planning: it wraps the Stage 1/Stage B edge boundary
@@ -49,7 +49,7 @@ from urllib.parse import urlparse
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.context import Context
-from mcp_types import CallToolResult, TextContent
+from mcp_types import CallToolResult, TextContent, ToolAnnotations
 
 from deploom_mcp import __version__
 from deploom_mcp.blueprint import (
@@ -64,6 +64,7 @@ from deploom_mcp.decisions import (
     MAX_DRAFT_CANDIDATES, OBJECTIVES, decision_evidence, normalize_decision_contract,
 )
 from deploom_mcp.target_assessment import target_assessment, target_decision_evidence
+from deploom_mcp.decision_followups import evaluate_assignment, explain_conflict
 
 SERVER_NAME = "deploom-mcp"
 TOOL_NAME = "get_upgrade_plan"
@@ -804,6 +805,64 @@ async def get_upgrade_plan_tool(
         str(req["purl"]), policy=req["policy"], options=req["options"]
     )
     return _result(_result_from_planning(result, req["policy"]))
+
+
+
+@server.tool(
+    name="evaluate_assignment",
+    title="Evaluate alternative dependency assignment",
+    description=(
+        "Inspect an exact-version candidate assignment against a previously "
+        "published full Upgrade Blueprint. Checks recorded decision authority, "
+        "mutable/excluded declarations, approved major lines, source drift, "
+        "known plan blockers, and whether pinned targets require replanning. "
+        "Keys may be package names or declarationIds; unspecified rows keep the "
+        "published selected/current version. This is NOT a fresh Z3 solver, "
+        "peer registry check, installed-tree audit or security/policy certification. "
+        "An alternative remains UNKNOWN until independently verified. "
+        "Pass the absolute path from get_upgrade_plan.artifacts.blueprint."
+    ),
+    annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False),
+)
+async def evaluate_assignment_tool(
+    blueprint_path: str,
+    assignment: Dict[str, str],
+    expected_decision_digest: Optional[str] = None,
+) -> CallToolResult:
+    return _result(evaluate_assignment(
+        blueprint_path=blueprint_path,
+        assignment=assignment,
+        expected_decision_digest=expected_decision_digest,
+    ))
+
+
+@server.tool(
+    name="explain_conflict",
+    title="Explain a published dependency constraint",
+    description=(
+        "Explain a known conflict, blocked target or missing evidence in a "
+        "full published Upgrade Blueprint. Optionally filter by package; "
+        "returns typed original reason, lifecycle, package/project scope, "
+        "JSON evidence pointer, next action and recorded solver components. "
+        "Does not reconstruct the solver model, invent an alternative, "
+        "replan, install or verify runtime/security. No documented conflict "
+        "does not imply compatibility. Pass the absolute path from "
+        "get_upgrade_plan.artifacts.blueprint."
+    ),
+    annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False),
+)
+async def explain_conflict_tool(
+    blueprint_path: str,
+    package: Optional[str] = None,
+    expected_decision_digest: Optional[str] = None,
+    max_items: int = 20,
+) -> CallToolResult:
+    return _result(explain_conflict(
+        blueprint_path=blueprint_path,
+        package=package,
+        expected_decision_digest=expected_decision_digest,
+        max_items=max_items,
+    ))
 
 
 def _result(payload: Dict[str, Any]) -> CallToolResult:
