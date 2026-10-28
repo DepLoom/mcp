@@ -68,7 +68,7 @@ class FollowupContractTests(unittest.TestCase):
             policy=BlueprintPolicy(), artifacts={}, blueprint_path=str(self.blueprint_file),
         )
         self.bp["policy"]["decisionContract"] = {
-            "targetMode": "advisory", "objective": "latest-compatible-in-approved-lines",
+            "version": 1, "targetMode": "advisory", "objective": "latest-compatible-in-approved-lines",
             "mutablePackages": ["router", "adapter"],
             "approvedVersionLines": {"router": [1, 2], "adapter": [1]},
         }
@@ -123,6 +123,14 @@ class FollowupContractTests(unittest.TestCase):
         self.assertEqual("REVIEW_REQUIRED", result["verdict"], result)
         self.assertIn("ALTERNATIVE_PEER_SECURITY_POLICY_NOT_RECHECKED", {x["code"] for x in result["checks"]})
         self.assertEqual("VERIFY_ALTERNATIVE_PEERS_SECURITY_POLICY_AND_RUNTIME", result["nextAction"])
+
+
+    def test_published_target_does_not_override_declared_hard_scope(self):
+        self.bp["policy"]["decisionContract"]["approvedVersionLines"] = {"router": [1], "adapter": [1]}
+        self.publish()
+        result = self.evaluate({})
+        self.assertEqual("BLOCKED_BY_KNOWN_CONSTRAINTS", result["verdict"], result)
+        self.assertIn("MAJOR_LINE_NOT_APPROVED", {x["code"] for x in result["checks"]})
 
     def test_pinned_alternative_requires_replan(self):
         self.bp["policy"]["decisionContract"]["targetMode"] = "pinned"

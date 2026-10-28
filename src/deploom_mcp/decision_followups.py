@@ -215,10 +215,10 @@ def evaluate_assignment(*, blueprint_path: str, assignment: dict[str, str],
             selected.append({"declarationId": identity, "package": name,
                              "current": current, "publishedTarget": baseline,
                              "candidate": selected_version})
-            if selected_version == baseline:
-                continue
-            changes += 1
-            if name in excludes or row.get("status") == "EXCLUDED":
+            # Inspect contractual hard boundaries even when the candidate
+            # matches a published target: an inconsistent source plan should
+            # not be blindly accepted as authorized.
+            if selected_version != current and (name in excludes or row.get("status") == "EXCLUDED"):
                 checks.append({"code": "EXCLUDED_PACKAGE_CHANGED", "severity": "BLOCKER",
                                "declarationId": identity, "package": name})
                 hard = True
@@ -239,6 +239,9 @@ def evaluate_assignment(*, blueprint_path: str, assignment: dict[str, str],
             elif allowed is None and contract["objective"] == "latest-compatible-in-approved-lines":
                 checks.append({"code": "MAJOR_AUTHORITY_UNKNOWN", "severity": "REVIEW",
                                "declarationId": identity, "package": name})
+            if selected_version == baseline:
+                continue
+            changes += 1
             if contract["targetMode"] == "pinned":
                 replan = True
                 checks.append({"code": "PINNED_TARGET_CHANGE_REQUIRES_REPLAN", "severity": "REVIEW",
