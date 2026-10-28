@@ -138,7 +138,7 @@
       "yarn_berry.py": "bd769e797823ff99129983f8295a52b5aac1f01f9be2c2a8eac9ffeaf20903d2"
     },
     "repository": "https://github.com/DepLoom/core",
-    "revision": "63674001ca56455f3d96d66d50c198f712400609",
+    "revision": "ba35b37c311fba13937ad4b2f46f760d57d9ab11",
     "version": "1.0.0-preview.20"
   },
   "mcpVersion": "0.2.0",
