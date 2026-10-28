@@ -64,6 +64,7 @@ from deploom_mcp.decisions import (
     MAX_DRAFT_CANDIDATES, OBJECTIVES, decision_evidence, normalize_decision_contract,
 )
 from deploom_mcp.target_assessment import target_assessment, target_decision_evidence
+from deploom_mcp.proxy_settings import ProxySettingError, resolve_system_proxy
 from deploom_mcp.decision_followups import evaluate_assignment, explain_conflict
 
 SERVER_NAME = "deploom-mcp"
@@ -146,8 +147,13 @@ def _build_request(
     approved_version_lines: Optional[Dict[str, List[int]]] = None,
     draft_max_candidates: int = 3,
     previous_evidence_digest: Optional[str] = None,
+    use_system_proxy: Optional[bool] = None,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Validate every input (fail-closed) and build the planner request."""
+    try:
+        effective_proxy, proxy_source = resolve_system_proxy(use_system_proxy)
+    except ProxySettingError as exc:
+        return _error("invalid-system-proxy", str(exc)), None
     if not project_path or not isinstance(project_path, str):
         return _error("invalid-args", "project_path must be a non-empty string"), None
     purl = Path(project_path).expanduser().resolve()
@@ -250,6 +256,7 @@ def _build_request(
     options = BlueprintOptions(
         registry=registry,
         include_prerelease=include_prerelease,
+        use_system_proxy=effective_proxy,
         draft_deadline_seconds=deadline,
         draft_max_candidates=draft_max_candidates,
         previous_evidence_digest=previous_evidence_digest,
@@ -268,7 +275,8 @@ def _build_request(
         exclusions=tuple(exclusions),
         intent=contract,
     )
-    return None, {"purl": purl, "options": options, "policy": policy}
+    return None, {"purl": purl, "options": options, "policy": policy,
+                  "systemProxySource": proxy_source}
 
 
 def _policy_snapshot(requested: BlueprintPolicy) -> Dict[str, Any]:
@@ -706,6 +714,7 @@ def get_upgrade_plan(
     deadline_seconds: float = DEFAULT_DEADLINE_SECONDS,
     include_prerelease: bool = False,
     registry: Optional[str] = None,
+    use_system_proxy: Optional[bool] = None,
     registry_metadata_ttl: float = 3600.0,
     output_dir: Optional[str] = None,
     exclude: Optional[List[str]] = None,
@@ -726,6 +735,7 @@ def get_upgrade_plan(
         deadline_seconds=deadline_seconds,
         include_prerelease=include_prerelease,
         registry=registry,
+        use_system_proxy=use_system_proxy,
         registry_metadata_ttl=registry_metadata_ttl,
         output_dir=output_dir,
         exclude=exclude,
@@ -768,6 +778,7 @@ async def get_upgrade_plan_tool(
     deadline_seconds: float = DEFAULT_DEADLINE_SECONDS,
     include_prerelease: bool = False,
     registry: Optional[str] = None,
+    use_system_proxy: Optional[bool] = None,
     registry_metadata_ttl: float = 3600.0,
     output_dir: Optional[str] = None,
     exclude: Optional[List[str]] = None,
@@ -786,6 +797,7 @@ async def get_upgrade_plan_tool(
         deadline_seconds=deadline_seconds,
         include_prerelease=include_prerelease,
         registry=registry,
+        use_system_proxy=use_system_proxy,
         registry_metadata_ttl=registry_metadata_ttl,
         output_dir=output_dir,
         exclude=exclude,

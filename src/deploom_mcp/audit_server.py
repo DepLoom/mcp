@@ -37,10 +37,12 @@ async def audit_dependencies_tool(
     include_lag: bool = False,
     lag_months: int = 12,
     output_dir: str | None = None,
+    use_system_proxy: bool | None = None,
 ) -> CallToolResult:
     payload = await audit_dependencies(project_path=project_path, package_manager=package_manager,
         registry=registry, deadline_seconds=deadline_seconds, include_lag=include_lag,
-        lag_months=lag_months, output_dir=output_dir)
+        lag_months=lag_months, output_dir=output_dir,
+        use_system_proxy=use_system_proxy)
     return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload, ensure_ascii=False))],
                           structuredContent=payload, isError=not payload.get("ok", False))
 
