@@ -176,7 +176,7 @@ class DecisionEvidenceTests(unittest.TestCase):
 class WorkspaceCoverageTests(unittest.TestCase):
     def test_root_and_child_never_claim_joint_plan(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             child = root / "packages" / "app"
             child.mkdir(parents=True)
             (root / "package.json").write_text(json.dumps({"workspaces": ["packages/*"]}))
@@ -191,7 +191,7 @@ class WorkspaceCoverageTests(unittest.TestCase):
 
     def test_discovery_limit_is_unknown_coverage_not_success(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             (root / "package.json").write_text(json.dumps({"workspaces": ["packages/*"]}))
             (root / "packages" / "app").mkdir(parents=True)
             coverage = workspace_coverage(root, max_directories=1)
@@ -200,7 +200,7 @@ class WorkspaceCoverageTests(unittest.TestCase):
 
     def test_unreadable_manifest_is_unknown_coverage(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             (root / "package.json").write_text("not json")
             coverage = workspace_coverage(root)
             self.assertFalse(coverage["discoveryComplete"])
@@ -209,7 +209,7 @@ class WorkspaceCoverageTests(unittest.TestCase):
 
     def test_unreadable_workspace_subtree_is_unknown_coverage(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             child = root / "packages" / "app"
             child.mkdir(parents=True)
             (root / "package.json").write_text(json.dumps({"workspaces": ["packages/*"]}))

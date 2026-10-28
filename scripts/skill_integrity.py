@@ -28,7 +28,9 @@ def canonical_files(root: Path, *, include_manifest: bool = False) -> list[Path]
     if not root.is_dir() or root.is_symlink():
         raise ValueError(f"Skill source must be a real directory: {root}")
     result = []
-    for path in sorted(root.rglob("*")):
+    # Path ordering is case-insensitive on Windows. The serialized manifest
+    # must use the same portable relative-name order on every platform.
+    for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
         relative = path.relative_to(root)
         if "__pycache__" in relative.parts or path.suffix == ".pyc":
             continue
