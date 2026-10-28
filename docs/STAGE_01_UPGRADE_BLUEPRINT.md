@@ -8,7 +8,11 @@
 > (бывш. `tests/test_upgrade_blueprint_headless.py`),
 > `benchmarks/measure_blueprint.py` (бывш.
 > `scripts/measure_upgrade_blueprint.py`). Ядро планирования подключено как
-> submodule `upstream/deploom` (пин `9e20107`). Старый репозиторий не изменён.
+> submodule `upstream/deploom` (исторический пин этой записи: `9e20107`).
+> Текущую поставку определяет `release-manifest.json`; wheel включает headless
+> Core без Desktop. Числа и номера строк ниже — исторический Stage 1, не новый
+> замер. Актуальные дополнительные поля и ограничения MCP 0.2 описаны в
+> [`DECISION_CONTRACT.md`](DECISION_CONTRACT.md).
 
 Роль документа: техническая основа Stage 2 (MCP-инструмент, OpenCode Skill,
 порт Autopilot). Здесь зафиксированы факты о том, как планирование зависимостей
@@ -145,9 +149,10 @@ python upgrade_blueprint.py --project C:\path\to\proj \
 `peer-compat-unresolved→PEER_UNRESOLVED`.
 
 `needsReview=true` для: CANDIDATE_SEARCH_TRUNCATED, BLOCKED, NO_TARGET,
-UNKNOWN_SECURITY, UNKNOWN_METADATA, PEER_UNRESOLVED. PROPOSED остаётся
-действий-подсказкой, даже если в его evidence есть caveat (truncation) — но
-только как планирование.
+UNKNOWN_SECURITY, UNKNOWN_METADATA, PEER_UNRESOLVED. В MCP 0.2 review также
+сохраняется для evidence flags, breaking changes, migration notes и типизированных
+причин, даже если строка остаётся `PROPOSED`. Review выполняется в рамках уже
+полученных полномочий; сам флаг не требует повторного согласования каждого шага.
 
 Рекомендательные группы (`recommendationGroups`): группировка по `group`
 планировщика (display priority), `kind=display-priority`,
@@ -182,8 +187,11 @@ HTTP-deadlock (~0.75 c/пакет), а не в кэш. Числа честно �
 - **Deadline-бюджет — главный регулятор стоимости**: `--draft-deadline-seconds`
   превращает долгий прогон в `DRAFT_PARTIAL` за ~deadline (14.7 s вместо 31+ s при
   недоступном реестре). Для агентских вызовов рекомендуем 15–30 s.
-- Воспроизводимость: два одинаковых прогона дают один и тот же `hashes.plan`
-  (SHA-256 plan.json) и одинаковый набор вердиктов (проверяется тестом).
+- Историческая проверка повторяемости: два прогона дали одинаковый `hashes.plan`
+  (SHA-256 plan.json) и набор вердиктов в этом fixture. Это не доказательство
+  общего детерминизма. MCP 0.2 отдельно публикует semantic input, policy,
+  published-evidence и decision digests; замороженный registry/OSV replay
+  по-прежнему не реализован.
 
 ## F. Тесты и верификация
 

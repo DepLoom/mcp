@@ -1,151 +1,136 @@
 ---
 name: deploom-upgrade
-description: Plan and safely execute JavaScript and TypeScript dependency upgrades using the DepLoom MCP get_upgrade_plan tool, isolated Git worktrees, exclusions and evidence-based verification. Use when the user asks to upgrade/update project dependencies, proposes an upgrade to a target level (yellow/green), says "don't touch <package>" / exclusions, or wants the build/tests verified after updating packages.
-metadata:
-  version: "1.0.0"
-  source: "https://github.com/DepLoom/mcp/tree/main/skills/deploom-upgrade"
-  languages: "javascript, typescript"
+description: Plan and execute JavaScript and TypeScript dependency upgrades with DepLoom MCP, explicit version objectives and scope, workspace constraint evidence, and verification of the changed project. Use for dependency upgrade plans, yellow/green targets, package exclusions, or requests to apply upgrades and check their results.
 ---
 
 # deploom-upgrade
 
-Plan and (on request) safely apply dependency upgrades for a Node.js /
-JavaScript / TypeScript project using the **DepLoom MCP** planning boundary,
-then verify the result with real checks and produce an evidence report.
+**Contract version: 2.0.0.** Canonical file hashes are in `contract.json`.
 
-The Skill is a **workflow and safety contract**, not a dependency solver.
-Planning verdicts come exclusively from `get_upgrade_plan` (pinned DepLoom Core).
-Execution and verification use the coding client's own tools (file edits, git,
-shell). It works the same in OpenCode, Claude Code and Codex.
+Use `get_upgrade_plan` for planning evidence. Use the coding client's tools for
+authorized edits and verification. A blueprint is `PLANNING_ONLY` and
+`NOT_VERIFIED`; its targets are proposals, not proof of installation, runtime
+compatibility, or policy attainment. An agent-selected alternative never becomes
+a Core verdict. This workflow is client-neutral.
 
-## When to use
+## Establish the task contract
 
-Trigger when the user asks to:
+Record these separately before planning. Reuse the user's existing instructions
+and decisions; ask only when a material choice is unresolved.
 
-- "upgrade / update dependencies", "bring the project to yellow (or green)",
-  "raise target level";
-- "look at what can be upgraded but don't touch `<pkg>`" (plan-only);
-- "upgrade and verify the build/tests" (execute mode).
+- **Action:** `PLAN_ONLY` for analysis; `EXECUTE` when the user asks for changes.
+  An analysis request does not authorize edits.
+- **Objective:** `minimum-change-to-policy` or
+  `latest-compatible-in-approved-lines`. A yellow/green health target does not
+  by itself specify the newest acceptable version. State the interpretation.
+- **Target authority:** `pinned` keeps the agreed targets; `advisory` permits
+  justified alternatives inside the authorized scope and version lines. Use
+  `pinned` when targets or a reproducible target set were explicitly specified.
+  If choosing versions is delegated, use `advisory` and record that authority.
+  MCP's default is `pinned`; send the intended mode explicitly.
+- **Scope:** mutable package names, allowed companion/code/config changes,
+  approved version lines, exclusions, workspace coverage, and required checks.
+  Full-project scope has no invented file-count limit. A necessary compatibility
+  repair in an untouched file is still part of the migration when authorized.
+- **Authority:** cite the user instruction covering execution, alternatives,
+  scope expansion, and checks. `needsReview` requests a decision; an existing
+  decision can satisfy it. The Skill cannot grant permission or override a
+  denied client permission.
 
-Do **not** use for dependency *audits* that do not ask for an upgrade plan, or
-for a project without a `package.json` manifest.
-
-## Prerequisites
-
-- The DepLoom MCP server is reachable and exposes the single tool
-  `get_upgrade_plan` (STDIO local server; see the client-specific integration
-  instructions in `integrations/<client>/README.md` of the DepLoom/mcp repo).
-- If `get_upgrade_plan` is **not** available, STOP: report `BLOCKED` and tell
-  the user how to enable it. Never substitute your own dependency-resolution
-  logic for the planner.
-
-## Mode selection (mandatory)
-
-Classify the user intent **before** any action:
-
-- `PLAN_ONLY` — "look at / propose / what can be upgraded", or analysis with no
-  instruction to apply anything. Produce a blueprint analysis, change nothing.
-- `EXECUTE` — "upgrade / apply / update and verify", an explicit instruction to
-  change the project. Run the full controlled-execution workflow.
-
-Rules:
-
-- A plan-only request must **never** silently become execution.
-- An execute request must pass every safety gate before any change.
-- If intent is ambiguous, ask the user and default to `PLAN_ONLY`.
+Keep four kinds of information distinct: hard compatibility constraints,
+user requirements, planner recommendations, and evidence/search limitations.
+Advisory mode changes recommendations, never proven peers/engines or user pins.
 
 ## Workflow
 
-Follow the steps below in order. Each step has a detailed reference
-(`references/*.md`) — load it when you need the specifics, don't keep the
-whole contract in context.
+1. **Preflight.** Record baseline and existing changes, package manager, Node,
+   registry, all manifests/workspaces, allowed checkout and check scripts.
+   Reuse an isolated worktree already supplied by the user. Load
+   `references/preflight.md` for details. Missing MCP is an infrastructure
+   limitation; do not fabricate a DepLoom plan.
+2. **Plan.** Send the objective, `target_mode`, scope and registry explicitly.
+   Inspect critical evidence before questions or edits: conflicts, unknowns,
+   unresolved peers, coverage, source/policy identity, and next action. Read
+   `references/blueprint-contract.md`. **Untruncated rows do not mean complete
+   decision evidence.** Open the full artifact when critical evidence is absent,
+   ambiguous or marked incomplete, even if `truncation.truncated=false`.
+   In `PLAN_ONLY`, treat Core execution instructions as future guidance; do not
+   create execution files or perform migration steps.
+3. **Reconcile.** A root-only plan is not a whole-workspace verdict. Reconcile
+   shared assignments and affected child constraints before applying them.
+   Do not execute a root proposal against a known child blocker. Do not invent
+   global incompatibility from a peer absent only in a child manifest.
+4. **Decide.** Write one short decision record per change or unresolved target:
+   original verdict, evidence, chosen target, origin (`planner`/`manual`),
+   authority, and verification required. Use the template in
+   `references/evidence-report.md`. Resolve known blockers before asking the
+   user to approve an option. `POLICY_SATISFIED` is not `ALREADY_AT_LATEST`.
+5. **Apply when authorized.** Follow `references/execution-policy.md` in the
+   agreed checkout. In pinned mode, re-plan or obtain an explicit revised
+   target decision before deviating. In advisory mode, validate and record an
+   alternative within existing authority. Keep exclusions and known constraints.
+6. **Verify the final state.** Follow `references/verification-policy.md`.
+   Bind install evidence to the final manifests, lockfile and environment;
+   bind checks to their relevant source/config state. A later install, downgrade
+   or lockfile edit invalidates earlier clean-install evidence for the new state.
+   Test affected runtime behavior locally; build/unit success is not a substitute.
+7. **Report.** For `PLAN_ONLY`, give a concise decision and uncertainty summary;
+   no execution checklist or evidence file is required unless requested. For
+   `EXECUTE` or an explicit evaluation, use the acceptance record in
+   `references/evidence-report.md` and validate its JSON with
+   `python scripts/validate_evidence.py <report.json>` from the Skill directory.
+   Use it as an index of logs and applicable user/Core execution deliverables,
+   including required migration guides/reports; avoid duplicating their content.
+   Separate session completion, installation, project checks, runtime and policy;
+   preserve failed attempts. The helper checks consistency, not execution truth.
+   Do not commit, push, publish or remove the working copy without authorization.
 
-1. **Preflight** — git root/HEAD/branch, tree state, package manager & lockfile,
-   Node engines, manifests/workspaces, available check scripts, registry,
-   target level, exclusions, client file permissions, MCP availability, worktree
-   feasibility. If any safety condition cannot be established → `BLOCKED`.
-   See `references/preflight.md`.
-2. **Get upgrade blueprint** — call `get_upgrade_plan(project_path=…,
-   target_level=…, exclude=[…], …)`; read the compact response; open the full
-   blueprint artifact if `truncation` limited inline rows.
-   See `references/blueprint-contract.md`.
-3. **Safety gate** — validate planning authority, policy identity, source
-   identity, partial/conflict handling and the exclusions contract. A failed
-   gate → `BLOCKED` (report, never act). See
-   `references/preflight.md`, `references/blueprint-contract.md`.
-4. **Plan-only response** — for `PLAN_ONLY`: summarize what is proposed /
-   excluded / blocked / needs review, note the run id and artifact paths, change
-   nothing.
-5. **Controlled execution** — for `EXECUTE`: after the gate passes, create an
-   isolated Git worktree at the baseline, apply only the planner-approved rows,
-   keep exclusions intact, update the lockfile with the project's package
-   manager, and make only minimal, justified code repairs (≤ 3 attempts per root
-   cause). See `references/execution-policy.md`.
-6. **Verification** — run the project's real checks (install/lockfile,
-   typecheck, lint, build, tests) plus a policy audit and a diff audit; report
-   each result with the honest status vocabulary. See
-   `references/verification-policy.md`.
-7. **Evidence report** — emit the single client-neutral JSON evidence report and
-   a user-facing summary. Never auto-commit, -push, -merge, or -delete the
-   worktree. See `references/evidence-report.md`.
+## Recovery rules
 
-## Mandatory safety gates (never skip)
+- Stop affected execution for changed input/policy identity, hash mismatch,
+  denied permission, a hard conflict, or unreconciled workspace assignments.
+  Independent work may continue only if its constraints and authority are
+  established; do not turn one unknown row into a whole-project failure.
+- `DRAFT_PARTIAL` is not a complete plan. Change the limiting condition before
+  retrying. A larger deadline does not expand `draft_max_candidates`. Do not
+  repeat the same capped request without new evidence or a changed constraint.
+- For `UNKNOWN`, targetless or truncated rows, preserve that verdict. Check
+  configured registry metadata, candidate coverage and relevant peers/engines.
+  A stable same-line manual proposal is allowed in advisory mode when existing
+  user authority covers it. Otherwise present a concrete proposal for approval.
+  Never claim that fallback proves solver compatibility, security or Yellow.
+- Source/policy mismatch, unavailable MCP, broad registry failure, exclusions
+  and proven incompatibilities are not bypassed by this fallback.
+- Repair diagnosed compatibility issues with bounded, evidence-driven attempts
+  (default at most three per root cause unless the task specifies otherwise).
+  Do not disable checks, remove validation or invent an out-of-scope restriction
+  to get green. Explain alternatives when the repair budget is exhausted.
 
-- **Planning authority.** The blueprint remains
-  `verificationStatus=NOT_VERIFIED`, `authority=PLANNING_ONLY`,
-  `compatibility=UNKNOWN`, `parallelExecutionSafety=UNPROVEN` (the planner
-  never produces `CONSTRAINT_SATISFIED`/`MATERIALIZED`/`PROJECT_VERIFIED`).
-  `PROPOSED` means "this upgrade can be proposed", **not** "already updated".
-- **Policy identity.** Compare requested vs applied target level, exclusions,
-  `minLagOkPct`, `policyHash`. If the response carries a `policyDiscrepancy` —
-  STOP execution even when `ok=true`. Do not ignore it.
-- **Source identity.** Verify the project state the blueprint was built for
-  matches the checkout you are about to edit (`source.inputFiles`; treat
-  `source.inputHashes` as opaque Core fingerprints — do not invent your own
-  per-file hash). If inputs changed, re-plan before executing.
-- **Partial planning.** `draftStatus=DRAFT_PARTIAL` means the plan is
-  **not** complete: do not execute it as complete; re-plan (larger budget) or
-  STOP. Only `DRAFT_READY` plans may be executed.
-- **Conflicts & needsReview.** Rows with `needsReview`, breaking changes,
-  unknown dependencies, unresolved peers, missing metadata, or unproven safety
-  conditions require user confirmation before action. Never decide for the user.
-- **Exclusions.** Keep the exclusion set intact through the whole workflow.
-  Check the excluded packages in manifest and lockfile before and after — if the
-  plan would change them anyway, STOP. The planner guarantees only **direct**
-  dependencies, never transitive copies.
-- **No substitute execution.** If a gate cannot be proven, `BLOCKED`, not
-  worked around. Missing permissions in the coding client → `BLOCKED`, never
-  bypass the client's sandbox.
+## Delivery and evaluation integrity
 
-## Honesty rules
+Record the contract version and hash of the **actually loaded** Skill when the
+client exposes its text. Source hashes from MCP and the install receipt identify
+expected/on-disk files; neither proves what a running client loaded. Mark loaded
+identity `UNKNOWN` if it is unobservable. Evaluate a revised rule only after its
+loaded content is confirmed; preserve an active run's old identity and history.
+For a rule in a reference, record that reference's loaded hash as well; matching
+SKILL.md alone does not prove that the revised reference was consumed.
 
-- Verification results use the status vocabulary
-  `PASSED / FAILED / INCONCLUSIVE / NOT_RUN / NOT_AVAILABLE`. Never report
-  `PASSED` for a check that did not run, and never substitute DepLoom's
-  internal verdicts for real check results.
-- Report what was updated, excluded, blocked, unconfirmed, and where the
-  worktree and diff live. If a name (e.g. the client) is not known, don't invent it.
-- A successful plan is **not** a successful migration.
+In a blinded comparison, read only the assigned slot and shared frozen inputs.
+Do not inspect another arm's manifests, installed versions, reports or usage to
+fill gaps. Missing local evidence stays unknown. Keep retries and post-review
+repairs distinct from the original result.
 
 ## References
 
-Progressive disclosure — load on demand:
-
-- `references/blueprint-contract.md` — the `get_upgrade_plan` contract, compact
-  response keys, status vocabulary, error codes, artifact layout.
-- `references/preflight.md` — the 12 preflight checks and the `BLOCKED` rules.
-- `references/execution-policy.md` — worktree isolation, source-identity proof,
-  dependency application, exclusions enforcement, bounded code repair.
-- `references/verification-policy.md` — check pipeline, honest statuses,
-  baseline-vs-regression, safe install for untrusted projects.
-- `references/evidence-report.md` — the single evidence JSON format and the
-  mandatory user-facing report.
-
-## Examples
-
-- `examples/plan-only.md` — "look at what can be upgraded, don't touch React"
-  (no writes).
-- `examples/yellow-exclude-react.md` — full execute flow with worktree, install,
-  build/test and evidence report.
-- `examples/blocked-upgrade.md` — `DRAFT_PARTIAL` / `policyDiscrepancy` stopped
-  cleanly with a re-plan path.
+- `references/blueprint-contract.md` — requests, compact completeness, workspace
+  coverage, pinned/advisory semantics and targeted recovery.
+- `references/preflight.md` — baseline, scope, authority and checkout selection.
+- `references/execution-policy.md` — decision records, alternatives, application
+  and bounded compatibility repair.
+- `references/verification-policy.md` — final-state install evidence, targeted
+  runtime checks, warning attribution and honest statuses.
+- `references/evidence-report.md` — minimal acceptance record and JSON format.
+- `examples/plan-only.md` — an advisory plan without edits.
+- `examples/yellow-exclude-react.md` — execution with a protected package.
+- `examples/blocked-upgrade.md` — hard blocker, capped search and manual fallback.

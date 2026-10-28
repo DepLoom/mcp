@@ -2,14 +2,13 @@
 
 Headless upgrade-planning boundary and MCP server for the DepLoom ecosystem.
 
-**Difference from DepLoom Desktop.** DepLoom Desktop (`AlexanderLevenskikh/deploom`)
-is the stable product: it owns the Python Core, the solver, Draft generation,
-the Electron Desktop, FLOW/Autopilot and the migration/checkpoint machinery.
-This repository (`DepLoom/mcp`) does **not** fork that logic. It depends on a
-**pinned** commit of the upstream Core (Git submodule `upstream/deploom`) and
-exposes a single, planning-only tool: `get_upgrade_plan`.
+DepLoom MCP exposes the Python planning Core through one tool,
+`get_upgrade_plan`. The Core is maintained in `AlexanderLevenskikh/deploom` and
+pinned here as `upstream/deploom`; built wheels include that exact headless Core,
+the schema and the canonical Skill. Desktop and Electron are not required.
 
-**What MCP does** — produce a correct, structured upgrade plan for a project.
+**What MCP does** — produce a structured dependency proposal with explicit
+objective, target authority, scope coverage, reasons and unresolved evidence.
 
 **What MCP does NOT do** — Autopilot, background migration jobs, agent
 dispatch, repair loops, REST, dashboards, GitLab/Renovate integration, or any
@@ -50,7 +49,7 @@ the universal agent skill in [`docs/STAGE_03_UNIVERSAL_SKILL.md`](docs/STAGE_03_
 ## Repository layout
 
 ```text
-upstream/deploom/          pinned planning core (Git submodule, commit 9e20107)
+upstream/deploom/          pinned planning core (Git submodule; see release-manifest.json)
 src/deploom_mcp/           Python package (blueprint adapter + MCP server)
 contracts/                 Upgrade Blueprint JSON Schema (v2)
 tests/                     unit, protocol and production-boundary tests
@@ -72,15 +71,16 @@ verification and a single evidence report. Install it with
 (byte-identical, idempotent, dry-run/verify supported):
 
 ```bash
-python scripts/install_skill.py --client opencode      # project scope by default
+python scripts/install_skill.py --client opencode --scope project --project /path/to/project
 python scripts/install_skill.py --client codex --scope user
 python scripts/install_skill.py --client claude-code --scope user --dry-run
 ```
 
-The skill is verified against opencode 1.17.14 (real E2E pilot, 12/12 checks:
-see [`docs/STAGE_03_UNIVERSAL_SKILL.md`](docs/STAGE_03_UNIVERSAL_SKILL.md));
-Claude Code and Codex paths are implemented and unit-tested but **NOT_VERIFIED**
-on this host (see the stage doc). The skill never edits
+The historical Stage 3 E2E pilot exercised the earlier Skill revision; it does
+not validate the current 2.0 contract. The current bundle has synthetic contract,
+evidence and installer checks. A new loaded-client or migration experiment is
+still required to evaluate agent behavior; see
+[`docs/STAGE_03_UNIVERSAL_SKILL.md`](docs/STAGE_03_UNIVERSAL_SKILL.md). The skill never edits
 `upstream/deploom`, never writes MCP configuration itself, and never commits,
 pushes or merges.
 
@@ -102,8 +102,10 @@ python -m venv .venv
 # .venv/bin/python -m pip install -e .        # Linux/macOS
 ```
 
-The pinned Core is fetched as a submodule; no files are copied from a desktop
-checkout and no Desktop installation is required.
+The source checkout fetches the pinned Core as a submodule. A built wheel is
+self-contained and also provides `deploom-install-skill`; see
+[`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) for build, install and isolated
+package checks. No Desktop installation is required.
 
 ## Running the MCP server (stdio)
 
@@ -126,7 +128,13 @@ List of published tools: exactly one — `get_upgrade_plan`.
   "registry": null,                          // optional npm registry; must be an http(s) URL
   "registry_metadata_ttl": 3600,             // packument TTL seconds for the shared cache
   "output_dir": null,                        // optional; MUST be outside the project
-  "exclude": null                            // optional [pkg, ...]; passed as --exclude-dependency pkg|reason
+  "exclude": null,                           // explicit health-scope exclusions
+  "target_mode": "pinned",                   // "pinned" | "advisory"
+  "objective": "minimum-change-to-policy",   // or "latest-compatible-in-approved-lines"
+  "mutable_packages": null,                 // null = all; [] = none; others remain constraints
+  "approved_version_lines": {},              // package -> allowed major numbers
+  "draft_max_candidates": 3,                 // evidence cap, separate from the deadline
+  "previous_evidence_digest": null           // diagnose unchanged published evidence
 }
 ```
 
@@ -173,8 +181,8 @@ alive (see [`docs/STAGE_02_MCP_SERVER.md`](docs/STAGE_02_MCP_SERVER.md)).
 
 The response is always `NOT_VERIFIED / PLANNING_ONLY / UNKNOWN / UNPROVEN`: a
 `PROPOSED` verdict means "this upgrade **can** be proposed", not "already
-updated", and dependencies flagged `needsReview` must be confirmed with the
-project owner first. Machine-readable errors use `{"ok": false, "error":
+updated", and `needsReview` requests evidence review within existing user authority.
+It does not require asking the owner again for an already authorized action. Machine-readable errors use `{"ok": false, "error":
 {code, message, ...}}`; see
 [`docs/STAGE_02_MCP_SERVER.md`](docs/STAGE_02_MCP_SERVER.md) for the full
 contract, error codes and partial-plan handling.
@@ -217,12 +225,13 @@ git add upstream/deploom
 git commit -m "chore(core): pin deploy core to <SHA>"
 ```
 
-Then re-run the full test suite. Do **not** edit files inside `upstream/deploom`.
+Then refresh `release-manifest.json` and re-run the full test and distribution
+checks in [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md). Do **not** edit files
+inside `upstream/deploom`.
 
 ## License / distribution
 
-This repository does **not** re-license the upstream Core. The upstream
-repository contains no LICENSE file, so its distribution terms are considered
-unresolved; no wheel or bundle that includes the Core is published. This
-repository itself adds no license until the ownership and upstream terms are
-resolved. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+This repository does not re-license the upstream Core or add an open-source
+license. The headless build can be validated locally; these changes do not
+publish a package to a registry or alter distribution terms. The repository
+owner must select the intended terms before a public package release.

@@ -37,7 +37,7 @@ This repository is the **headless planning boundary** of the DepLoom ecosystem.
    GitLab/Renovate integration, no agent dispatch. `get_upgrade_plan` never
    verifies.
 2. **Single pinned Core.** Planning = subprocess run of the pinned submodule
-   (`upstream/deploom @ 9e20107`); the MCP server and adapter never reimplement
+   (the `upstream/deploom` gitlink bound in `release-manifest.json`); the MCP server and adapter never reimplement
    solving. Updating the Core is an explicit, reviewable pin change.
 3. **Read-only on the project.** The project directory is only ever read; the
    test suite proves byte-for-byte immutability across a real run.
@@ -49,7 +49,7 @@ This repository is the **headless planning boundary** of the DepLoom ecosystem.
    the model context.
 6. **Honest statuses.** Every response is `NOT_VERIFIED / PLANNING_ONLY /
    UNKNOWN / UNPROVEN`; a `PROPOSED` verdict means "can be proposed", and
-   `needsReview` rows require owner confirmation. The reserved verified statuses
+   `needsReview` rows require evidence review under the existing user authorization. They do not create an additional blanket approval gate. The reserved verified statuses
    are never produced by the planning pipeline.
 
 ## Data flow of one tool call
@@ -66,3 +66,20 @@ This repository is the **headless planning boundary** of the DepLoom ecosystem.
 
 See `STAGE_01_UPGRADE_BLUEPRINT.md` for the boundary contract and
 `STAGE_02_MCP_SERVER.md` for the MCP server contract.
+
+## Versioned headless package
+
+The source gitlink remains the Core source of truth. Wheels include an explicit
+hash-bound inventory of its Python modules and required data, plus the schema
+and canonical Skill. Resource locators support both editable checkouts and
+installed packages without Desktop. See [DISTRIBUTION.md](DISTRIBUTION.md).
+
+The decision contract distinguishes `targetMode` from `objective`. Legacy
+callers default to pinned proposals and minimum change to health policy; an
+advisory request permits evidence-backed alternatives within user-approved
+bounds. This contract does not grant execution or verification authority.
+
+Workspace discovery and semantic input fingerprints are not a joint solver.
+A single-manifest plan reports unevaluated workspace manifests and requires
+reconciliation before workspace-wide application. Compact decision completeness
+is separate from row clipping and from compatibility or policy attainment.

@@ -93,6 +93,8 @@ class CanonicalSkillContractTests(unittest.TestCase):
         }
         expected = {
             "SKILL.md",
+            "contract.json",
+            "scripts/validate_evidence.py",
             *(f"references/{name}" for name in sorted(EXPECTED_REFERENCES)),
             *(f"examples/{name}" for name in sorted(EXPECTED_EXAMPLES)),
         }

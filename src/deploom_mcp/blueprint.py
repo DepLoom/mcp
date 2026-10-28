@@ -18,9 +18,9 @@ Guarantees this boundary provides:
   `compatibility=UNKNOWN` and `parallelExecutionSafety=UNPROVEN`. The
   reserved statuses CONSTRAINT_SATISFIED / MATERIALIZED / PROJECT_VERIFIED
   are declared in the schema but are never emitted by a planning-only run.
-* Determinism: same project state + same options reproduce the same plan
-  content; the plan and prompt SHA-256 hashes published by the planner are
-  carried into the blueprint as `hashes`.
+* Identity: byte hashes of published artifacts are retained. Semantic input,
+  decision and published-evidence hashes are separate; they do not promise
+  reproducibility while registry/OSV evidence or runtime changes.
 * Isolation: nothing is imported from the generator; the planner runs as a
   child OS process, so this module cannot mutate planner global state and
   planner failures degrade into machine-readable errors, not exceptions.
@@ -42,6 +42,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from deploom_mcp.process_runner import ProcessRun, run_process, run_process_async
+from deploom_mcp.decisions import (
+    MAX_DRAFT_CANDIDATES, enrich_decisions, normalize_decision_contract,
+    requires_contract_support, runtime_provenance, workspace_coverage,
+)
+from deploom_mcp.distribution import resolve_core_dir, blueprint_schema_path
 
 BLUEPRINT_SCHEMA_VERSION = 2
 KIND = "upgrade-blueprint"
@@ -101,7 +106,7 @@ def _default_core_dir() -> Path:
     """Standalone repository layout: the pinned planning core lives at
     ``<repo root>/upstream/deploom``, while this module lives at
     ``<repo root>/src/deploom_mcp/blueprint.py``."""
-    return Path(__file__).resolve().parents[2] / "upstream" / "deploom"
+    return resolve_core_dir()
 
 
 @dataclass(frozen=True)
@@ -138,6 +143,7 @@ class BlueprintOptions:
     core_dir: Optional[str] = None
     run_timeout_seconds: Optional[float] = None
     workspace_id: Optional[str] = None
+    previous_evidence_digest: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -337,7 +343,8 @@ def transcode_upgrade_blueprint(
         if value not in input_files_unique:
             input_files_unique.append(value)
 
-    return {
+    contract = normalize_decision_contract(manifest.get("decisionContract") or policy.intent)
+    blueprint = {
         "schemaVersion": BLUEPRINT_SCHEMA_VERSION,
         "kind": KIND,
         "generatedAt": manifest.get("generatedAt"),
@@ -354,6 +361,9 @@ def transcode_upgrade_blueprint(
             "project": {"name": project_name, "path": str(project_resolved)},
             "inputFiles": input_files_unique,
             "inputHashes": manifest.get("inputHashes") or {},
+            "semanticInputHash": manifest.get("semanticInputHash"),
+            "semanticInputsByProject": manifest.get("semanticInputsByProject") or {},
+            "inputCoverage": manifest.get("inputCoverage"),
         },
         "policy": {
             "targetLevel": policy.target_level,
@@ -362,6 +372,12 @@ def transcode_upgrade_blueprint(
             "intent": policy.intent,
             "acceptancePolicy": policy.acceptance_policy,
             "exclusions": list(policy.exclusions),
+            "decisionContract": contract,
+            "coreContractSupport": "V1" if manifest.get("decisionContract") else "LEGACY",
+        },
+        "objectiveEvidence": manifest.get("objectiveEvidence") or {
+            "objective": contract["objective"], "status": "CANDIDATE_PLAN_ONLY",
+            "freshnessOptimality": "NOT_PROVEN", "physicalCompatibility": "UNKNOWN",
         },
         "status": {
             "draftStatus": manifest.get("status"),
@@ -409,6 +425,8 @@ def transcode_upgrade_blueprint(
         "artifacts": dict(artifacts),
         "blueprintFile": str(Path(blueprint_path).resolve()),
     }
+    enrich_decisions(blueprint)
+    return blueprint
 
 
 class BlueprintError(RuntimeError):
@@ -473,7 +491,7 @@ def validate_planning_contract(manifest: Mapping[str, Any]) -> Optional[Dict[str
 
 
 def _schema_path() -> Path:
-    return Path(__file__).resolve().parents[2] / CONTRACTS_DIRNAME / BLUEPRINT_SCHEMA_FILENAME
+    return blueprint_schema_path()
 
 
 def _validate_blueprint_schema(blueprint: Mapping[str, Any], schema_path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
@@ -632,8 +650,8 @@ def _expand_short_names(path_str: str) -> str:
     """Canonicalize 8.3 short-name components to their long form on Windows
     WITHOUT following reparse points.
 
-    ``GetLongPathNameW`` expands each component's short name (``LEVENS~1`` ->
-    ``levenskikh``) but treats a junction/symlink entry as a plain directory
+    ``GetLongPathNameW`` expands each component's short name (``EXAMPL~1`` ->
+    ``example-user``) but treats a junction/symlink entry as a plain directory
     entry, so the reparse component survives on the lexical path -- exactly
     what the filesystem guard needs to detect a route that passes THROUGH the
     project. Non-existent tail components (fresh managed run dirs) are kept
@@ -772,6 +790,12 @@ def _validate_boundary_inputs(pol: BlueprintPolicy, opts: BlueprintOptions) -> O
         return _error("invalid-deadline", "draft_deadline_seconds must be a finite positive number")
     if not isinstance(pol.min_lag_ok_pct, int) or not (0 <= pol.min_lag_ok_pct <= 100):
         return _error("invalid-policy", "min_lag_ok_pct must be an integer in [0, 100]")
+    if isinstance(opts.draft_max_candidates, bool) or not isinstance(opts.draft_max_candidates, int) or not (1 <= opts.draft_max_candidates <= MAX_DRAFT_CANDIDATES):
+        return _error("invalid-candidate-cap", f"draft_max_candidates must be an integer in [1, {MAX_DRAFT_CANDIDATES}]")
+    try:
+        normalize_decision_contract(pol.intent)
+    except ValueError as exc:
+        return _error("invalid-intent", str(exc))
     return None
 
 
@@ -802,7 +826,9 @@ def _prepare_generation(
             ),
             None,
         )
-    interpreter = str(Path(opts.python).resolve()) if opts.python else sys.executable
+    # A venv interpreter is commonly a symlink. Resolving it changes Python's
+    # environment discovery and silently drops the requested environment/deps.
+    interpreter = os.path.abspath(os.path.expanduser(opts.python)) if opts.python else sys.executable
 
     purl = Path(project_path).expanduser().resolve().absolute()
     if not purl.exists() or not purl.is_dir():
@@ -980,6 +1006,16 @@ def _finalize(prep: _PreparedRun, outcome: ProcessRun, start: float) -> UpgradeB
         )
 
     contract_error = validate_planning_contract(manifest)
+    requested_contract = normalize_decision_contract(prep.policy.intent)
+    applied_contract = manifest.get("decisionContract")
+    if contract_error is None and applied_contract:
+        try:
+            if normalize_decision_contract(applied_contract) != requested_contract:
+                contract_error = _error("decision-contract-mismatch", "Core applied a different decision contract")
+        except ValueError as exc:
+            contract_error = _error("decision-contract-invalid", str(exc))
+    elif contract_error is None and requires_contract_support(requested_contract):
+        contract_error = _error("decision-contract-unsupported", "Core did not confirm the requested objective or mutable scope; upgrade Core before acting")
     if contract_error is not None:
         return UpgradeBlueprintResult(
             ok=False, run_id=prep.run_id, draft_status=None, blueprint=None,
@@ -1050,6 +1086,20 @@ def _complete_blueprint(
         if file_components:
             components = file_components
     blueprint["solverComponents"] = components
+    blueprint["workspaceCoverage"] = workspace_coverage(prep.purl)
+    blueprint["runtimeProvenance"] = runtime_provenance(prep.generator)
+    reported_options = manifest.get("planningOptions") or {}
+    effective_cap = reported_options.get("draftMaxCandidates")
+    if not isinstance(effective_cap, int) or isinstance(effective_cap, bool) or effective_cap < 1:
+        effective_cap = prep.options.draft_max_candidates
+    blueprint["planningOptions"] = {
+        **reported_options, "draftMaxCandidates": effective_cap,
+        "requestedDraftMaxCandidates": prep.options.draft_max_candidates,
+        "capSource": "CORE_MANIFEST" if reported_options.get("draftMaxCandidates") is not None else "REQUEST",
+        "deadlineSeconds": prep.options.draft_deadline_seconds,
+    }
+    enrich_decisions(blueprint, candidate_cap=effective_cap,
+                     previous_evidence_digest=prep.options.previous_evidence_digest)
 
     schema_error = _validate_blueprint_schema(blueprint)
     if schema_error is not None:

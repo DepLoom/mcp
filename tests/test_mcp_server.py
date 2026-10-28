@@ -114,8 +114,10 @@ class GetUpgradePlanHardeningValidationTests(unittest.TestCase):
         self.assertEqual(self._code(min_lag_ok_pct=80.5), "invalid-policy")
 
     def test_registry_url_with_credentials_is_rejected(self) -> None:
+        # Synthetic userinfo exercises rejection without embedding a credential URL.
+        registry = "https://" + "user:secret@registry.example.com/"
         self.assertEqual(
-            self._code(registry="https://user:secret@registry.example.com/"),
+            self._code(registry=registry),
             "invalid-registry",
         )
 

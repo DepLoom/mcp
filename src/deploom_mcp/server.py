@@ -29,7 +29,7 @@ Hardening contract of this boundary:
   `--exclude-dependency` BEFORE planning (never filtered out afterwards);
 * honest statuses: every response carries `authority=PLANNING_ONLY`, a
   `PROPOSED` verdict means "can be proposed", not "already updated", and
-  `needsReview` items must be confirmed with the project owner first;
+  `needsReview` items require inspecting evidence within existing authority;
 * budget: default deadline 20 s (range 5..600), planning metadata cached in a
   managed directory shared between calls (`DEPLOOM_MCP_STATE_DIR`);
 * artifacts and output always live outside the analysed project
@@ -41,6 +41,7 @@ import asyncio
 import json
 import math
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -58,6 +59,9 @@ from deploom_mcp.blueprint import (
     generate_upgrade_blueprint,
     generate_upgrade_blueprint_async,
     resolve_output_outside,
+)
+from deploom_mcp.decisions import (
+    MAX_DRAFT_CANDIDATES, OBJECTIVES, decision_evidence, normalize_decision_contract,
 )
 
 SERVER_NAME = "deploom-mcp"
@@ -81,12 +85,15 @@ DEFAULT_INLINE_ROWS = 100
 # complete -- and are recapped in `truncation.limitsHit`.
 DEFAULT_INLINE_GROUPS = 50
 DEFAULT_PACKAGES_PER_GROUP = 50
+DEFAULT_INLINE_EVIDENCE = 50
+MAX_DETAIL_CHARS = 512
 MAX_RESPONSE_BYTES = 512 * 1024  # 512 KiB deterministic cap on the JSON response
 
 HONESTY_NOTE = (
     "Planning-only: authority=PLANNING_ONLY (nothing was installed or verified). "
     "A PROPOSED verdict means 'this upgrade can be proposed', NOT 'already updated'. "
-    "Confirm with the project owner before acting on any dependency flagged needsReview."
+    "Review needsReview evidence within the authority already granted by the user; "
+    "request additional approval only when the intended action exceeds it."
 )
 PLANNING_BOUNDARY_NOTE = (
     "NOT_VERIFIED / PLANNING_ONLY / UNKNOWN / UNPROVEN: statuses are planning "
@@ -131,11 +138,28 @@ def _build_request(
     registry_metadata_ttl: float,
     output_dir: Optional[str],
     exclude: Optional[List[str]],
+    target_mode: str = "pinned",
+    objective: str = OBJECTIVES[0],
+    mutable_packages: Optional[List[str]] = None,
+    approved_version_lines: Optional[Dict[str, List[int]]] = None,
+    draft_max_candidates: int = 3,
+    previous_evidence_digest: Optional[str] = None,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Validate every input (fail-closed) and build the planner request."""
     if not project_path or not isinstance(project_path, str):
         return _error("invalid-args", "project_path must be a non-empty string"), None
     purl = Path(project_path).expanduser().resolve()
+    try:
+        contract = normalize_decision_contract({
+            "targetMode": target_mode, "objective": objective,
+            "mutablePackages": mutable_packages, "approvedVersionLines": approved_version_lines,
+        })
+    except ValueError as exc:
+        return _error("invalid-intent", str(exc)), None
+    if isinstance(draft_max_candidates, bool) or not isinstance(draft_max_candidates, int) or not (1 <= draft_max_candidates <= MAX_DRAFT_CANDIDATES):
+        return _error("invalid-candidate-cap", f"draft_max_candidates must be an integer in [1, {MAX_DRAFT_CANDIDATES}]"), None
+    if previous_evidence_digest is not None and (not isinstance(previous_evidence_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", previous_evidence_digest)):
+        return _error("invalid-evidence-digest", "previous_evidence_digest must be a lowercase SHA-256 digest"), None
 
     if target_level not in ("yellow", "green"):
         return _error("invalid-goal", f"target_level must be 'yellow' or 'green', got {target_level!r}"), None
@@ -225,6 +249,8 @@ def _build_request(
         registry=registry,
         include_prerelease=include_prerelease,
         draft_deadline_seconds=deadline,
+        draft_max_candidates=draft_max_candidates,
+        previous_evidence_digest=previous_evidence_digest,
         registry_metadata_cache=str(cache_dir) if cache_dir else None,
         registry_metadata_ttl=ttl,
         output_dir=out,
@@ -238,6 +264,7 @@ def _build_request(
         target_level=target_level,
         min_lag_ok_pct=min_lag_ok_pct,
         exclusions=tuple(exclusions),
+        intent=contract,
     )
     return None, {"purl": purl, "options": options, "policy": policy}
 
@@ -248,6 +275,7 @@ def _policy_snapshot(requested: BlueprintPolicy) -> Dict[str, Any]:
         "targetLevel": requested.target_level,
         "minLagOkPct": requested.min_lag_ok_pct,
         "exclusions": list(requested.exclusions),
+        "decisionContract": normalize_decision_contract(requested.intent),
     }
 
 
@@ -268,11 +296,13 @@ def _policy_discrepancy(
             mismatched.append(field)
     if set(requested.get("exclusions") or []) != set(applied.get("exclusions") or []):
         mismatched.append("exclusions")
+    if applied.get("decisionContract") is not None and requested.get("decisionContract") != applied.get("decisionContract"):
+        mismatched.append("decisionContract")
     if not mismatched:
         return None
     return {
         "requested": dict(requested),
-        "applied": {k: applied.get(k) for k in ("targetLevel", "minLagOkPct", "exclusions", "policyHash")},
+        "applied": {k: applied.get(k) for k in ("targetLevel", "minLagOkPct", "exclusions", "policyHash", "decisionContract")},
         "mismatchedFields": sorted(mismatched),
         "message": "the plan was produced under a policy that differs from the requested one "
         "(see policy.applied); do not act on rows expecting the requested policy",
@@ -297,6 +327,9 @@ def _result_from_planning(result, requested: Optional[BlueprintPolicy] = None) -
         discrepancy = _policy_discrepancy(_policy_snapshot(requested), applied)
         if discrepancy is not None:
             response["policyDiscrepancy"] = discrepancy
+    if _finalize_byte_count(response) > MAX_RESPONSE_BYTES:
+        return {"ok": False, "runId": result.run_id,
+                "error": _error("response-too-large", "response including policy discrepancy exceeds the byte limit")}
     return response
 
 
@@ -306,6 +339,7 @@ def _compact_payload(
     max_inline_rows: int,
     max_inline_groups: int,
     max_packages_per_group: int,
+    max_inline_evidence: int = DEFAULT_INLINE_EVIDENCE,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Build the compact payload for the given display caps.
 
@@ -333,17 +367,41 @@ def _compact_payload(
     inline_packages = sum(len(g["packages"]) for g in groups)
 
     all_rows = blueprint.get("dependencies") or []
+    all_evidence = blueprint.get("decisionEvidence")
+    if all_evidence is None:
+        all_evidence = decision_evidence(blueprint)
+    critical_evidence = sorted(
+        [e for e in all_evidence if e.get("severity") != "INFO"],
+        key=lambda e: (0 if e.get("severity") == "BLOCKER" else 1,
+                       str(e.get("package") or ""), str(e.get("evidenceRef") or ""), str(e.get("code") or "")),
+    )
+    details_clipped = False
+
+    def detail(value):
+        nonlocal details_clipped
+        if isinstance(value, str) and len(value) > MAX_DETAIL_CHARS:
+            details_clipped = True
+            return value[:MAX_DETAIL_CHARS] + "… [read evidenceRef]"
+        return value
+
+    visible_evidence = [{k: detail(item.get(k)) for k in ("code", "severity", "package", "message", "nextAction", "evidenceRef", "lifecycle")}
+                        for item in critical_evidence[:max_inline_evidence]]
     total_rows = len(all_rows)
     rows = all_rows[:max_inline_rows]
     dependencies = []
     for row in rows:
         dependencies.append({
             "package": row.get("package"),
+            "declarationId": row.get("declarationId"),
             "status": row.get("status"),
             "current": row.get("current"),
             "target": row.get("target"),
             "group": row.get("group"),
             "needsReview": bool(row.get("needsReview")),
+            "reason": detail(row.get("reason")),
+            "evidence": row.get("evidence") or {},
+            "nextAction": row.get("nextAction") or "READ_PLANNER_EVIDENCE",
+            "evidenceRef": f"#/dependencies/{len(dependencies)}",
         })
 
     draft_status = status.get("draftStatus")
@@ -351,7 +409,35 @@ def _compact_payload(
     processed = summary.get("processed")
     processed_total = summary.get("processedTotal")
     policy = blueprint.get("policy") or {}
+    coverage = dict(blueprint.get("workspaceCoverage") or {
+        "workspaceGraphCoverage": "UNKNOWN", "reconciliationRequired": True,
+        "jointAssignment": "NOT_COMPUTED", "discoveryComplete": False,
+        "nextAction": "INSPECT_WORKSPACE_COVERAGE",
+    })
+    coverage_clipped = False
+    for field in ("discoveredManifests", "evaluatedManifests", "unevaluatedManifests"):
+        items = coverage.get(field)
+        if isinstance(items, list):
+            coverage[field + "Count"] = len(items)
+            coverage[field] = [detail(x) for x in items[:max_inline_evidence]]
+            coverage_clipped = coverage_clipped or len(items) > max_inline_evidence
+    blocker_count = sum(x.get("severity") == "BLOCKER" for x in critical_evidence)
+    unresolved = any(x.get("code") in {"CANDIDATE_CAP", "METADATA_UNKNOWN", "SECURITY_UNKNOWN", "PEER_UNRESOLVED", "UNRESOLVED_TARGET"}
+                     or x.get("lifecycle") == "UNRESOLVED_LEGACY" for x in critical_evidence)
+    coverage_known = all(isinstance(summary.get(k), int) and not isinstance(summary.get(k), bool)
+                         for k in ("metadataKnown", "metadataTotal", "securityKnown", "securityTotal"))
+    evidence_complete = (coverage_known and summary["metadataKnown"] == summary["metadataTotal"]
+                         and summary["securityKnown"] == summary["securityTotal"]
+                         and not summary.get("insufficientData") and not is_partial and not unresolved)
+    projection_complete = (len(rows) == total_rows and len(visible_evidence) == len(critical_evidence)
+                           and not details_clipped and not coverage_clipped)
+    next_action = ("READ_FULL_DECISION_EVIDENCE" if not projection_complete else
+                   "RECONCILE_WORKSPACE_PLANS" if coverage.get("reconciliationRequired") else
+                   "RESOLVE_PARTIAL_PLAN" if is_partial else
+                   "RECONCILE_CONSTRAINTS" if blocker_count else
+                   "REVIEW_WITHIN_EXISTING_AUTHORITY" if critical_evidence else "VERIFY_PROPOSED_ASSIGNMENT")
     payload = {
+        "ok": True,
         "protocol": KIND,
         "schemaVersion": blueprint.get("schemaVersion"),
         "run": {
@@ -383,6 +469,7 @@ def _compact_payload(
             "minLagOkPct": policy.get("minLagOkPct"),
             "exclusions": list(policy.get("exclusions") or []),
             "policyHash": policy.get("policyHash"),
+            **{k: policy[k] for k in ("decisionContract", "coreContractSupport") if k in policy},
         },
         "summary": {
             "totalDependencies": summary.get("totalDependencies"),
@@ -392,6 +479,29 @@ def _compact_payload(
         },
         "recommendationGroups": groups,
         "dependencies": dependencies,
+        "decisionEvidence": visible_evidence,
+        "decisionCompleteness": {
+            "projectionComplete": projection_complete,
+            "requiresArtifactRead": not projection_complete,
+            "planningComplete": not is_partial and draft_status == "DRAFT_READY",
+            "evidenceComplete": evidence_complete,
+            "criticalEvidenceCount": len(critical_evidence),
+            "inlineCriticalEvidenceCount": len(visible_evidence),
+            "blockerCount": blocker_count,
+            "workspaceReconciliationRequired": bool(coverage.get("reconciliationRequired")),
+            "nextAction": next_action,
+        },
+        "workspaceCoverage": coverage,
+        "source": {
+            "semanticInputHash": source.get("semanticInputHash"),
+            "inputCoverage": {k: (source.get("inputCoverage") or {}).get(k)
+                              for k in ("scope", "status", "jointSolver", "dependencyGraph")},
+        },
+        "objectiveEvidence": blueprint.get("objectiveEvidence") or {},
+        "runtimeProvenance": blueprint.get("runtimeProvenance"),
+        "identities": blueprint.get("identities") or {},
+        "recovery": blueprint.get("recovery") or {},
+        "planningOptions": blueprint.get("planningOptions") or {},
         "artifacts": {
             "blueprint": blueprint.get("blueprintFile"),
             **{k: v for k, v in (blueprint.get("artifacts") or {}).items()},
@@ -406,6 +516,10 @@ def _compact_payload(
         "totalGroups": total_groups,
         "inlinePackages": inline_packages,
         "totalPackages": total_packages,
+        "inlineEvidence": len(visible_evidence),
+        "totalEvidence": len(critical_evidence),
+        "detailsClipped": details_clipped,
+        "coverageClipped": coverage_clipped,
     }
     return payload, metrics
 
@@ -439,6 +553,7 @@ def compact_blueprint(
     max_inline_groups: int = DEFAULT_INLINE_GROUPS,
     max_packages_per_group: int = DEFAULT_PACKAGES_PER_GROUP,
     max_response_bytes: int = MAX_RESPONSE_BYTES,
+    max_inline_evidence: int = DEFAULT_INLINE_EVIDENCE,
 ) -> Dict[str, Any]:
     """Project a full blueprint into the compact agent-facing protocol.
 
@@ -465,6 +580,7 @@ def compact_blueprint(
     rows_cap = max(0, int(max_inline_rows))
     groups_cap = max(0, int(max_inline_groups))
     packages_cap = max(0, int(max_packages_per_group))
+    evidence_cap = max(0, int(max_inline_evidence))
     budget = max(1, int(max_response_bytes))
 
     # True once the byte budget ever forces content off the wire; persists for
@@ -479,6 +595,7 @@ def compact_blueprint(
             max_inline_rows=rows_cap,
             max_inline_groups=groups_cap,
             max_packages_per_group=packages_cap,
+            max_inline_evidence=evidence_cap,
         )
         limits_hit: List[str] = []
         if metrics["inlineRows"] < metrics["totalRows"]:
@@ -487,6 +604,12 @@ def compact_blueprint(
             limits_hit.append("groups")
         if metrics["inlinePackages"] < metrics["totalPackages"]:
             limits_hit.append("packages")
+        if metrics["inlineEvidence"] < metrics["totalEvidence"]:
+            limits_hit.append("decisionEvidence")
+        if metrics["detailsClipped"]:
+            limits_hit.append("evidenceDetails")
+        if metrics["coverageClipped"]:
+            limits_hit.append("workspaceCoverage")
 
         payload["truncation"] = {
             "truncated": True,  # finalized below once limitsHit is known
@@ -496,6 +619,8 @@ def compact_blueprint(
             "totalGroups": metrics["totalGroups"],
             "inlinePackages": metrics["inlinePackages"],
             "totalPackages": metrics["totalPackages"],
+            "inlineDecisionEvidence": metrics["inlineEvidence"],
+            "totalDecisionEvidence": metrics["totalEvidence"],
             "byteLimit": budget,
             "bytes": 0,
             "limitsHit": [],
@@ -514,7 +639,7 @@ def compact_blueprint(
         if final_size <= budget:
             return payload
 
-        if not (packages_cap or groups_cap or rows_cap):
+        if not (packages_cap or groups_cap or rows_cap or evidence_cap):
             # Nothing left to clip -- the minimal required payload does not fit.
             from deploom_mcp.blueprint import BlueprintError
             raise BlueprintError(
@@ -526,8 +651,10 @@ def compact_blueprint(
             packages_cap = max(0, packages_cap // 2)
         elif groups_cap > 0:
             groups_cap = max(0, groups_cap // 2)
-        else:
+        elif rows_cap > 0:
             rows_cap = max(0, rows_cap // 2)
+        else:
+            evidence_cap = max(0, evidence_cap // 2)
 
 
 def get_upgrade_plan(
@@ -541,6 +668,12 @@ def get_upgrade_plan(
     registry_metadata_ttl: float = 3600.0,
     output_dir: Optional[str] = None,
     exclude: Optional[List[str]] = None,
+    target_mode: str = "pinned",
+    objective: str = OBJECTIVES[0],
+    mutable_packages: Optional[List[str]] = None,
+    approved_version_lines: Optional[Dict[str, List[int]]] = None,
+    draft_max_candidates: int = 3,
+    previous_evidence_digest: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Synchronous variant: run the Stage 1 boundary and return the compact
     protocol. Used by embedding/CLI callers that run outside an event loop;
@@ -555,6 +688,12 @@ def get_upgrade_plan(
         registry_metadata_ttl=registry_metadata_ttl,
         output_dir=output_dir,
         exclude=exclude,
+        target_mode=target_mode,
+        objective=objective,
+        mutable_packages=mutable_packages,
+        approved_version_lines=approved_version_lines,
+        draft_max_candidates=draft_max_candidates,
+        previous_evidence_digest=previous_evidence_digest,
     )
     if error is not None:
         return {"ok": False, "error": error}
@@ -574,8 +713,11 @@ def get_upgrade_plan(
         "project. exclude lists package names removed from planning scope BEFORE "
         "planning (not filtered afterwards). Honesty: authority is always "
         "PLANNING_ONLY; a PROPOSED verdict means 'can be proposed', NOT 'already "
-        "updated'; confirm with the project owner before acting on any dependency "
-        "flagged needsReview."
+        "updated'. target_mode selects pinned targets or advisory suggestions; "
+        "neither relaxes compatibility constraints. mutable_packages limits changes "
+        "while retaining the other packages as constraints. draft_max_candidates "
+        "widens candidate evidence independently of the deadline. Review critical "
+        "evidence and workspaceCoverage before acting within existing user authority."
     ),
 )
 async def get_upgrade_plan_tool(
@@ -588,6 +730,12 @@ async def get_upgrade_plan_tool(
     registry_metadata_ttl: float = 3600.0,
     output_dir: Optional[str] = None,
     exclude: Optional[List[str]] = None,
+    target_mode: str = "pinned",
+    objective: str = OBJECTIVES[0],
+    mutable_packages: Optional[List[str]] = None,
+    approved_version_lines: Optional[Dict[str, List[int]]] = None,
+    draft_max_candidates: int = 3,
+    previous_evidence_digest: Optional[str] = None,
     ctx: Context = None,  # type: ignore[assignment]  # injected by MCPServer
 ) -> CallToolResult:
     error, req = _build_request(
@@ -600,6 +748,12 @@ async def get_upgrade_plan_tool(
         registry_metadata_ttl=registry_metadata_ttl,
         output_dir=output_dir,
         exclude=exclude,
+        target_mode=target_mode,
+        objective=objective,
+        mutable_packages=mutable_packages,
+        approved_version_lines=approved_version_lines,
+        draft_max_candidates=draft_max_candidates,
+        previous_evidence_digest=previous_evidence_digest,
     )
     if error is not None:
         return _result({"ok": False, "error": error})

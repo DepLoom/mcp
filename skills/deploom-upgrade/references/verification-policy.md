@@ -1,76 +1,77 @@
 # Verification policy
 
-Rules for proving what the upgrade actually did. Verification always runs on the
-**worktree** (never the original checkout) and uses the project's real commands
-and the coding client's own tools.
+Verify the accepted task in the authorized checkout with real commands and
+targeted runtime checks. Keep completion, installation, project checks, runtime
+and policy attainment separate. Neither `DRAFT_READY` nor an agent's final reply
+proves any of those other states.
 
-## Check pipeline
+## Final-state evidence
 
-Run every relevant check; a check that cannot run for a legitimate reason is
-recorded as such, it is never skipped silently:
+Record each check's command, start/end, exit code, status, log and input hashes.
+`manifests`, `lockfile` and `environment` identify installation inputs; checks
+also bind relevant tracked `source`/configuration. Document paths and hashing
+method. Unknown identity stays unknown.
 
-1. **Install / lockfile validation** — install with the project's package
-   manager (`npm ci` or `npm install`, `yarn`, `pnpm`, matching the lockfile)
-   and confirm the lockfile is in sync and the resolved versions match the plan.
-2. **Typecheck** — the project's typecheck script (`tsc --noEmit` etc.).
-3. **Lint** — the project's lint script.
-4. **Build** — the project's build script.
-5. **Tests** — the project's test script.
-6. **Policy audit** — re-confirm: no `policyDiscrepancy`; applied exclusions
-   equal requested; excluded packages unchanged in manifest and lockfile.
-7. **Diff audit** — every manifest/lockfile change traces to a `PROPOSED` row;
-   nothing outside the intended change set; excluded packages untouched.
+1. Update manifests and lockfile, then perform the package manager's required
+   **clean/frozen install** on that final state (`npm ci`, or the appropriate
+   project equivalent). `npm install` can change the lockfile; it is not proof
+   that a subsequent clean install succeeded.
+2. Run bootstrap when required, typecheck, lint, build and project tests. Verify
+   resolved target versions in all affected workspaces and inspect peer errors.
+3. Run the runtime checks required by changed behavior and the user/protocol.
+4. Audit exclusions and every changed declaration against decision records.
+5. Audit the requested policy against the final installed state and complete
+   intended scope. Exclusions matching the request alone do not prove Yellow,
+   Green, security coverage or latest-compatible attainment. If no adequate
+   policy audit is available, report policy `NOT_VERIFIED`.
 
-Order matters (fail fast), but each check that can run still runs to produce a
-complete record.
+A downgrade, resync install, manifest/lock/environment edit makes an earlier
+clean-install result historical. Preserve it, but do not count it for the final
+inputs. A source change similarly invalidates affected checks. Re-run only the
+required checks invalidated by actual changes; do not repeat unrelated work.
 
-## Status vocabulary
+## Targeted runtime checks
 
-Each check gets exactly one of:
+Use local data/mocks when available. A missing backend does not by itself prevent
+a structural render/navigation check. If a required local check is impossible,
+record the concrete limitation and `NOT_RUN`/`NOT_AVAILABLE` rather than PASS.
 
-- `PASSED` — the check ran and its criterion holds.
-- `FAILED` — the check ran and its criterion failed.
-- `INCONCLUSIVE` — the check ran but produced no clear verdict.
-- `NOT_RUN` — the check was not executed (e.g. no test script, user said skip).
-- `NOT_AVAILABLE` — the tool/command does not exist in this project.
+| Changed surface | Minimal useful checks |
+|---|---|
+| Router version or route hierarchy | Render representative nested routes and a deep link; check parent/child path matching or Outlet behavior, including a nonempty page and 404. Typecheck cannot detect every empty render. |
+| Redirect or navigation APIs | Check destination, preserved query/hash and history Back/replace semantics. Compare with the previous behavior or explicit new requirement. |
+| Route parameters | Preserve existing guards; valid, invalid and missing parameters follow the intended 404/error path without an unintended API call. Do not silently replace a format guard with unchecked params. |
+| Storybook configuration/decorators | Read shared preview/config and global decorators; render at least one affected story with them active. Check router providers, parameters and hooks actually used by that story. `storybook:build` proves bundling, not execution of the decorator. |
+| Widget/loader/API adaptation | Exercise the changed call with a small local mock for required arguments/behavior. Keep backend/payment E2E separately NOT_RUN when unavailable. |
 
-Rules:
+Preserve current behavior unless change is authorized. A source grep can locate
+obsolete API usage, but cannot establish runtime correctness by itself.
 
-- A check that did not run is **never** `PASSED`.
-- DepLoom's internal verdicts (`PROJECT_VERIFIED`, `CONSTRAINT_SATISFIED`) are
-  planning vocabulary and are **never** used as verification results here —
-  they do not exist for a planning-only blueprint.
-- For every check record: command, exit code, result, elapsed time (when
-  measured), failure/skip reason, and any diagnostic artifacts (paths to logs,
-  output excerpts, diff).
+## Warnings and failures
 
-## Baseline vs regression
+- Trace a new warning to source/config/shared entry points before scanning all
+  dependencies. Identify its package, import path, impacted scenario and severity.
+  An absent export/provider warning requires investigation, even with exit 0.
+- Do not call a warning "addon-internal", "pre-existing" or harmless without
+  evidence. Compare a retained baseline log or the relevant baseline source;
+  record unresolved attribution when neither is available. Size advisories are
+  different from missing API warnings; do not silently equate them.
+- Compiler failures can identify necessary annotations, exports or API repairs;
+  they do not automatically prove that no compatible target exists. Replacing
+  the compiler in an already changed tree is a version probe, not a baseline run.
+- Keep every failure and successful repair. A wrapper launch error is an
+  infrastructure/unknown result, not a failing project command. Tool status
+  `completed`, an empty log and a copied duration are not substitutes for an
+  observed command exit and criterion.
 
-If the project already had failing checks before the upgrade, distinguish a
-**baseline failure** (pre-existing, unrelated) from a **regression** introduced
-by the update:
+## Status and authorization
 
-- Re-run the same check on the baseline (original checkout or `baselineCommit`
-  worktree) if feasible, and compare.
-- Report both facts (baseline failed too / new failure) instead of a single
-  binary.
-- A regression should normally be handled by the bounded repair loop (≤ 3
-  attempts per root cause) or reported as `FAILED` with diagnostics.
+Use `PASSED`, `FAILED`, `INCONCLUSIVE`, `NOT_RUN`, `NOT_AVAILABLE` for individual
+checks. Summary states additionally allow `NOT_VERIFIED`. `PASSED` requires an
+executed check, its criterion and evidence on the relevant final inputs. A waived
+check remains not run. Project checks cannot stand in for runtime or policy.
 
-## Install safety for untrusted projects
-
-Package lifecycle scripts (`preinstall`, `postinstall`, `rebuild`, …) are not
-unconditionally safe.
-
-- For projects that are not in the trusted set: perform the install with a safe
-  mode where lifecycle scripts are suppressed
-  (`npm install --ignore-scripts`, or the yarn/pnpm equivalent) when that does
-  not break the build, and note that scripts were not run.
-- Otherwise ask for user confirmation before letting scripts execute.
-- Never auto-negotiate registry credentials or write credentials anywhere.
-
-## Recording
-
-Collect every check result into the evidence report's `verification` array
-(see `references/evidence-report.md`). The report is the transcript of what was
-actually executed, measured and observed — nothing more.
+Use already granted user authority for installs and verification. Respect real
+client permissions and untrusted lifecycle-script restrictions; record any
+suppressed scripts. Do not invent a new confirmation requirement from this file.
+Never change global tooling or credentials without authorization.

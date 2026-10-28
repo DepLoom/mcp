@@ -171,7 +171,9 @@ class TranscodeUnitTests(unittest.TestCase):
         self.assertEqual(status["parallelExecutionSafety"], "UNPROVEN")
         self.assertEqual(bp["hashes"], {"plan": "planhash", "prompt": "prompthash"})
         self.assertEqual(bp["summary"]["proposed"], 1)
-        self.assertEqual(bp["summary"]["needsReview"], 0)
+        # A concrete target still needs review when the source reports a
+        # breaking change; PROPOSED alone is not the complete decision.
+        self.assertEqual(bp["summary"]["needsReview"], 1)
         by_pkg = {d["package"]: d["status"] for d in bp["dependencies"]}
         self.assertEqual(by_pkg, {"a": "PROPOSED", "b": "POLICY_SATISFIED"})
 

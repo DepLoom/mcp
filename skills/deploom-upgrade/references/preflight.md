@@ -1,71 +1,68 @@
 # Preflight
 
-Run before **any** planning request and again before execution. If any check
-that matters for the requested mode cannot be completed reliably, the result is
-`BLOCKED` (report the missing capability; never guess past it).
+Collect the facts that affect this task, without an automatic permission round.
+Read existing user authority first. Record missing evidence as unknown.
 
-## The checks
+## Task and workspace
 
-1. **Git root, HEAD, branch.** `git rev-parse --show-toplevel`,
-   `git rev-parse --abbrev-ref HEAD`, `git rev-parse HEAD`. Record them as the
-   baseline. If `git` is unavailable or the project is not a git repo, block
-   execution (worktree isolation is required for `EXECUTE`); `PLAN_ONLY` can
-   still proceed read-only on manifest+lockfile.
-2. **Working tree state.** `git status --porcelain`. A dirty checkout is fine
-   for `PLAN_ONLY`. For `EXECUTE`:
-   - Do **not** auto `git stash` / `git reset --hard` / `git clean` to make
-     room — that would mutate the original checkout.
-   - Prefer an already-clean checkout; if it is dirty, plan against the actual
-     current tree, then prove the worktree matches the plan inputs (see
-     execution-policy "Source identity across the worktree") or re-plan inside
-     the worktree.
-3. **Package manager & lockfile.** Detect from lockfile + tooling:
-   `package-lock.json` → npm, `yarn.lock` → yarn, `pnpm-lock.yaml` → pnpm,
-   `bun.lockb` → bun. The planner reads the manifest and lockfile; the same
-   package manager must be used to update the lockfile during execution.
-4. **Node.js version & engines.** `node --version`; read `engines` in
-   `package.json` and check the toolchain satisfies it. A planned upgrade must
-   not force a Node version the environment cannot run.
-5. **Manifest & workspace configuration.** `package.json` present at
-   `project_path`; detect `workspaces` / monorepo layout. The planner handles
-   per-project analysis; record which project(s) the plan covers.
-6. **Available check commands.** From `package.json` `scripts` discover
-   `lint` / `typecheck` / `build` / `test` (and any CI-observed commands).
-   Record them; they become the verification pipeline. If a script is absent,
-   it is `NOT_AVAILABLE`, not skipped silently.
-7. **Registry configuration.** Note `.npmrc` / `publishConfig.registry` /
-   environment registry. Pass an explicit `registry` to `get_upgrade_plan` when
-   the project pins one, so planning matches installation.
-8. **Target level.** From the user request: `yellow` (default) or `green`.
-   If the user did not state it and intent is ambiguous, ask.
-9. **Exclusions.** The exact set of packages that must not change (e.g.
-   `react`). Confirm the set with the user if there is any doubt; the planner
-   enforces it via `exclude` **before** planning.
-10. **Client file permissions.** Confirm the coding client is allowed to read
-    the project and (for `EXECUTE`) create files, run `git worktree` and shell
-    commands. If a needed permission is missing/denied → `BLOCKED`, never
-    bypass the client's sandbox.
-11. **`get_upgrade_plan` availability.** Confirm the MCP tool is present in the
-    client's tool list. If not → `BLOCKED` and point at the integration
-    instructions (`integrations/<client>/README.md`).
-12. **Worktree feasibility.** For `EXECUTE`: confirm `git worktree add` is
-    supported and a target path exists (outside or alongside the checkout, not
-    inside it in a way that would confuse the package manager).
+1. Record action (`PLAN_ONLY`/`EXECUTE`), objective, target mode, approved version
+   lines, mutable packages, exclusions and permitted companion/source/config
+   repairs. Preserve explicit user pins and environment restrictions.
+2. Record git root, HEAD, branch and existing diff. Never stash, reset, clean or
+   discard user work to make execution possible. A plan can inspect a dirty tree.
+3. Use the checkout the user assigned, including an existing isolated worktree.
+   Otherwise prefer an isolated working copy for execution. Create another
+   worktree only if compatible with the task; do not require duplicate isolation.
+   Without Git, plan-only still works; explain how to retain a reviewable baseline
+   before executing rather than claiming a fictitious commit.
+4. Discover all root/workspace manifests, package manager/lockfile, Node engines
+   and actual runtime. Keep the whole graph as compatibility context even when
+   only a subset may change. `mutable_packages` limits edits; it is not an
+   instruction to exclude contextual peers from analysis.
+5. Read configured registry and package scripts. Pass the registry to the MCP;
+   never expose credentials. Discover bootstrap, typecheck, lint, build, tests,
+   Storybook and runtime entry points affected by proposed updates.
+6. Record which checks are required by the user/protocol and already authorized.
+   Resolve project-rule conflicts using the user's explicit decision. Do not ask
+   again for authority already granted. A genuine client denial is still a block.
+7. Confirm `get_upgrade_plan` availability. If absent, report infrastructure
+   unavailability; do not present a manual plan as a DepLoom verdict.
+8. Record expected contract identity from `contract.json`, installed receipt if
+   available, and actually loaded Skill identity separately. An on-disk match
+   is not evidence of the current client's loaded content.
 
-## Blocked conditions (summary)
+## Baseline and fingerprints
 
-`BLOCKED` (report, do not act) when any of the following is true:
+Before edits, retain a baseline manifest map and identities of inputs actually
+used. For later verification, use deterministic, separately named hashes for
+`manifests`, `lockfile`, `environment` and relevant `source`/configuration.
+Hash sorted project-relative paths and file contents; exclude generated output,
+node_modules and the evidence report itself from source identity. Record the
+algorithm and covered paths. If a required identity is unavailable, keep it
+unknown; never guess a SHA.
 
-- `get_upgrade_plan` is not reachable;
-- the project is not a git repo (for `EXECUTE`);
-- the checkout cannot be proven clean or the worktree cannot be proven to match
-  the plan inputs;
-- the client lacks a permission required for the operation;
-- a requested exclusion conflicts with the action (see execution-policy);
-- intent or target level is ambiguous and the user did not resolve it.
+Core `source.inputHashes` may be an opaque combined fingerprint, not these
+per-category hashes. Preserve it unchanged. Compare real input bytes or a
+documented Core identity; re-plan if pre-application inputs changed. When moving
+to a new worktree, prove equivalence of relevant bytes instead of assuming that
+the same HEAD includes uncommitted changes.
 
-## Output of preflight
+## Minimal acceptance contract
 
-Keep a short machine-readable record to carry into the evidence report:
-`baselineCommit`, `branch`, `packageManager`, `nodeVersion`, `checkScripts`,
-`registry`, `targetLevel`, `exclusions`, `mcpAvailable`, `worktreeFeasible`.
+Before execution, record:
+
+- user authority references, objective and target-selection rules;
+- mutable names plus allowed companions and all workspace context;
+- required install/build/test/runtime checks and policy criterion;
+- applicable execution deliverables from the user/Core workflow, indexed once;
+- baseline identity and allowed working copy;
+- what would require another decision: a new major line, excluded edit,
+  environment change, material behavior change or a revised pinned target.
+
+Use `references/evidence-report.md`. No artificial file-count limit applies to
+authorized compatibility repairs. Distinguish an unavailable check from a check
+the user waived. A waiver narrows acceptance; it does not manufacture PASS.
+
+For blinded experiments, keep a shared frozen-input directory and an assigned
+slot. Do not read neighboring worktrees, caches of their reports or results.
+Use only the evidence available to this run to diagnose failures.
