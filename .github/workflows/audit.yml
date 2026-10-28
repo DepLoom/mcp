@@ -1,5 +1,7 @@
 name: audit-native
 on:
+  push:
+    branches: [main]
   pull_request:
     paths:
       - 'src/deploom_mcp/**'

@@ -21,8 +21,8 @@ class AuditStdioTests(unittest.TestCase):
                     self.assertEqual({"get_upgrade_plan", "audit_dependencies"}, {tool.name for tool in tools.tools})
                     result = await session.call_tool("audit_dependencies", {"project_path": "relative"})
                     self.assertTrue(result.is_error)
-                    self.assertEqual("invalid-project", result.structuredContent["error"]["code"])
-                    self.assertEqual("UNKNOWN", result.structuredContent["security"]["verdict"])
+                    self.assertEqual("invalid-project", result.structured_content["error"]["code"])
+                    self.assertEqual("UNKNOWN", result.structured_content["security"]["verdict"])
         asyncio.run(scenario())
 
 

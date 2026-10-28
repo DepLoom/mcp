@@ -86,6 +86,23 @@ still required to evaluate agent behavior; see
 `upstream/deploom`, never writes MCP configuration itself, and never commits,
 pushes or merges.
 
+## Optional dependency audit (npm / Yarn)
+
+An **opt-in** MCP entrypoint exposes `audit_dependencies` alongside
+`get_upgrade_plan`. The default planning entrypoint and the frozen A/B
+experiment's tool surface are unchanged:
+
+```bash
+python -m deploom_mcp.audit_server
+```
+
+The audit is read-only to the project: npm audits the existing lockfile,
+Yarn Classic passes an exact `yarn.lock` package/version inventory to
+`npm audit`, and Yarn Berry uses `yarn npm audit --all --recursive`.
+It does not install packages, apply fixes or prove runtime safety or
+Yellow/Green closure. See [dependency audit contract](docs/DEPENDENCY_AUDIT.md)
+for supported engines, registry access, completeness and evidence fields.
+
 ## Requirements
 
 - Python **>= 3.12, < 3.15** (the pinned Core and the MCP SDK are verified in CI on 3.12).
