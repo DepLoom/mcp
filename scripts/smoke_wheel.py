@@ -30,7 +30,7 @@ def main() -> int:
     if not wheel.is_file():
         parser.error("wheel does not exist")
     with tempfile.TemporaryDirectory(prefix="deploom-wheel-") as tmp:
-        root = Path(tmp)
+        root = Path(tmp).resolve()
         env_path = root / "venv"
         venv.EnvBuilder(with_pip=True).create(env_path)
         python = env_path / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -52,8 +52,8 @@ import json, pathlib, subprocess, sys
 import deploom_mcp
 from deploom_mcp.distribution import resolve_core_dir, blueprint_schema_path, release_manifest_path, skill_root
 from deploom_mcp.blueprint import BlueprintOptions, generate_upgrade_blueprint
-root=pathlib.Path.cwd()
-assert pathlib.Path(deploom_mcp.__file__).is_relative_to(root / "venv"), deploom_mcp.__file__
+root=pathlib.Path.cwd().resolve()
+assert pathlib.Path(deploom_mcp.__file__).resolve().is_relative_to(root / "venv"), deploom_mcp.__file__
 core=resolve_core_dir()
 assert core.name == "_core" and core.is_relative_to(root / "venv"), core
 assert blueprint_schema_path().is_file() and release_manifest_path().is_file()
