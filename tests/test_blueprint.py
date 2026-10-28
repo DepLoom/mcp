@@ -258,6 +258,26 @@ class HeadlessIntegrationTests(unittest.TestCase):
             schema = _read_json(ROOT / "contracts" / "upgrade-blueprint.schema.json")
             jsonschema.validate(bp, schema)
 
+        # Public follow-up tools must consume an actual, published Core Draft,
+        # not just a hand-built Blueprint fixture.
+        from deploom_mcp.decision_followups import evaluate_assignment, explain_conflict
+        decision_digest = bp["identities"]["decisionDigest"]
+        evaluation = evaluate_assignment(
+            blueprint_path=str(result.blueprint_path),
+            assignment={},
+            expected_decision_digest=decision_digest,
+        )
+        self.assertTrue(evaluation["ok"], evaluation)
+        self.assertNotEqual("STALE_BLUEPRINT", evaluation["verdict"], evaluation)
+        self.assertEqual("UNKNOWN", evaluation["compatibility"])
+        explanation = explain_conflict(
+            blueprint_path=str(result.blueprint_path),
+            package="uuid",
+            expected_decision_digest=decision_digest,
+        )
+        self.assertTrue(explanation["ok"], explanation)
+        self.assertEqual("UNKNOWN", explanation["compatibility"])
+
     def test_repeated_planning_is_deterministic(self) -> None:
         proj = _make_project(self._tmp)
         results = []

@@ -12,6 +12,7 @@ import os
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -178,6 +179,28 @@ class NativeAuditTests(unittest.TestCase):
         self.assertEqual("UNKNOWN", report["security"]["verdict"], report)
         self.assertIsNone(report["security"]["counts"], report)
         self.assert_preserved(before)
+
+
+    def test_native_audit_proxy_option_and_report_precedence(self):
+        with Registry(findings=False) as registry:
+            before = self.fixture("npm", registry.url)
+            with patch.dict(os.environ, {"DEPLOOM_MCP_USE_SYSTEM_PROXY": "true"}):
+                denied = asyncio.run(audit_dependencies(
+                    project_path=str(self.project), package_manager="npm",
+                    registry=registry.url, output_dir=str(self.outputs),
+                    deadline_seconds=60, use_system_proxy=False,
+                ))
+            self.assertTrue(denied["ok"], denied)
+            self.assertFalse(denied["network"]["useSystemProxy"])
+            self.assertEqual("tool", denied["network"]["source"])
+            allowed = asyncio.run(audit_dependencies(
+                project_path=str(self.project), package_manager="npm",
+                registry=registry.url, output_dir=str(self.outputs),
+                deadline_seconds=60, use_system_proxy=True,
+            ))
+            self.assertTrue(allowed["ok"], allowed)
+            self.assertTrue(allowed["network"]["useSystemProxy"])
+            self.assert_preserved(before)
 
     def test_registry_error_never_becomes_clean(self):
         with Registry(fail=True) as registry:

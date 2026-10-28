@@ -148,6 +148,14 @@ def main() -> int:
     run_id = _arg("--run-id", "fake-run")
     draft_dir = artifacts_dir / "runs" / run_id / "draft"
 
+    # Test-only receipt proving the MCP-requested flag reached the actual
+    # planner subprocess through stdio. This file is OUTSIDE the project.
+    if os.environ.get("FAKE_GENERATOR_PROXY_RECEIPT") == "1":
+        _write(
+            draft_dir / "proxy-argv.json",
+            json.dumps({"useSystemProxy": "--use-system-proxy" in sys.argv}),
+        )
+
     if MODE == "slow":
         time.sleep(120)
         return 0

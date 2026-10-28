@@ -132,6 +132,7 @@ class BlueprintOptions:
 
     registry: Optional[str] = None
     include_prerelease: bool = False
+    use_system_proxy: bool = False
     draft_deadline_seconds: float = 60.0
     draft_max_candidates: int = 3
     max_candidates: Optional[int] = None
@@ -603,6 +604,8 @@ def _prepare_argv_full(
         argv += ["--exclude-dependency", f"{package}|{DEFAULT_EXCLUSION_REASON}"]
     if options.include_prerelease:
         argv += ["--include-prerelease"]
+    if options.use_system_proxy:
+        argv += ["--use-system-proxy"]
     if options.max_candidates is not None:
         argv += ["--max-candidates", str(options.max_candidates)]
     if options.http_timeout is not None:
@@ -779,6 +782,8 @@ def _validate_boundary_inputs(pol: BlueprintPolicy, opts: BlueprintOptions) -> O
     protects the headless CLI path (and any embedding) from NaN/Inf numbers
     that would otherwise flow into the planner with undefined semantics.
     """
+    if type(opts.use_system_proxy) is not bool:
+        return _error("invalid-system-proxy", "use_system_proxy must be a boolean")
     deadline = opts.draft_deadline_seconds
     if isinstance(deadline, (int, float)) and (not math.isfinite(float(deadline)) or float(deadline) <= 0):
         return _error("invalid-deadline", "draft_deadline_seconds must be a finite positive number")

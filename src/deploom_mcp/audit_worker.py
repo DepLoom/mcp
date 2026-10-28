@@ -20,6 +20,7 @@ from typing import Any
 
 from deploom_mcp.audit_evidence import AuditError, normalize_audit
 from deploom_mcp.dependency_audit import LOCKS, checked_registry
+from deploom_mcp.proxy_settings import native_proxy_environment
 
 MAX_FILE = 16 * 1024 * 1024
 MAX_STREAM = 4 * 1024 * 1024
@@ -345,7 +346,9 @@ def execute(request: dict) -> dict:
     private, root, project = (Path(request[k]) for k in ("privateDir", "root", "project"))
     sys.path.insert(0, request["coreDir"])
     import manual_dependency_audit as manual
-    env = os.environ.copy()
+    env = native_proxy_environment(
+        os.environ, use_system_proxy=request.get("useSystemProxy", False)
+    )
     for key in list(env):
         lower = key.lower()
         if key in ("NODE_OPTIONS", "NODE_ENV") or (key.startswith("YARN_") and not any(word in key for word in ("AUTH", "REGISTRY"))) or lower.startswith("npm_config_") and not any(word in lower for word in ("token", "auth", "registry", "proxy", "cafile")):
@@ -359,7 +362,9 @@ def execute(request: dict) -> dict:
         "scope": {"kind": "LOCKFILE_ROOT", "requestedProject": str(project), "root": str(root)},
         "provenance": request["provenance"], "projectModified": False, "runtimeVerified": False,
         "security": {"complete": False, "verdict": "UNKNOWN", "counts": None},
-        "lag": {"requested": request["includeLag"], "complete": False, "status": "NOT_RUN"}}
+        "lag": {"requested": request["includeLag"], "complete": False, "status": "NOT_RUN"},
+        "network": {"useSystemProxy": request.get("useSystemProxy", False),
+                    "source": request.get("systemProxySource", "default")}}
     try:
         inputs, manifests, issues = collect_inputs(root, project)
         report["sourceFiles"] = {k: digest_bytes(v) for k, v in inputs.items()}

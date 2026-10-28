@@ -17,6 +17,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from deploom_mcp.audit_evidence import AuditError
+from deploom_mcp.proxy_settings import ProxySettingError, resolve_system_proxy
 
 LOCKS = ("npm-shrinkwrap.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml")
 MAX_REPORT_BYTES = 8 * 1024 * 1024
@@ -57,7 +58,8 @@ def lock_root(project: Path) -> Path:
 
 def validate_request(project_path: str, *, package_manager: str = "auto",
                      registry: str | None = None, deadline_seconds: float = 120,
-                     include_lag: bool = False, lag_months: int = 12) -> dict[str, Any]:
+                     include_lag: bool = False, lag_months: int = 12,
+                     use_system_proxy: bool | None = None) -> dict[str, Any]:
     if not isinstance(project_path, str) or not project_path or not Path(project_path).expanduser().is_absolute():
         raise AuditError("invalid-project", "project_path must be an absolute local directory")
     project = Path(project_path).expanduser().resolve()
@@ -69,9 +71,15 @@ def validate_request(project_path: str, *, package_manager: str = "auto",
         raise AuditError("invalid-deadline", "deadline_seconds must be finite and in [5, 600]")
     if not isinstance(include_lag, bool) or type(lag_months) is not int or lag_months not in (3, 6, 9, 12):
         raise AuditError("invalid-args", "include_lag must be boolean; lag_months must be 3, 6, 9 or 12")
+    try:
+        proxy_enabled, proxy_source = resolve_system_proxy(use_system_proxy)
+    except ProxySettingError as exc:
+        raise AuditError("invalid-system-proxy", str(exc)) from exc
     return {"project": str(project), "root": str(lock_root(project)),
             "packageManager": package_manager, "registry": checked_registry(registry),
-            "deadlineSeconds": float(deadline_seconds), "includeLag": include_lag, "lagMonths": lag_months}
+            "deadlineSeconds": float(deadline_seconds), "includeLag": include_lag,
+            "lagMonths": lag_months, "useSystemProxy": proxy_enabled,
+            "systemProxySource": proxy_source}
 
 
 def compact_audit(report: dict[str, Any], report_path: str, *, max_items: int = 40,
@@ -129,7 +137,8 @@ def _core_provenance() -> tuple[Path, dict[str, Any]]:
 async def audit_dependencies(*, project_path: str, package_manager: str = "auto",
                              registry: str | None = None, deadline_seconds: float = 120,
                              include_lag: bool = False, lag_months: int = 12,
-                             output_dir: str | None = None) -> dict[str, Any]:
+                             output_dir: str | None = None,
+                             use_system_proxy: bool | None = None) -> dict[str, Any]:
     """Audit an input snapshot, not the mutable checkout or installed runtime.
 
     Cancellation propagates; the shared async process runner kills the entire
@@ -137,7 +146,8 @@ async def audit_dependencies(*, project_path: str, package_manager: str = "auto"
     """
     try:
         request = validate_request(project_path, package_manager=package_manager, registry=registry,
-            deadline_seconds=deadline_seconds, include_lag=include_lag, lag_months=lag_months)
+            deadline_seconds=deadline_seconds, include_lag=include_lag, lag_months=lag_months,
+            use_system_proxy=use_system_proxy)
         from deploom_mcp.blueprint import resolve_output_outside
         root = Path(request["root"])
         if output_dir is not None and (not isinstance(output_dir, str) or not output_dir):
