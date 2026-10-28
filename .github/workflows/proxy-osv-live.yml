@@ -1,0 +1,30 @@
+name: proxy-osv-live
+on:
+  pull_request:
+    paths:
+      - 'src/deploom_mcp/**'
+      - 'scripts/smoke_live_proxy_osv.py'
+      - 'tests/test_system_proxy.py'
+      - '.github/workflows/proxy-osv-live.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: proxy-osv-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  live:
+    name: real MCP → Core → OSV via HTTP CONNECT proxy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install MCP + pinned Core
+        run: python -m pip install -e .
+      - name: Live OSV with a real local forward proxy (NOT a mock)
+        run: python scripts/smoke_live_proxy_osv.py
