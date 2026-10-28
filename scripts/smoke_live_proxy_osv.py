@@ -175,10 +175,11 @@ def main() -> int:
                 try:
                     bp = asyncio.run(inspect_mcp(project, env))
                     hosts = proxy.snapshot()
-                    current_known = int((bp.get("summary") or {}).get("securityKnown") or 0)
+                    # Read published Core security evidence from the exact
+                    # result.json/targetAssessment, not the MCP compact summary.
+                    # The compact may omit numeric security detail.
                     status = ((bp.get("status") or {}).get("draftStatus"))
                     valid = bool(bp.get("ok")) and status in ("DRAFT_READY", "DRAFT_PARTIAL")
-                    passed = (valid and hosts.get("api.osv.dev", 0) > 0 and current_known > 0)
                     changed = any(
                         hashlib.sha256((project / name).read_bytes()).hexdigest() != digest
                         for name, digest in original.items()
@@ -193,6 +194,20 @@ def main() -> int:
                     manifest_data = json.loads(Path(manifest_path).read_text(encoding="utf-8")) if manifest_path else {}
                     plan_rows = [x for p in (plan_data.get("proposals") or []) for x in (p.get("rows") or [])]
                     first = plan_rows[0] if plan_rows else {}
+                    metadata = manifest_data.get("metadata") or {}
+                    assessment = (bp.get("targetAssessment") or {}).get("aggregate") or {}
+                    current_known = int(metadata.get("securityKnown") or 0)
+                    security_total = int(metadata.get("securityTotal") or 0)
+                    target_known = int(assessment.get("postPlanSecurityKnown") or 0)
+                    target_total = int(assessment.get("postPlanSecurityTotal") or 0)
+                    target_unknown = int(assessment.get("postPlanSecurityUnknown") or 0)
+                    osv_unknown = int(metadata.get("osvUnknown") or 0)
+                    passed = (
+                        valid and hosts.get("api.osv.dev", 0) > 0
+                        and current_known > 0 and security_total > 0
+                        and target_known > 0 and target_total > 0
+                        and target_unknown == 0 and osv_unknown == 0
+                    )
                     evidence_keys = (
                         "package", "status", "current", "target", "currentVulns",
                         "vulnEvidenceByVersion", "vuln_evidence_by_version",
@@ -213,7 +228,7 @@ def main() -> int:
                         "mcpOk": bp.get("ok"),
                         "draftStatus": status,
                         "securityKnown": current_known,
-                        "securityTotal": (bp.get("summary") or {}).get("securityTotal"),
+                        "securityTotal": security_total,
                         "statusCounts": (bp.get("summary") or {}).get("statusCounts"),
                         "proxyConnects": hosts,
                         "projectUnchanged": True,
