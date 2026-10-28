@@ -131,6 +131,51 @@ def detect_manager(inputs: dict[str, bytes], requested: str) -> str:
     return detected
 
 
+
+def validate_lock_paths(inputs: dict[str, bytes], manager: str, manifests: list[str]) -> None:
+    """Reject native lockfile links that could read outside the input snapshot.
+
+    Workspace links must name a copied member. Non-registry Berry locators can
+    invoke resolvers even during install-state restoration; don't execute them.
+    Classic uses only its parsed inventory, never the native Yarn resolver.
+    """
+    from pathlib import PurePosixPath
+    def safe_relative(value: str) -> bool:
+        path = PurePosixPath(value.replace("\\", "/"))
+        return not path.is_absolute() and ".." not in path.parts and ":" not in value
+    if manager == "npm":
+        filename = "npm-shrinkwrap.json" if "npm-shrinkwrap.json" in inputs else "package-lock.json"
+        lock = load_json(inputs[filename])
+        if lock.get("lockfileVersion") not in (1, 2, 3):
+            raise AuditError("unsupported-lock-format", "npm lockfile version must be 1, 2 or 3")
+        for name, item in (lock.get("packages") or {}).items():
+            if not isinstance(name, str) or not safe_relative(name) or not isinstance(item, dict):
+                raise AuditError("unsafe-lock-path", "npm lock contains an unsafe package path")
+            if item.get("link"):
+                target = str(item.get("resolved") or "")
+                if not target or not safe_relative(target) or target.rstrip("/") + "/package.json" not in manifests:
+                    raise AuditError("unsafe-lock-link", "npm link must resolve to a captured workspace member")
+    elif manager == "yarn-berry":
+        import yaml
+        lock = yaml.safe_load(inputs["yarn.lock"].decode("utf-8-sig"))
+        if not isinstance(lock, dict):
+            raise AuditError("unsupported-lock-format", "Berry lock must be a mapping")
+        for key, item in lock.items():
+            if key == "__metadata":
+                continue
+            if not isinstance(item, dict) or not isinstance(item.get("resolution"), str):
+                raise AuditError("unsupported-lock-format", "Berry locator is missing its resolution")
+            resolution = item["resolution"]
+            if "@npm:" in resolution:
+                continue
+            if "@workspace:" in resolution:
+                target = resolution.split("@workspace:", 1)[1]
+                expected = "package.json" if target == "." else target.rstrip("/") + "/package.json"
+                if safe_relative(target) and expected in manifests:
+                    continue
+            raise AuditError("unsupported-lock-protocol", "Berry audit supports registry and captured workspace locators only")
+
+
 def _digest(inputs: dict[str, bytes]) -> str:
     inventory = {name: digest_bytes(raw) for name, raw in sorted(inputs.items())}
     return digest_bytes(json.dumps(inventory, sort_keys=True, separators=(",", ":")).encode())
@@ -140,6 +185,7 @@ class Runner:
     def __init__(self, private: Path, env: dict[str, str]):
         self.env, self.private = env, private
         self.commands: list[dict] = []
+        self._command_count = 0
         self.secrets = {v for k, v in env.items() if re.search(r"token|password|secret|auth", k, re.I) and len(v) >= 4}
         self._lock = threading.Lock()
 
@@ -166,6 +212,10 @@ class Runner:
             raise AuditError("command-not-allowed", "audit may not install or repair dependencies")
         if not cwd.resolve().is_relative_to(self.private.resolve()):
             raise AuditError("unsafe-cwd", "subprocess directory is not isolated")
+        with self._lock:
+            self._command_count += 1
+            if self._command_count > 512:
+                raise AuditError("command-budget-exceeded", "audit exceeded 512 native requests")
         executable = shutil.which(command[0], path=self.env.get("PATH"))
         if not executable:
             raise AuditError("executable-missing", f"{command[0]} is not available on PATH")
@@ -199,8 +249,8 @@ class Runner:
         with self._lock:
             self.commands.append({"argv": self.redact(command), "exitCode": code,
                 "durationSeconds": round(time.monotonic() - started, 4),
-                "stdout": self.redact(out[:32768]), "stderr": self.redact(err[:8192]),
-                "captureTruncated": len(out) > 32768 or len(err) > 8192, "outputTruncated": any(overflow)})
+                "stdout": self.redact(out[:4096]), "stderr": self.redact(err[:2048]),
+                "captureTruncated": len(out) > 4096 or len(err) > 2048, "outputTruncated": any(overflow)})
         if any(overflow):
             raise AuditError("audit-output-too-large", "native output exceeded the evidence capture limit")
         return code, out, err
@@ -233,10 +283,12 @@ def configure(snapshot: Path, inputs: dict[str, bytes], runner: Runner, requeste
                 if re.search(r"auth|password", key, re.I) and len(expand(value)) >= 4:
                     runner.secrets.add(expand(value))
     (snapshot / ".npmrc").write_text("\n".join(npm_lines) + "\n", encoding="utf-8")
-    empty = runner.private / "empty-npmrc"
-    empty.write_text("", encoding="utf-8")
-    runner.env.update({"NPM_CONFIG_USERCONFIG": str(empty), "NPM_CONFIG_GLOBALCONFIG": str(empty),
-        "npm_config_userconfig": str(empty), "npm_config_globalconfig": str(empty)})
+    empty_user = runner.private / "empty-user-npmrc"
+    empty_global = runner.private / "empty-global-npmrc"
+    empty_user.write_text("", encoding="utf-8")
+    empty_global.write_text("", encoding="utf-8")
+    runner.env.update({"NPM_CONFIG_USERCONFIG": str(empty_user), "NPM_CONFIG_GLOBALCONFIG": str(empty_global),
+        "npm_config_userconfig": str(empty_user), "npm_config_globalconfig": str(empty_global)})
     yarn_config: dict = {}
     allowed = {"npmRegistryServer", "npmAuditRegistry", "npmScopes", "npmRegistries", "npmAlwaysAuth", "npmAuthIdent", "npmAuthToken", "enableStrictSsl", "httpsCaFilePath", "httpsCertFilePath", "httpsKeyFilePath", "httpProxy", "httpsProxy", "unsafeHttpWhitelist"}
     yarn_sources = []
@@ -273,13 +325,17 @@ def configure(snapshot: Path, inputs: dict[str, bytes], runner: Runner, requeste
     registry, metadata_registry = checked_registry(expand(registry)), checked_registry(expand(metadata_registry))
     yarn_config.update({"npmRegistryServer": metadata_registry, "npmAuditRegistry": registry,
         "enableScripts": False, "enableTelemetry": False, "enableColors": False,
-        "enableProgressBars": False, "ignorePath": True, "httpRetry": 0})
+        "enableProgressBars": False, "ignorePath": True, "httpRetry": 0,
+        "enableGlobalCache": False, "globalFolder": str(runner.private / "yarn-global"),
+        "cacheFolder": str(runner.private / "yarn-cache")})
     # Isolated RC filename prevents inherited ancestor/global Yarn plugins.
     rc_name = ".deploom-audit.yarnrc.yml"
     (snapshot / rc_name).write_text(yaml.safe_dump(yarn_config), encoding="utf-8")
     runner.env.update({"YARN_RC_FILENAME": rc_name, "YARN_IGNORE_PATH": "1", "YARN_ENABLE_SCRIPTS": "0",
         "YARN_ENABLE_TELEMETRY": "0", "YARN_ENABLE_COLORS": "0", "YARN_ENABLE_PROGRESS_BARS": "0",
         "YARN_NPM_REGISTRY_SERVER": metadata_registry, "YARN_NPM_AUDIT_REGISTRY": registry,
+        "YARN_ENABLE_GLOBAL_CACHE": "0", "YARN_GLOBAL_FOLDER": str(runner.private / "yarn-global"),
+        "YARN_CACHE_FOLDER": str(runner.private / "yarn-cache"),
         "COREPACK_ENABLE_NETWORK": "0", "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0"})
     return registry, metadata_registry
 
@@ -310,6 +366,7 @@ def execute(request: dict) -> dict:
         report["sourceInputSha256"] = _digest(inputs)
         manager = detect_manager(inputs, request["packageManager"])
         report["packageManager"] = manager
+        validate_lock_paths(inputs, manager, manifests)
         snapshot = private / "project"
         snapshot.mkdir()
         for name, raw in inputs.items():
