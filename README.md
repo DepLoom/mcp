@@ -122,6 +122,11 @@ python -m venv .venv
 # .venv/bin/python -m pip install -e .        # Linux/macOS
 ```
 
+If OSV or npm registry needs the host proxy, see [system proxy](docs/SYSTEM_PROXY.md).
+`DEPLOOM_MCP_USE_SYSTEM_PROXY=true` enables it by default, overridden by
+`use_system_proxy=true|false` per network-using tool. Without either, planning
+keeps its previous `false` behavior.
+
 The source checkout fetches the pinned Core as a submodule. A built wheel is
 self-contained and also provides `deploom-install-skill`; see
 [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) for build, install and isolated
@@ -166,6 +171,7 @@ blockers/reviews with evidence pointers, project scope and next actions.
   "min_lag_ok_pct": 80,                      // minimum registry-lag % for a clean proposal
   "deadline_seconds": 20,                     // default 20, clamped to [5, 600]
   "include_prerelease": false,               // allow prerelease targets
+  "use_system_proxy": null,                 // env setting or false; explicit boolean overrides
   "registry": null,                          // optional npm registry; must be an http(s) URL
   "registry_metadata_ttl": 3600,             // packument TTL seconds for the shared cache
   "output_dir": null,                        // optional; MUST be outside the project

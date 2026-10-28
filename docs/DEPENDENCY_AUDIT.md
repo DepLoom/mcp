@@ -23,9 +23,15 @@ tool list or commit midway through the frozen experiment.
   "deadline_seconds": 120,
   "include_lag": false,
   "lag_months": 12,
+  "use_system_proxy": null,
   "output_dir": "/absolute/path/outside-the-workspace"
 }
 ```
+
+System proxy usage follows the optional `use_system_proxy` parameter or
+`DEPLOOM_MCP_USE_SYSTEM_PROXY`. Explicit false overrides an env true; default
+is false. The native npm/Yarn subprocess inherits proxy environment only when
+enabled; explicit project proxy settings remain. See [SYSTEM_PROXY.md](SYSTEM_PROXY.md).
 
 `package_manager` is `auto`, `npm`, `yarn-classic` or `yarn-berry`. An explicit
 value must agree with the canonical inputs. pnpm, mixed npm/Yarn lockfiles,

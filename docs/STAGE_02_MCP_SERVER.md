@@ -255,3 +255,13 @@ subprocess runner lifecycle (timeout kill of the whole tree, cancellation,
 bounded output). A CI suite on the real pinned Core runs over the network.
 `scripts/smoke_stdio.py` boots `python -m deploom_mcp` over stdio and asserts a
 clean, protocol-only stdout. See README "Tests".
+
+
+## System HTTP/HTTPS proxy (opt-in)
+
+`get_upgrade_plan` accepts `use_system_proxy: boolean|null`. If omitted,
+`DEPLOOM_MCP_USE_SYSTEM_PROXY=true|false` applies; otherwise the default is
+false. Explicit false overrides env true; effective true appends Core's existing
+`--use-system-proxy` flag, with no new Core client. Invalid settings produce
+`invalid-system-proxy`. See [SYSTEM_PROXY.md](SYSTEM_PROXY.md) for OSV
+UNKNOWN_SECURITY troubleshooting and audit behavior.
