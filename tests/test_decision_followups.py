@@ -187,6 +187,18 @@ class FollowupContractTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertEqual("blueprint-identity-mismatch", result["error"]["code"])
 
+
+    def test_modified_cached_reason_cannot_hide_an_underlying_blocker(self):
+        self.bp["conflicts"] = [{
+            "package": "router", "active": True, "stage": "final",
+            "notes": ["PEER_RESOLUTION_DEFERRED: adapter must remain on ^1"],
+        }]
+        self.publish()
+        self.bp["decisionEvidence"] = []
+        self.blueprint_file.write_text(json.dumps(self.bp), encoding="utf-8")
+        result = self.explain(package="router")
+        self.assertEqual("blueprint-identity-mismatch", result["error"]["code"])
+
     def test_expected_digest_mismatch_rejected(self):
         result = self.evaluate({}, expected_decision_digest="0" * 64)
         self.assertEqual("decision-digest-mismatch", result["error"]["code"])
@@ -212,25 +224,27 @@ class FollowupContractTests(unittest.TestCase):
     def test_explain_active_final_blocker_with_pointer_and_lifecycle(self):
         self.bp["conflicts"] = [{
             "package": "router", "active": True, "stage": "final",
-            "notes": ["PEER_CONFLICT: adapter requires router ^1"],
+            "notes": ["PEER_RESOLUTION_DEFERRED: adapter requires router ^1"],
         }]
         self.publish()
         result = self.explain(package="router", expected_decision_digest=self.digest)
         self.assertTrue(result["ok"], result)
         self.assertEqual("DOCUMENTED_CONSTRAINTS", result["verdict"])
-        self.assertEqual("PEER_CONSTRAINT", result["reasons"][0]["code"])
-        self.assertEqual("BLOCKER", result["reasons"][0]["severity"])
-        self.assertEqual("#/conflicts/0", result["reasons"][0]["evidenceRef"])
-        self.assertTrue(result["reasons"][0].get("lifecycle"))
+        source_reason = next(x for x in result["reasons"] if x["evidenceRef"] == "#/conflicts/0")
+        self.assertEqual("PEER_CONSTRAINT", source_reason["code"])
+        self.assertEqual("BLOCKER", source_reason["severity"])
+        self.assertEqual("ACTIVE_FINAL", source_reason["lifecycle"])
         self.assertEqual("UNKNOWN", result["compatibility"])
 
     def test_explain_legacy_notes_are_not_made_final_blockers(self):
-        self.bp["conflicts"] = [{"package": "router", "notes": ["legacy note"]}]
+        self.bp["conflicts"] = [{"package": "router", "notes": ["PEER_RESOLUTION_DEFERRED: historical hint"]}]
         self.publish()
         result = self.explain(package="router")
         self.assertTrue(result["ok"])
         self.assertTrue(result["reasons"])
-        self.assertNotEqual("BLOCKER", result["reasons"][0]["severity"])
+        legacy = next(x for x in result["reasons"] if x["evidenceRef"] == "#/conflicts/0")
+        self.assertEqual("UNRESOLVED_LEGACY", legacy["lifecycle"])
+        self.assertEqual("REVIEW", legacy["severity"])
 
     def test_no_published_reason_is_not_a_compatibility_proof(self):
         result = self.explain(package="adapter")

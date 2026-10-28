@@ -94,6 +94,20 @@ def load_blueprint(path_value: str, expected_decision_digest: str | None = None)
     for key in ("decisionDigest", "evidenceDigest", "policyDigest"):
         if candidate["identities"].get(key) != identities.get(key):
             raise FollowupError("blueprint-identity-mismatch", "published decision/evidence identity no longer matches its contents")
+    # The published list of reasons is not itself a digest input: instead,
+    # digests are derived from canonical conflicts, rows and target health.
+    # Reject a file whose visible decision rows/reasons were edited while
+    # leaving the source facts and digest unchanged.
+    if value.get("decisionEvidence") != candidate.get("decisionEvidence"):
+        raise FollowupError("blueprint-identity-mismatch", "published decision evidence differs from canonical projection")
+    if value.get("targetAssessment") != candidate.get("targetAssessment"):
+        raise FollowupError("blueprint-identity-mismatch", "published target assessment differs from canonical source facts")
+    old_rows = value.get("dependencies") or []
+    new_rows = candidate.get("dependencies") or []
+    for previous, normalized in zip(old_rows, new_rows):
+        for key in ("declarationId", "decisionReasons", "needsReview", "nextAction"):
+            if previous.get(key) != normalized.get(key):
+                raise FollowupError("blueprint-identity-mismatch", "published row evidence is inconsistent")
     return value, hashlib.sha256(raw).hexdigest()
 
 
@@ -203,7 +217,7 @@ def evaluate_assignment(*, blueprint_path: str, assignment: dict[str, str],
             if name in assignment and identity not in assignment and len(by_name[name]) > 1:
                 # Package-only syntax is safe only for a uniform original
                 # assignment. Otherwise an agent must select declaration IDs.
-                previous = {_row_baseline(r) for r in by_name[name]}
+                previous = {(_row_baseline(r), r.get("current")) for r in by_name[name]}
                 if len(previous) != 1:
                     raise FollowupError("ambiguous-package", "use declarationId for a package declared with different baselines")
             selected_version = assignment.get(identity, assignment.get(name, baseline))
