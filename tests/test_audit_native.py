@@ -170,6 +170,15 @@ class NativeAuditTests(unittest.TestCase):
         self.assertEqual("NO_KNOWN_FINDINGS", report["security"]["verdict"], report)
         self.assert_preserved(before)
 
+    def test_berry_registry_error_never_becomes_clean(self):
+        with Registry(fail=True) as registry:
+            before = self.fixture("yarn-berry", registry.url)
+            report = self.run_audit("yarn-berry", registry.url)
+        self.assertFalse(report["ok"], report)
+        self.assertEqual("UNKNOWN", report["security"]["verdict"], report)
+        self.assertIsNone(report["security"]["counts"], report)
+        self.assert_preserved(before)
+
     def test_registry_error_never_becomes_clean(self):
         with Registry(fail=True) as registry:
             before = self.fixture("npm", registry.url)

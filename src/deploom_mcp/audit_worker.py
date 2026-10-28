@@ -424,7 +424,17 @@ def execute(request: dict) -> dict:
             if manager == "yarn-classic":
                 command.append("--legacy-peer-deps")
         code, stdout, stderr = runner.run(command, audit_cwd)
-        security = normalize_audit(stdout, code, manager)
+        # Yarn 4.9.x's --json --no-deprecations emits no JSON when the audit
+        # endpoint returned an empty advisory map. Accept the documented CLI
+        # success signal only for native Yarn 4+, never npm or an error/stderr.
+        # The native integration gate covers both clean and registry-503 cases.
+        berry_empty_success = (
+            manager == "yarn-berry" and int(match[1]) >= 4
+            and code == 0 and not stdout.strip() and not stderr.strip()
+        )
+        security = normalize_audit(
+            stdout, code, manager, confirmed_empty_success=berry_empty_success
+        )
         security["auditExitCode"] = code
         if inventory is not None:
             for item in security["packages"]:

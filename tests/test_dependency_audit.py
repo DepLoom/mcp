@@ -87,6 +87,18 @@ class AuditNormalizationTests(unittest.TestCase):
         self.assertEqual(1, report["counts"]["advisoriesBySeverity"]["moderate"])
         self.assertIsNone(report["counts"]["reportedNodesBySeverity"])
 
+    def test_berry_empty_json_requires_explicit_native_success_proof(self):
+        with self.assertRaises(AuditError):
+            normalize_audit("", 0, "yarn-berry")
+        with self.assertRaises(AuditError):
+            normalize_audit("", 1, "yarn-berry", confirmed_empty_success=True)
+        with self.assertRaises(AuditError):
+            normalize_audit("", 0, "npm", confirmed_empty_success=True)
+        evidence = normalize_audit("", 0, "yarn-berry", confirmed_empty_success=True)
+        self.assertEqual("NO_KNOWN_FINDINGS", evidence["verdict"])
+        self.assertEqual("YARN4_NATIVE_EXIT_ZERO_NO_JSON", evidence["completionEvidence"])
+        self.assertFalse(evidence["installedTreeVerified"])
+
     def test_berry_clean_event(self):
         event = {"type": "info", "name": 0, "displayName": "YN0000", "data": "No audit suggestions"}
         self.assertEqual("NO_KNOWN_FINDINGS", normalize_audit(json.dumps(event), 0, "yarn-berry")["verdict"])

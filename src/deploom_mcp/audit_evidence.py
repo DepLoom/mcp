@@ -22,7 +22,8 @@ def severity(value: Any) -> str:
     return value if isinstance(value, str) and value in SEVERITIES else "unknown"
 
 
-def normalize_audit(stdout: str, exit_code: int, engine: str) -> dict[str, Any]:
+def normalize_audit(stdout: str, exit_code: int, engine: str, *,
+                    confirmed_empty_success: bool = False) -> dict[str, Any]:
     """Accept npm audit v1/v2, Berry raw reports and Berry tree NDJSON.
 
     JSON-shaped errors, arbitrary {}, mixed diagnostics, unrecognized records
@@ -31,6 +32,18 @@ def normalize_audit(stdout: str, exit_code: int, engine: str) -> dict[str, Any]:
     if exit_code not in (0, 1):
         raise AuditError("audit-command-failed", f"audit command exited with {exit_code}")
     if not stdout.strip():
+        # Yarn 4.x currently prints *no JSON lines* when the recursive audit
+        # completes without advisories. Trust this shape only when the worker
+        # explicitly confirmed a supported native Yarn version, exit=0 and
+        # empty stderr, after executing the exact audit command. A bare empty
+        # response can never make npm or an unverified Berry run appear clean.
+        if engine == "yarn-berry" and confirmed_empty_success and exit_code == 0:
+            result = normalize_audit(
+                '{"type":"info","name":0,"displayName":"YN0000","data":"No audit suggestions"}',
+                exit_code, engine,
+            )
+            result["completionEvidence"] = "YARN4_NATIVE_EXIT_ZERO_NO_JSON"
+            return result
         raise AuditError("audit-output-invalid", "audit returned no JSON")
     try:
         whole = json.loads(stdout)

@@ -94,7 +94,11 @@ safe. `status=COMPLETE|INCOMPLETE|ERROR` describes evidence collection.
 `auditExitCode` and `workerExitCode` are independent. Native exit 1 with valid
 findings is not a process/infrastructure failure. Empty/malformed/unknown JSON,
 auth/network errors, contradictory counters and truncated native output cannot
-become a successful clean scan.
+become a successful clean scan. One narrow exception is Yarn 4's native
+`--json --no-deprecations` successful *empty* output: only a verified Yarn 4+
+command with exit 0, empty stdout **and** empty stderr counts as
+`YARN4_NATIVE_EXIT_ZERO_NO_JSON`; the observed registry-503 negative control
+must remain UNKNOWN. An empty npm response is never a clean result.
 
 Counts separately expose unique advisories, affected package records and, when
 provided by npm, reported node counts. Yarn Classic inventory entries represent
