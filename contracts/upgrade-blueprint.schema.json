@@ -154,6 +154,18 @@
     "unresolved": { "type": "array", "items": { "type": "object" } },
     "perProject": { "type": "object" },
     "projections": { "type": "object" },
+    "targetAssessment": {
+      "description": "Published health of the exact final chosen/kept versions, distinct from current coverage and physical verification. Missing or invalid target evidence fails closed. A fully assessed policy violation can have evidenceComplete=true.",
+      "type": "object",
+      "required": ["scope", "aggregate", "projects", "evidenceComplete", "needsReview"],
+      "properties": {
+        "scope": { "const": "FINAL_PLANNED_ASSIGNMENT" },
+        "aggregate": { "type": "object" },
+        "projects": { "type": "object", "additionalProperties": { "type": "object" } },
+        "evidenceComplete": { "type": "boolean" },
+        "needsReview": { "type": "boolean" }
+      }
+    },
     "hashes": {
       "type": "object",
       "properties": {
@@ -232,6 +244,8 @@
         "code": { "type": "string" },
         "severity": { "enum": ["BLOCKER", "REVIEW", "INFO"] },
         "package": { "type": ["string", "null"] },
+        "scope": { "enum": ["project", "aggregate"] },
+        "project": { "type": ["string", "null"] },
         "message": { "type": "string" },
         "nextAction": { "type": "string" },
         "evidenceRef": { "type": "string" },

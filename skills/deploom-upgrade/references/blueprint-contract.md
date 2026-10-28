@@ -62,7 +62,8 @@ parallel execution safety `UNPROVEN`.
 | Field | How to use it |
 |---|---|
 | `dependencies` | Read `status`, target, `reason`, `evidence`, `nextAction`, `evidenceRef`, and review flags together. |
-| `decisionEvidence` | Typed `code`, `severity`, package, message, next action and artifact reference. `BLOCKER` is decision-critical; `REVIEW` is unresolved evidence, not automatically a hard conflict. |
+| `decisionEvidence` | Typed `code`, `severity`, package, message, next action and artifact reference. Check `scope`/`project` on assessment-level reasons; `package=null` does not identify an offending package. `BLOCKER` is decision-critical; `REVIEW` is not automatically a hard conflict. |
+| `targetAssessment` | Read `aggregate` and `projects` for the exact chosen or retained versions: `postPlanGoal`, security coverage/counters, lag shortfalls and available policy thresholds. Check its `evidenceComplete` and `needsReview` independently. |
 | `decisionCompleteness` | Check `projectionComplete`, `requiresArtifactRead`, `planningComplete`, `evidenceComplete`, critical evidence counts, blocker count, workspace reconciliation and next action. |
 | `workspaceCoverage` | Manifest discovery/evaluation inventory, unevaluated manifests and reconciliation requirements. `SINGLE_MANIFEST_PLANNING` plus `jointAssignment=NOT_COMPUTED` is not a joint workspace solution. |
 | `artifacts.blueprint` | Full evidence when compact fields are insufficient, ambiguous or truncated. Preserve the exact JSON reference with the decision. |
@@ -70,11 +71,27 @@ parallel execution safety `UNPROVEN`.
 | `identities` | Semantic input, policy, published-evidence and decision digests; their scopes differ from raw artifact hashes and final installation checks. |
 | `runtimeProvenance` | Actual generator/MCP/source Skill identity when observed. `skill.loadedClientContent=UNVERIFIED` is not upgraded by a source hash or installation receipt. |
 
-`truncation.truncated=false` only describes displayed rows. Read full evidence
-when `requiresArtifactRead=true`, critical counts differ, a reason/ref is missing,
-or a contradiction cannot be resolved. `projectionComplete` does not prove
-planning or evidence completeness. Conversely, a complete compact response can
-be sufficient; do not open every artifact mechanically.
+`truncation.truncated=false` describes display completeness, not evidence
+quality or policy success. Read full evidence when `requiresArtifactRead=true`,
+critical counts differ, target project summaries are clipped, a reason/ref is
+missing, or a contradiction cannot be resolved. `projectionComplete` does not
+prove planning or evidence completeness. Conversely, a complete compact
+response can be sufficient; do not open every artifact mechanically.
+
+Check target assessment even when the current version is clean and the row is
+`PROPOSED`. `TARGET_SECURITY_UNKNOWN` requires missing exact-version evidence;
+never transfer current-version security coverage to a proposed target.
+`TARGET_POLICY_BLOCKED` records a known violation of the applied policy;
+resolve the affected assignment before execution. Evidence can be complete and
+the plan blocked. Preserve both facts. `TARGET_POLICY_UNKNOWN` requires the
+missing policy/lag evidence. Missing or invalid target assessment
+remains unknown, including on older responses. If full evidence is also missing,
+record the gap rather than inferring a clean target or repeatedly reading it.
+
+A project/aggregate reason does not prove which package caused it. Review the
+affected scope and use the referenced assessment to localize the problem before
+making a package claim. A row's review flag does not by itself identify that row
+as the offender. A blocked plan also does not prove that all alternatives fail.
 
 For conflicts with `lifecycle=UNRESOLVED_LEGACY`, inspect the referenced original
 constraint and final row. A legacy note can outlive the proposal it concerned;

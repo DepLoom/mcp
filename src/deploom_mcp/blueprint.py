@@ -47,6 +47,7 @@ from deploom_mcp.decisions import (
     requires_contract_support, runtime_provenance, workspace_coverage,
 )
 from deploom_mcp.distribution import resolve_core_dir, blueprint_schema_path
+from deploom_mcp.target_assessment import TARGET_PROJECTION_FIELDS, projected_health
 
 BLUEPRINT_SCHEMA_VERSION = 2
 KIND = "upgrade-blueprint"
@@ -235,12 +236,7 @@ def _projections(manifest: Mapping[str, Any]) -> Dict[str, Any]:
         "processedTotal", "pending", "interrupted", "registryFailed",
         "osvUnknown", "noTarget", "candidateTruncated", "candidateTruncatedTargetless",
         "candidateTruncatedProposed", "blocked", "peerCompatUnresolved", "ok",
-        "postPlanLagOk", "postPlanLagOkPct", "postPlanScopeTotal",
-        "postPlanTargetLevel", "postPlanPolicyRequired", "postPlanReserveRequired",
-        "postPlanPolicyShortfall", "postPlanReserveShortfall", "postPlanShortfall",
-        "postPlanCritical", "postPlanHigh", "postPlanModerate", "postPlanLow",
-        "postPlanSecurityKnown", "postPlanSecurityUnknown", "postPlanSecurityTotal",
-        "postPlanGoal",
+        *TARGET_PROJECTION_FIELDS,
     )
     return {k: meta.get(k) for k in keys if k in meta}
 
@@ -308,9 +304,7 @@ def transcode_upgrade_blueprint(
             "unknown": health.get("unknown"),
             "excluded": health.get("excluded"),
             "insufficientData": bool(health.get("insufficient_data")),
-            "postPlanTargetLevel": health.get("postPlanTargetLevel"),
-            "postPlanLagOkPct": health.get("postPlanLagOkPct"),
-            "postPlanGoal": health.get("postPlanGoal"),
+            **projected_health(health),
         }
 
     counts = plan.get("counts") or {}

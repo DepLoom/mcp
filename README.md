@@ -45,6 +45,8 @@ The boundary contract is detailed in
 [`docs/STAGE_01_UPGRADE_BLUEPRINT.md`](docs/STAGE_01_UPGRADE_BLUEPRINT.md);
 the MCP server in [`docs/STAGE_02_MCP_SERVER.md`](docs/STAGE_02_MCP_SERVER.md);
 the universal agent skill in [`docs/STAGE_03_UNIVERSAL_SKILL.md`](docs/STAGE_03_UNIVERSAL_SKILL.md).
+The exact-target evidence contract is in [`docs/DECISION_CONTRACT.md`](docs/DECISION_CONTRACT.md);
+experiment preparation and agent handoff are in [`docs/EXPERIMENT_HANDOFF.md`](docs/EXPERIMENT_HANDOFF.md).
 
 ## Repository layout
 

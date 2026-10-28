@@ -16,6 +16,8 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
+from deploom_mcp.target_assessment import target_assessment, target_decision_evidence
+
 TARGET_MODES = ("pinned", "advisory")
 OBJECTIVES = ("minimum-change-to-policy", "latest-compatible-in-approved-lines")
 MAX_DRAFT_CANDIDATES = 128
@@ -298,7 +300,7 @@ def _evidence_kind(message: str, status: str = "") -> tuple[str, str, str]:
 
 
 def decision_evidence(blueprint: Mapping[str, Any]) -> list[Dict[str, Any]]:
-    result: list[Dict[str, Any]] = []
+    result: list[Dict[str, Any]] = target_decision_evidence(target_assessment(blueprint))
     for index, row in enumerate(blueprint.get("dependencies") or []):
         evidence = row.get("evidence") or {}
         status = row.get("status", "UNKNOWN")
@@ -360,13 +362,20 @@ def enrich_decisions(blueprint: Dict[str, Any], *, candidate_cap: int = 3,
     manifest = logical_path(str(project_path / "package.json")) if project_path else "package.json"
     for row in blueprint.get("dependencies") or []:
         row["declarationId"] = f"{manifest}#{row.get('kind') or 'unknown'}:{row.get('package')}"
+    blueprint["targetAssessment"] = target_assessment(blueprint)
     evidence = decision_evidence(blueprint)
     blueprint["decisionEvidence"] = evidence
     by_package: Dict[str, list[Dict[str, Any]]] = {}
     for item in evidence:
         by_package.setdefault(str(item.get("package") or ""), []).append(item)
     for row in blueprint.get("dependencies") or []:
-        items = by_package.get(str(row.get("package") or ""), [])
+        items = list(by_package.get(str(row.get("package") or ""), []))
+        # Project/aggregate findings concern the assignment, not a proven
+        # offending package. Keep that attribution when requiring row review.
+        items.extend(item for item in evidence if item.get("scope") == "aggregate"
+                     or (item.get("scope") == "project" and item.get("project") == row.get("project")))
+        items.sort(key=lambda item: (0 if item["severity"] == "BLOCKER" else 1 if item["severity"] == "REVIEW" else 2,
+                                    str(item.get("evidenceRef") or ""), item["code"]))
         row["decisionReasons"] = items
         if row.get("status") == "EXCLUDED":
             # The user's scope decision is already resolved. Related peer or
@@ -397,7 +406,7 @@ def enrich_decisions(blueprint: Dict[str, Any], *, candidate_cap: int = 3,
         dynamic_paths[str(project_path)] = "<project>"
     semantic_reasons = []
     for item in evidence:
-        reason = {k: item.get(k) for k in ("code", "severity", "package", "message", "nextAction", "lifecycle")}
+        reason = {k: item.get(k) for k in ("code", "severity", "package", "scope", "project", "message", "nextAction", "lifecycle")}
         for path, replacement in sorted(dynamic_paths.items(), key=lambda p: len(p[0]), reverse=True):
             reason["message"] = reason["message"].replace(path, replacement)
         semantic_reasons.append(reason)
@@ -409,6 +418,7 @@ def enrich_decisions(blueprint: Dict[str, Any], *, candidate_cap: int = 3,
     evidence_rows.sort(key=lambda x: json.dumps(x, sort_keys=True))
     evidence_hash = digest({"rows": evidence_rows, "decisionEvidence": semantic_reasons,
                             "perProject": blueprint.get("perProject") or {},
+                            "targetAssessment": blueprint["targetAssessment"],
                             "coverage": {k: (blueprint.get("summary") or {}).get(k) for k in
                                          ("metadataKnown", "metadataTotal", "securityKnown", "securityTotal", "insufficientData")}})
     blueprint["identities"] = {

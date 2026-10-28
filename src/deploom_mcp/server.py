@@ -63,6 +63,7 @@ from deploom_mcp.blueprint import (
 from deploom_mcp.decisions import (
     MAX_DRAFT_CANDIDATES, OBJECTIVES, decision_evidence, normalize_decision_contract,
 )
+from deploom_mcp.target_assessment import target_assessment, target_decision_evidence
 
 SERVER_NAME = "deploom-mcp"
 TOOL_NAME = "get_upgrade_plan"
@@ -81,8 +82,8 @@ DEFAULT_INLINE_ROWS = 100
 # P2 (deterministic response size): display-priority groups and the packages
 # inside each group are also bounded, and the whole serialized response must
 # fit a byte budget before it is returned. All reductions are pure truncation
-# of display lists -- status counts, per-project health and artifact paths stay
-# complete -- and are recapped in `truncation.limitsHit`.
+# of display lists. Aggregate target health, full counts and artifact paths stay
+# visible; clipped project health is explicit in `truncation.limitsHit`.
 DEFAULT_INLINE_GROUPS = 50
 DEFAULT_PACKAGES_PER_GROUP = 50
 DEFAULT_INLINE_EVIDENCE = 50
@@ -366,10 +367,30 @@ def _compact_payload(
         })
     inline_packages = sum(len(g["packages"]) for g in groups)
 
-    all_rows = blueprint.get("dependencies") or []
+    # Re-read final-target facts even for a legacy/pre-enriched blueprint. A
+    # stored empty reason list or stale completeness flag cannot hide them.
+    assessment = target_assessment(blueprint)
+    target_evidence = target_decision_evidence(assessment)
     all_evidence = blueprint.get("decisionEvidence")
     if all_evidence is None:
         all_evidence = decision_evidence(blueprint)
+    all_evidence = [item for item in all_evidence
+                    if not str(item.get("code") or "").startswith("TARGET_")]
+    all_evidence.extend(target_evidence)
+    all_rows = []
+    for original in blueprint.get("dependencies") or []:
+        row = dict(original)
+        affected = [item for item in target_evidence
+                    if item.get("scope") == "aggregate" or item.get("project") == row.get("project")]
+        if affected and row.get("status") != "EXCLUDED":
+            if not row.get("needsReview"):
+                row["nextAction"] = affected[0]["nextAction"]
+            row["needsReview"] = True
+        all_rows.append(row)
+    for group in groups:
+        names = set(group["packages"])
+        group["needsReview"] = bool(group["needsReview"] or any(
+            row.get("needsReview") for row in all_rows if row.get("package") in names))
     critical_evidence = sorted(
         [e for e in all_evidence if e.get("severity") != "INFO"],
         key=lambda e: (0 if e.get("severity") == "BLOCKER" else 1,
@@ -384,8 +405,20 @@ def _compact_payload(
             return value[:MAX_DETAIL_CHARS] + "… [read evidenceRef]"
         return value
 
-    visible_evidence = [{k: detail(item.get(k)) for k in ("code", "severity", "package", "message", "nextAction", "evidenceRef", "lifecycle")}
+    visible_evidence = [{k: detail(item.get(k)) for k in ("code", "severity", "scope", "project", "package", "message", "nextAction", "evidenceRef", "lifecycle")}
                         for item in critical_evidence[:max_inline_evidence]]
+    target_projects = assessment["projects"]
+    visible_projects = dict(list(target_projects.items())[:max_inline_evidence])
+    target_clipped = len(visible_projects) != len(target_projects)
+    compact_assessment = {
+        **assessment,
+        "aggregate": {key: detail(value) for key, value in assessment["aggregate"].items()},
+        "projects": {name: {key: detail(value) for key, value in health.items()}
+                     for name, health in visible_projects.items()},
+        "totalProjects": len(target_projects),
+        "inlineProjects": len(visible_projects),
+        "evidenceRef": "#/targetAssessment",
+    }
     total_rows = len(all_rows)
     rows = all_rows[:max_inline_rows]
     dependencies = []
@@ -428,13 +461,16 @@ def _compact_payload(
                          for k in ("metadataKnown", "metadataTotal", "securityKnown", "securityTotal"))
     evidence_complete = (coverage_known and summary["metadataKnown"] == summary["metadataTotal"]
                          and summary["securityKnown"] == summary["securityTotal"]
-                         and not summary.get("insufficientData") and not is_partial and not unresolved)
+                         and not summary.get("insufficientData") and not is_partial and not unresolved
+                         and assessment["evidenceComplete"])
     projection_complete = (len(rows) == total_rows and len(visible_evidence) == len(critical_evidence)
-                           and not details_clipped and not coverage_clipped)
+                           and not details_clipped and not coverage_clipped and not target_clipped)
     next_action = ("READ_FULL_DECISION_EVIDENCE" if not projection_complete else
                    "RECONCILE_WORKSPACE_PLANS" if coverage.get("reconciliationRequired") else
                    "RESOLVE_PARTIAL_PLAN" if is_partial else
                    "RECONCILE_CONSTRAINTS" if blocker_count else
+                   "FETCH_TARGET_SECURITY_EVIDENCE" if any(e["code"] == "TARGET_SECURITY_UNKNOWN" for e in target_evidence) else
+                   "INSPECT_TARGET_ASSESSMENT" if target_evidence else
                    "REVIEW_WITHIN_EXISTING_AUTHORITY" if critical_evidence else "VERIFY_PROPOSED_ASSIGNMENT")
     payload = {
         "ok": True,
@@ -474,12 +510,13 @@ def _compact_payload(
         "summary": {
             "totalDependencies": summary.get("totalDependencies"),
             "proposed": summary.get("proposed"),
-            "needsReview": summary.get("needsReview"),
+            "needsReview": sum(bool(row.get("needsReview")) for row in all_rows),
             "statusCounts": summary.get("statusCounts") or {},
         },
         "recommendationGroups": groups,
         "dependencies": dependencies,
         "decisionEvidence": visible_evidence,
+        "targetAssessment": compact_assessment,
         "decisionCompleteness": {
             "projectionComplete": projection_complete,
             "requiresArtifactRead": not projection_complete,
@@ -520,6 +557,7 @@ def _compact_payload(
         "totalEvidence": len(critical_evidence),
         "detailsClipped": details_clipped,
         "coverageClipped": coverage_clipped,
+        "targetAssessmentClipped": target_clipped,
     }
     return payload, metrics
 
@@ -610,6 +648,8 @@ def compact_blueprint(
             limits_hit.append("evidenceDetails")
         if metrics["coverageClipped"]:
             limits_hit.append("workspaceCoverage")
+        if metrics["targetAssessmentClipped"]:
+            limits_hit.append("targetAssessment")
 
         payload["truncation"] = {
             "truncated": True,  # finalized below once limitsHit is known

@@ -50,8 +50,10 @@ Advisory mode changes recommendations, never proven peers/engines or user pins.
    limitation; do not fabricate a DepLoom plan.
 2. **Plan.** Send the objective, `target_mode`, scope and registry explicitly.
    Inspect critical evidence before questions or edits: conflicts, unknowns,
-   unresolved peers, coverage, source/policy identity, and next action. Read
-   `references/blueprint-contract.md`. **Untruncated rows do not mean complete
+   unresolved peers, exact-target security/policy assessment, coverage,
+   source/policy identity, and next action. Current-version security does not
+   assess a proposed version; complete evidence can describe a blocked plan.
+   Read `references/blueprint-contract.md`. **Untruncated rows do not mean complete
    decision evidence.** Open the full artifact when critical evidence is absent,
    ambiguous or marked incomplete, even if `truncation.truncated=false`.
    In `PLAN_ONLY`, treat Core execution instructions as future guidance; do not

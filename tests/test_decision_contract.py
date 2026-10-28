@@ -23,19 +23,25 @@ from deploom_mcp.server import _build_request, compact_blueprint, get_upgrade_pl
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def clean_target_health():
+    return {"postPlanSecurityKnown": 1, "postPlanSecurityUnknown": 0,
+            "postPlanSecurityTotal": 1, "postPlanCritical": 0, "postPlanHigh": 0,
+            "postPlanModerate": 0, "postPlanLow": 0, "postPlanGoal": "feasible"}
+
+
 def blueprint(*, conflict=False, capped=False, migration=False):
     row = {"project": "app", "package": "ui-runtime", "kind": "runtime", "current": "1.0.0",
            "target": "2.0.0", "status": "proposed", "reason": "Candidate update", "group": 1,
            "candidateSearchTruncated": capped,
            "breakingChanges": ["Review runtime migration"] if migration else [], "migrationNotes": []}
-    plan = {"proposals": [{"project": "app", "rows": [row], "health": {"total": 1}}],
+    plan = {"proposals": [{"project": "app", "rows": [row], "health": {"total": 1, **clean_target_health()}}],
             "counts": {"total": 1, "proposed": 1}, "unknowns": [], "unresolved": [],
             "conflicts": [{"package": "ui-runtime", "active": True, "stage": "final", "notes": [
                 "PEER_RESOLUTION_DEFERRED: desired=2.0.0; resolved=current 1.0.0; consumer requires ^1"
             ]}] if conflict else []}
     manifest = {"status": "DRAFT_READY", "runId": "run-a", "generatedAt": None,
                 "verificationStatus": "NOT_VERIFIED", "authority": "PLANNING_ONLY", "compatibility": "UNKNOWN",
-                "metadata": {}, "inputFilesByProject": {"app": [{"name": "package.json"}]}}
+                "metadata": clean_target_health(), "inputFilesByProject": {"app": [{"name": "package.json"}]}}
     bp = transcode_upgrade_blueprint(plan, manifest, project_path="/synthetic/app", project_name="app",
                                      policy=BlueprintPolicy(), artifacts={"plan": "/artifacts/a/plan.json"},
                                      blueprint_path="/artifacts/a/blueprint.json")
@@ -88,6 +94,10 @@ class DecisionEvidenceTests(unittest.TestCase):
         bp = blueprint()
         bp["summary"].update(metadataKnown=1, metadataTotal=1, securityKnown=1, securityTotal=1)
         self.assertTrue(compact_blueprint(bp)["decisionCompleteness"]["evidenceComplete"])
+        # Current coverage alone cannot certify a legacy target assessment.
+        bp["projections"] = {}
+        bp["perProject"]["app"] = {"total": 1}
+        self.assertFalse(compact_blueprint(bp)["decisionCompleteness"]["evidenceComplete"])
 
     def test_migration_reason_requires_review_but_ordinary_recommendation_does_not(self):
         self.assertFalse(blueprint()["dependencies"][0]["needsReview"])

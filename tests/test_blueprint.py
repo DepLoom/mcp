@@ -119,6 +119,10 @@ class StatusVocabularyTests(unittest.TestCase):
 
 class TranscodeUnitTests(unittest.TestCase):
     def _synthetic(self):
+        target_health = {"postPlanSecurityKnown": 2, "postPlanSecurityUnknown": 0,
+                         "postPlanSecurityTotal": 2, "postPlanCritical": 0,
+                         "postPlanHigh": 0, "postPlanModerate": 0, "postPlanLow": 0,
+                         "postPlanGoal": "feasible", "postPlanLagOkPct": 100.0}
         plan = {
             "schemaVersion": 1,
             "projects": ["app"],
@@ -135,7 +139,7 @@ class TranscodeUnitTests(unittest.TestCase):
                      "group": 1, "latest": "1.0.0", "candidateSearchTruncated": False,
                      "peerCompatUnresolved": False, "breakingChanges": [], "migrationNotes": []},
                 ],
-                "health": {"total": 2, "critical": 0, "high": 0, "postPlanGoal": "feasible", "postPlanLagOkPct": 100.0},
+                "health": {"total": 2, "critical": 0, "high": 0, **target_health},
             }],
             "unknowns": [], "conflicts": [], "unresolved": [],
             "counts": {"proposed": 1, "ok": 1, "total": 2},
@@ -147,7 +151,7 @@ class TranscodeUnitTests(unittest.TestCase):
             "elapsedMs": 123, "deadline": 60, "policyHash": "ph",
             "verificationStatus": "NOT_VERIFIED", "authority": "PLANNING_ONLY", "compatibility": "UNKNOWN",
             "partialReason": None, "summary": "ok",
-            "metadata": {"metadataKnown": 2, "metadataTotal": 2, "securityKnown": 2, "securityTotal": 2, "insufficientData": False},
+            "metadata": {"metadataKnown": 2, "metadataTotal": 2, "securityKnown": 2, "securityTotal": 2, "insufficientData": False, **target_health},
             "inputHashes": {"package.json": "h1", "package-lock.json": "h2"},
             "inputFilesByProject": {"app": [{"name": "package.json"}, {"name": "package-lock.json"}]},
             "hashes": {"plan": "planhash", "prompt": "prompthash"},
