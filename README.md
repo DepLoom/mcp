@@ -3,7 +3,7 @@
 Headless upgrade-planning boundary and MCP server for the DepLoom ecosystem.
 
 DepLoom MCP exposes the Python planning Core through one tool,
-`get_upgrade_plan`. The Core is maintained in `AlexanderLevenskikh/deploom` and
+`get_upgrade_plan`. The Core is maintained in [`DepLoom/core`](https://github.com/DepLoom/core) and
 pinned here as `upstream/deploom`; built wheels include that exact headless Core,
 the schema and the canonical Skill. Desktop and Electron are not required.
 
