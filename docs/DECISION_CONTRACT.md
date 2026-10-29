@@ -15,6 +15,7 @@ additive fields; existing planning-only statuses retain their meaning.
 | `objective` | `"minimum-change-to-policy"` | Preserve the existing minimum-change health-policy behavior, or request `latest-compatible-in-approved-lines`. |
 | `mutable_packages` | `null` | `null` permits all selected declarations to move; `[]` permits none. Packages outside the set remain constraints and remain in health accounting. This is different from `exclude`. |
 | `approved_version_lines` | `null` | Map package names to allowed nonnegative integer major numbers. For the latest-compatible objective, an absent entry limits new candidates to the current major. An explicit empty array permits no new major; the current assignment remains available as a constraint. |
+| `required_packages` | `null` | Optional user-required movement, forwarded as the existing Core legacy `policies: {package: "required"}`. Each name must be mutable and not excluded. **Requires a change but does not specify an exact version.** An unspecified package remains governed by normal policy; it is not implicitly required. |
 | `draft_max_candidates` | `3` | Positive integer in `1..128` controlling the Core security-evidence candidate search. It is not the static solver's domain limit and is independent of the deadline. |
 | `previous_evidence_digest` | `null` | Optional lowercase SHA-256 from a previous response, for diagnosing unchanged published evidence. It is not a server-side cache key. |
 
@@ -30,8 +31,24 @@ and is explicitly marked `policy.coreContractSupport="LEGACY"`.
 
 The Python boundary preserves legacy intent fields. In particular,
 `policies: {package: "required"}` requires movement from current; it does not
-name an exact target. Requiring movement outside an explicit mutable set is an
-invalid intent. `exclude` remains an explicit health-scope exclusion.
+name an exact target. `required_packages` exposes only this **existing Core
+intent** on the MCP boundary, with pre-run validation and no expansion of MCP
+execution authority. Requiring movement outside an explicit mutable set or on
+an excluded package is an invalid intent. `exclude` remains an explicit
+health-scope exclusion; `mutable_packages=["name"]` keeps other packages in
+compatibility context and immutable, whereas `exclude` removes them from
+health scope.
+
+The compact response's optional `policy.requestedRequiredPackages` records
+what MCP forwarded; it **does not independently prove an installable exact
+assignment**. The normalized V1 `decisionContract` continues to specify
+major lines, NOT exact patch versions. For an explicitly requested version
+(e.g. a breaking API release), use existing `evaluate_assignment` to inspect
+the published-plan scope, then independently verify registry, peers, security,
+install/build/tests/runtime. An alternative verdict of `REPLAN_REQUIRED` or
+`REVIEW_REQUIRED` is not permission to claim `PROPOSED` or `VERIFIED`.
+New exact-version planning would require a separately designed/validated Core
+contract and tests, not mapping an exact version onto `approved_version_lines`.
 
 `POLICY_SATISFIED` means the existing health objective is satisfied. It does not
 mean a dependency is the freshest compatible candidate. The latest-compatible
