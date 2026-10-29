@@ -20,7 +20,9 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import requests
+import jsonschema
 from mcp import ClientSession, StdioServerParameters, stdio_client
+from deploom_mcp.distribution import blueprint_schema_path, release_manifest_path
 
 ALLOWED = {"api.osv.dev", "registry.npmjs.org"}
 
@@ -202,7 +204,50 @@ def main() -> int:
                     target_total = int(assessment.get("postPlanSecurityTotal") or 0)
                     target_unknown = int(assessment.get("postPlanSecurityUnknown") or 0)
                     osv_unknown = int(metadata.get("osvUnknown") or 0)
+                    # Repin gate: assert diagnostics from the *actual pinned Core*
+                    # survive into full Blueprint and the bounded MCP protocol.
+                    full_path = Path((bp.get("artifacts") or {}).get("blueprint") or "")
+                    if not full_path.is_file():
+                        raise RuntimeError("PINNED_CORE_BLUEPRINT_MISSING")
+                    full_blueprint = json.loads(full_path.read_text(encoding="utf-8"))
+                    schema = json.loads(blueprint_schema_path().read_text(encoding="utf-8"))
+                    jsonschema.validate(full_blueprint, schema)
+                    release = json.loads(release_manifest_path().read_text(encoding="utf-8"))
+                    core_pin = release.get("core", {}).get("revision")
+                    full_rows = full_blueprint.get("dependencies") or []
+                    compact_rows = bp.get("dependencies") or []
+                    core_registry = plan_data.get("registryDiagnostics")
+                    full_registry = full_blueprint.get("registryDiagnostics")
+                    compact_registry = bp.get("registryDiagnostics")
+                    source_row = first
+                    full_row = full_rows[0] if len(full_rows) == 1 else {}
+                    compact_row = compact_rows[0] if len(compact_rows) == 1 else {}
+                    registry_projection_confirmed = (
+                        isinstance(core_registry, dict)
+                        and isinstance(full_registry, dict)
+                        and isinstance(compact_registry, dict)
+                        and all(r.get("schemaVersion") == 1
+                                for r in (core_registry, full_registry, compact_registry))
+                        and core_registry.get("examinedVersions") == full_registry.get("examinedVersions")
+                        == compact_registry.get("examinedVersions")
+                        and source_row.get("status") == "proposed"
+                        and full_row.get("status") == compact_row.get("status") == "PROPOSED"
+                        and source_row.get("target") == full_row.get("target") == compact_row.get("target")
+                        and bool(source_row.get("registryCandidateDiagnostics"))
+                        and bool(full_row.get("registryCandidateDiagnostics"))
+                        and bool(compact_row.get("registryCandidateDiagnostics"))
+                        and full_row["registryCandidateDiagnostics"].get("rejectionCounts")
+                        == compact_row["registryCandidateDiagnostics"].get("rejectionCounts")
+                        and not any(x.get("noTargetDiagnosticCode")
+                                    for x in (source_row, full_row, compact_row))
+                    )
+                    core_release_verified = (
+                        core_pin == "0faa83f63b863f8ee47e4e6282a4f11c057824b5"
+                        and (full_blueprint.get("runtimeProvenance") or {}).get("core", {})
+                            .get("matchesExpectedRelease") is True
+                    )
                     passed = (
+                        registry_projection_confirmed and core_release_verified and
                         valid and hosts.get("api.osv.dev", 0) > 0
                         and current_known > 0 and security_total > 0
                         and target_known > 0 and target_total > 0
@@ -233,6 +278,9 @@ def main() -> int:
                         "proxyConnects": hosts,
                         "projectUnchanged": True,
                         "preflightVulnerabilityRecords": len(preflight_vulns),
+                        "registryDiagnosticProjectionConfirmed": bool(registry_projection_confirmed),
+                        "coreReleaseInventoryVerified": bool(core_release_verified),
+                        "coreRevision": core_pin,
                         "note": "Planning evidence only: no installed-tree or runtime security proof.",
                     }
                     print(json.dumps(result, sort_keys=True))

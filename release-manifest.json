@@ -1,7 +1,7 @@
 {
   "blueprintSchemaVersion": 2,
   "core": {
-    "contentSha256": "a516ac31c5129e49566c17e0be56310577fb9bb93320fb215389dd8820a4f887",
+    "contentSha256": "aba84762c128d25e34c3b7ee14d8d65c9f36256638c6db66ac69993234fb8b34",
     "files": {
       "VERSION": "2698c63efcc74d9adc7a29889fc4ecc7fadfb58c4588db3f117f9d87cfaaff40",
       "analyze_verification_telemetry.py": "1ee235ef0b9cf275fe34c22cf16cb4049e88fb19953096ddaecbb73d7a700e6f",
@@ -49,7 +49,7 @@
       "dependency_audit_branch.py": "c556a4ce33f105eb10763e0d874e4f2a03043bb94744ab68336a063a5d779f15",
       "dependency_compatibility_evidence.py": "6233e7d8bedca194fd030fa883aac57d9c3d51e79a342cec21420b04f757d192",
       "dependency_interaction.py": "af9f4e3b2458f2d58e557b3e241aaf4bab4596c6fbf59a0b355d46bb7215196c",
-      "dependency_live_roadmap_generator.py": "be98c697d7ea8afb4eacdf779f0daf7da5716f9c0feafdafe94636f76ec28f10",
+      "dependency_live_roadmap_generator.py": "1ed14f09ecade602f1690f9e572f14405e3c40aa04eb55ee2cf0d26f7d5cecd7",
       "dependency_live_roadmap_worker.py": "1b76e6403c2964a45fd0fbca46031a0baa40bb5c3e4c6afdc943940973359aac",
       "dependency_release_branch.py": "072cec1182cf8d801fb9c727cd1266f0711f5eff49cb8799a304647ff17c87fe",
       "deploom_failure.py": "0f3d75cb02e3440379b736ab709cd916634a60e9f14d03b4be3cd14c162e8687",
@@ -84,7 +84,7 @@
       "iterative_target_deferrals.py": "f92426c77d50bba4c81740f470d71605592d165e0b7260e5bc5118ca1f57b64d",
       "iterative_task.py": "a7b245714ec9e92713a6c98f2e472c81fc13e7a8b77ed9f4a28760c5fbce5bdb",
       "iterative_trial_workspace.py": "d9e140c72553244cfea3a8055faa97ecc85342ffcd73b4d70f45aea0151a09a2",
-      "lockfile_consistency.py": "c52be3f9bc042ab16590d733840fd5a2c20ab74b261dbd67390b108ac3d29f6a",
+      "lockfile_consistency.py": "12bb0614bd8b3d4ef6078bdade9e33eb99badf43b6d789cf0c5da129ba547a5a",
       "lockfile_preflight.py": "b13ee58c00905c27223062e872f0c3219239b76249a19b3ea6c15e1fd1238924",
       "manual_dependency_audit.py": "2c7b393466c3b2b1e030fbacbb28b52697b7b21eddcb09c80c15e93eee8e3340",
       "materialization_retention.py": "9e4c37f073de700ef4a0d0fe2a5225a3b71b7e3e814c1fd48ab59189af5f6abf",
@@ -101,6 +101,7 @@
       "project_runtime.py": "fe74962da83588c361b69a962b8988fe400623e8464409d546df050a5f213973",
       "project_topology.py": "2ff960672379ec74264980e7fdea2fc95cf7570c95dd6362d01cb03bb7bf6772",
       "proven_dependency_state.py": "675591dce5dcd8b59f301811ed1e8b4e12183289844369ce4a1ba0e4b27fc119",
+      "registry_candidate_diagnostics.py": "8a2eacbdc17916807d6e21ff1664dc03b7dd0ee2ba5acc8725a709ada138c09f",
       "registry_metadata_cache.py": "71599efd302a915173c01afd303b1f43de6d5535a77874699bece32a369b36e2",
       "registry_request_context.py": "e1a5783e8859b7477a9a69fd600feaeeb1cae403a09098181099d1bd898fad0e",
       "reparse_materialization.py": "ddb8d24337b510f6b432571fa26917f9270433416f9b69f612cfbceaec2509c7",
@@ -138,7 +139,7 @@
       "yarn_berry.py": "bd769e797823ff99129983f8295a52b5aac1f01f9be2c2a8eac9ffeaf20903d2"
     },
     "repository": "https://github.com/DepLoom/core",
-    "revision": "ba35b37c311fba13937ad4b2f46f760d57d9ab11",
+    "revision": "0faa83f63b863f8ee47e4e6282a4f11c057824b5",
     "version": "1.0.0-preview.20"
   },
   "mcpVersion": "0.2.0",
