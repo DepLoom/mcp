@@ -29,9 +29,22 @@ class PilotContractTests(unittest.TestCase):
         core={"ok":True,"authority":"PLANNING_ONLY","verificationStatus":"NOT_VERIFIED",
               "draftStatus":"DRAFT_READY","chalkStatus":"PROPOSED","chalkTarget":"5.3.0",
               "companionStatus":"NO_CHANGE","companionTarget":None}
-        self.assertEqual("GO",evaluate({"responses":[core]})["gate"])
+        self.assertEqual("EXACT_VERSION_OBJECTIVE_NOT_SUPPORTED_BY_V1",
+            evaluate({"responses":[core]})["productGap"])
         self.assertEqual("NO_EXACT_CHALK_5_3_0_TARGET",
             evaluate({"responses":[dict(core,chalkTarget="5.6.2")]})["productGap"])
         self.assertEqual("NO_GO",evaluate({"responses":[dict(core,companionStatus="PROPOSED")]} )["gate"])
+
+    def test_required_core_movement_is_not_an_exact_version_contract(self):
+        row={"ok":True,"authority":"PLANNING_ONLY","verificationStatus":"NOT_VERIFIED",
+             "draftStatus":"DRAFT_READY","chalkStatus":"PROPOSED","chalkTarget":"5.3.0",
+             "companionStatus":"DEFERRED","companionTarget":None,
+             "requiredPackagesRequested":["chalk"]}
+        verdict=evaluate({"responses":[row]})
+        self.assertEqual("NO_GO",verdict["gate"])
+        self.assertTrue(verdict["incidentalTargetMatch"])
+        self.assertEqual("EXACT_VERSION_OBJECTIVE_NOT_SUPPORTED_BY_V1",
+                         verdict["productGap"])
+
 
 if __name__=="__main__":unittest.main()
