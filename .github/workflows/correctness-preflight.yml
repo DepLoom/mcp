@@ -104,5 +104,8 @@ jobs:
           path: |
             ${{ runner.temp }}/p2-chalk-receipt.json
             ${{ runner.temp }}/p2-chalk-frozen-baseline/
+          # The frozen seed's .npmrc is deliberately public-only and must be
+          # retained. Without it the captured baseline SHA cannot replay.
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
