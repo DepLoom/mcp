@@ -32,7 +32,7 @@ STATUSES = {
 }
 # Runtime is installed from the provided wheel, NEVER imported from editable source.
 RUNTIME = r"""
-import asyncio,hashlib,json,os,pathlib,sys
+import asyncio,hashlib,json,os,pathlib,sys,re
 from mcp import ClientSession,StdioServerParameters,stdio_client
 import deploom_mcp
 from deploom_mcp.distribution import release_manifest_path,resolve_core_dir
