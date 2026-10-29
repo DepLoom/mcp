@@ -279,15 +279,21 @@ def plan_oracle(result: dict, expect_foreign: bool = False) -> str:
         return "MCP_EXCLUSION_MISSING"
     if expect_foreign:
         row = rows["kontur-fixture-a"]
-        if row.get("status") != "NO_TARGET" or row.get("target") is not None:
-            status = row.get("status")
-            allowed = {"PROPOSED", "NO_TARGET", "BLOCKED", "UNKNOWN_SECURITY",
-                       "UNKNOWN_METADATA", "NO_CHANGE", "CANDIDATE_CAP"}
-            public_status = status if type(status) is str and status in allowed else "OTHER"
-            has_target = "WITH_TARGET" if row.get("target") is not None else "NO_TARGET_VALUE"
-            return "MCP_FOREIGN_STATUS_" + public_status + "_" + has_target
-        if row.get("noTargetDiagnosticCode") != "NO_INSTALLABLE_ARTIFACT":
-            return "MCP_FOREIGN_ARTIFACT_DIAGNOSTIC_MISSING"
+        if row.get("status") == "PROPOSED" or row.get("target") is not None:
+            return "MCP_FOREIGN_ARTIFACT_SELECTED"
+        diagnostic = row.get("registryCandidateDiagnostics")
+        if (not isinstance(diagnostic, dict)
+                or diagnostic.get("acceptedUpgradeCandidates") != 0
+                or (diagnostic.get("rejectionCounts") or {}).get("FOREIGN_TARBALL_ORIGIN", 0) < 1):
+            return "MCP_FOREIGN_ORIGIN_EVIDENCE_MISSING"
+        # NO_INSTALLABLE is conditional on the *original* no-target status:
+        # a goal already satisfied by the current version need not be no-target.
+        if (row.get("status") == "NO_TARGET"
+                and row.get("noTargetDiagnosticCode") != "NO_INSTALLABLE_ARTIFACT"):
+            return "MCP_NO_TARGET_CODE_MISSING"
+        if (row.get("status") != "NO_TARGET"
+                and row.get("noTargetDiagnosticCode") is not None):
+            return "MCP_SPURIOUS_NO_TARGET_CODE"
     else:
         for name in ("kontur-fixture-a", "kontur-fixture-b"):
             row = rows[name]
@@ -368,9 +374,13 @@ def run_preflight(wheel_root: Path, wheel: Path) -> dict:
             with patch.dict(os.environ, env, clear=True):
                 make_fixture(str(blocked), reg.base)
             before = fingerprints(blocked)
+            meta = reg.store.metadata("kontur-fixture-a")
+            observed_url = meta["versions"]["1.9.0"]["dist"]["tarball"]
+            checks["foreign_fixture_origin"] = (
+                "PASS" if not observed_url.startswith(reg.base + "/") else "FOREIGN_FIXTURE_INVALID")
             plan = asyncio.run(packaged_plan(wheel_root, blocked, root / "plan-foreign",
                                              reg.base, env))
-            checks["foreign_tarball_blocked"] = plan_oracle(plan, expect_foreign=True)
+            checks["foreign_tarball_not_admitted"] = plan_oracle(plan, expect_foreign=True)
             checks["foreign_blueprint_schema"] = verify_blueprint(plan, schema)
             checks["blocked_checkout_unchanged"] = (
                 "PASS" if fingerprints(blocked) == before else "SOURCE_MUTATED_BY_PLANNER")
@@ -385,7 +395,8 @@ def run_preflight(wheel_root: Path, wheel: Path) -> dict:
             "tampered_lock_rejected": "LOCK_VERSION_MISMATCH",
             "runtime_regression_rejected": "TEST_FAILED",
             "source_checkout_unchanged": "PASS",
-            "foreign_tarball_blocked": "PASS",
+            "foreign_tarball_not_admitted": "PASS",
+            "foreign_fixture_origin": "PASS",
             "foreign_blueprint_schema": "PASS",
             "blocked_checkout_unchanged": "PASS",
         }

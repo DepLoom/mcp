@@ -83,10 +83,24 @@ class IndependentOracleTests(unittest.TestCase):
         bad_foreign = copy.deepcopy(plan)
         bad_foreign["dependencies"][0]["status"] = "NO_TARGET"
         bad_foreign["dependencies"][0]["target"] = None
-        self.assertEqual("MCP_FOREIGN_ARTIFACT_DIAGNOSTIC_MISSING",
+        self.assertEqual("MCP_FOREIGN_ORIGIN_EVIDENCE_MISSING",
+                         plan_oracle(bad_foreign, expect_foreign=True))
+        bad_foreign["dependencies"][0]["registryCandidateDiagnostics"] = {
+            "acceptedUpgradeCandidates": 0,
+            "rejectionCounts": {"FOREIGN_TARBALL_ORIGIN": 1},
+        }
+        self.assertEqual("MCP_NO_TARGET_CODE_MISSING",
                          plan_oracle(bad_foreign, expect_foreign=True))
         bad_foreign["dependencies"][0]["noTargetDiagnosticCode"] = "NO_INSTALLABLE_ARTIFACT"
         self.assertEqual("PASS", plan_oracle(bad_foreign, expect_foreign=True))
+        # Policy-satisfied/current version is not required to say NO_TARGET.
+        retained = copy.deepcopy(bad_foreign)
+        retained["dependencies"][0]["status"] = "POLICY_SATISFIED"
+        del retained["dependencies"][0]["noTargetDiagnosticCode"]
+        self.assertEqual("PASS", plan_oracle(retained, expect_foreign=True))
+        retained["dependencies"][0]["target"] = "1.9.0"
+        self.assertEqual("MCP_FOREIGN_ARTIFACT_SELECTED",
+                         plan_oracle(retained, expect_foreign=True))
 
     def test_local_registry_denies_unpublished_tarballs(self):
         with LocalRegistry() as reg:
