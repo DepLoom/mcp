@@ -55,7 +55,8 @@ async def run():
    tools=await session.list_tools()
    if "get_upgrade_plan" not in {t.name for t in tools.tools}: return {"toolAvailable":False}
    tool=next(t for t in tools.tools if t.name=="get_upgrade_plan")
-   schema=tool.inputSchema if isinstance(tool.inputSchema,dict) else {}
+   tool_schema=getattr(tool,"inputSchema",None)
+   schema=tool_schema if isinstance(tool_schema,dict) else {}
    supports_required="required_packages" in (schema.get("properties") or {})
    base={"project_path":str(project),"registry":"https://registry.npmjs.org",
          "target_level":"yellow","min_lag_ok_pct":80,"deadline_seconds":75,
@@ -262,6 +263,16 @@ def main() -> int:
                     report["mcpPlanWallSeconds"]=round(time.monotonic()-t,3)
                     if process.returncode:
                         report["productGap"]="PACKAGED_MCP_CALL_FAILED"
+                        # Never emit subprocess stderr, which may expose paths
+                        # or private registry/auth diagnostics. Record only a
+                        # fixed-class failure marker.
+                        stderr=process.stderr.decode("utf-8",errors="replace")
+                        names=("SyntaxError","NameError","AttributeError",
+                               "UnboundLocalError","TypeError","KeyError",
+                               "AssertionError","ImportError","ModuleNotFoundError",
+                               "RuntimeError","McpError","ExceptionGroup")
+                        report["failureClass"]=next(
+                            (n for n in names if n in stderr),"OTHER")
                     else:
                         payload=json.loads(process.stdout.decode("utf-8").splitlines()[-1])
                         report.update(evaluate(payload))
