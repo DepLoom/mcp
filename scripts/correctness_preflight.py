@@ -204,10 +204,19 @@ def selftest(wheel: pathlib.Path) -> dict:
         with seeded_registry() as registry:
             with clean_npm_environment(root, registry):
                 baseline = root / "baseline"
-                with contextlib.redirect_stdout(io.StringIO()):
-                    make_fixture(str(baseline), registry)
+                try:
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        make_fixture(str(baseline), registry)
+                except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+                    import re
+                    found = re.search(r"(?i)(?:npm\\s+(?:ERR!|error)\\s+code\\s+)([A-Z0-9_-]+)", str(exc))
+                    return {"status": "FAIL", "reason": "BASELINE_NPM_PREP_FAILED",
+                            "npmErrorCode": found.group(1) if found else "UNKNOWN"}
                 positive = root / "positive"
-                make_positive_candidate(baseline, positive, registry)
+                try:
+                    make_positive_candidate(baseline, positive, registry)
+                except (RuntimeError, OSError, subprocess.SubprocessError):
+                    return {"status": "FAIL", "reason": "POSITIVE_LOCK_PREP_FAILED"}
                 result = verify_candidate(baseline, positive)
                 negative: dict[str, str] = {}
                 cases = ("excluded-upgraded", "stale-lock", "tampered-checks", "foreign-tarball",
@@ -287,6 +296,7 @@ def main() -> int:
     output.parent.mkdir(parents=True,exist_ok=True)
     output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps({"status":report["status"],"report":output.name,
+                      "reason":report.get("reason"),
                       "negativeCases":len(report.get("negativeRejections", {})),
                       "packagedStdio":report.get("packagedMcpStdio",{}).get("status","NOT_RUN")},
                      sort_keys=True))
