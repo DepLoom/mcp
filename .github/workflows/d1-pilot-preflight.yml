@@ -1,0 +1,78 @@
+name: d1-pilot-no-agent-preflight
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/d1_pilot.py'
+      - 'scripts/d1_mcp_value_preflight.py'
+      - 'tests/test_d1_pilot.py'
+      - 'docs/D1_PILOT_HANDOFF.md'
+      - '.github/workflows/d1-pilot-preflight.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  no-paid-models:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install actual pinned MCP and build prerequisites
+        run: python -m pip install -e . build setuptools wheel
+      - name: Build exact checked-out wheel
+        run: python -m build --no-isolation
+      - name: Recreate P2 public frozen input and verify independent oracle
+        run: >-
+          python scripts/correctness_preflight.py breaking-demo
+          --wheel dist/deploom_mcp-0.2.0-py3-none-any.whl
+          --snapshot-dir "${{ runner.temp }}/d1-frozen-chalk"
+          --report "${{ runner.temp }}/d1-p2-control.json"
+      - name: REAL Chalk-specific MCP value gate (zero agent calls)
+        run: >-
+          python scripts/d1_mcp_value_preflight.py
+          --frozen "${{ runner.temp }}/d1-frozen-chalk"
+          --wheel dist/deploom_mcp-0.2.0-py3-none-any.whl
+          --report "${{ runner.temp }}/d1-mcp-value.json"
+      - name: CLI native event parsing and explicitly fake dry run
+        run: |
+          python -m unittest discover -s tests -p test_d1_pilot.py -v
+          python scripts/d1_pilot.py dry-run --out "${{ runner.temp }}/d1-fake"
+          python scripts/d1_pilot.py doctor
+      - name: Display GO/NO_GO honestly (CI PASS does NOT imply MCP usefulness)
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          data=json.loads((Path(os.environ['RUNNER_TEMP'])/'d1-mcp-value.json').read_text())
+          text=f"D1 PRODUCT VALUE: {data['gate']}; gap: {data.get('productGap')}\n"
+          print(text)
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8') as out:
+              out.write(text)
+          PY
+      - name: Public launch packet, frozen input and sanitary receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: d1-no-agent-launch-packet
+          path: |
+            ${{ runner.temp }}/d1-p2-control.json
+            ${{ runner.temp }}/d1-mcp-value.json
+            ${{ runner.temp }}/d1-fake/
+            ${{ runner.temp }}/d1-frozen-chalk/
+            scripts/d1_pilot.py
+            scripts/d1_mcp_value_preflight.py
+            docs/D1_PILOT_HANDOFF.md
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
