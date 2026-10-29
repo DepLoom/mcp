@@ -57,7 +57,17 @@ async def run():
    tool=next(t for t in tools.tools if t.name=="get_upgrade_plan")
    tool_schema=getattr(tool,"inputSchema",None)
    schema=tool_schema if isinstance(tool_schema,dict) else {}
-   supports_required="required_packages" in (schema.get("properties") or {})
+   # MCP SDKs may expose inputSchema through a serialization alias.
+   alternate=tool.model_dump(by_alias=True) if hasattr(tool,"model_dump") else {}
+   if not schema and isinstance(alternate,dict):
+    schema=alternate.get("inputSchema") or alternate.get("input_schema") or {}
+   properties=schema.get("properties") if isinstance(schema,dict) else {}
+   properties=properties if isinstance(properties,dict) else {}
+   known_fields=("project_path","target_level","mutable_packages",
+                 "approved_version_lines","required_packages",
+                 "draft_max_candidates")
+   observed_fields=[name for name in known_fields if name in properties]
+   supports_required="required_packages" in properties
    base={"project_path":str(project),"registry":"https://registry.npmjs.org",
          "target_level":"yellow","min_lag_ok_pct":80,"deadline_seconds":75,
          "use_system_proxy":True,"registry_metadata_ttl":0,
@@ -107,6 +117,9 @@ async def run():
          "AssertionError","UnboundLocalError","OverflowError","SyntaxError",
          "ModuleNotFoundError","ImportError","Z3Exception","unsat",
          "required update","required assignment","candidate search",
+         "USER_BASELINE_REQUIRED_UPDATE", "NO_FEASIBLE_ASSIGNMENT",
+         "PROJECT_NODE_ENGINE_CONFLICT","USER_APPROVED_VERSION_LINE",
+         "EXACT_SOLVER_UNSAT","manifest", "lockfile",
          "NO_INSTALLABLE_ARTIFACT","Traceback")
      safe_failure_markers=[x for x in safe_failure_classes if x.lower() in error_detail.lower()]
      planner_message=str(error_obj.get("message") or "")
@@ -194,6 +207,9 @@ async def run():
                        "exceptionType":kind,"toolAvailable":True})
    return {"responses":responses,"toolAvailable":True,
            "requiredFieldInMcpToolSchema":supports_required,
+           "knownFieldsAdvertised":observed_fields,
+           "inputSchemaType":(type(tool_schema).__name__
+                if type(tool_schema).__name__ in ("dict","JsonSchemaDict","Schema") else "OTHER"),
            "coreRevision":manifest["core"]["revision"],
            "coreInventorySha256":manifest["core"]["contentSha256"],
            "mcpVersion":manifest["mcpVersion"],
@@ -301,6 +317,8 @@ def main() -> int:
                         report.update(evaluate(payload))
                         report["requests"]=payload.get("responses",[])
                         report["requiredFieldInMcpToolSchema"]=payload.get("requiredFieldInMcpToolSchema")
+                        report["knownFieldsAdvertised"]=payload.get("knownFieldsAdvertised",[])
+                        report["inputSchemaType"]=payload.get("inputSchemaType")
                         report["coreRevision"]=payload.get("coreRevision")
                         report["coreInventorySha256"]=payload.get("coreInventorySha256")
                         report["skillBundleSha256"]=payload.get("skillBundleSha256")
