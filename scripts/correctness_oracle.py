@@ -246,8 +246,12 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const render=require('./src/format.cjs');
 assert.equal(require('is-number')('42'), true);
-Promise.resolve().then(()=>render('Ada')).then(message=>{
-  assert.equal(message, 'READY Ada');
+Promise.resolve().then(async()=>{
+  // No agent can pass by hardcoding the one build/test example.
+  for (const name of ['Ada', 'Lin', 'Ada & Lin']) {
+    const message = await render(name);
+    assert.equal(message, 'READY ' + name);
+  }
   const output=JSON.parse(fs.readFileSync('dist/result.json','utf8'));
   assert.deepEqual(output, {message:'READY Ada', excluded:'7.0.0'});
   console.log('INDEPENDENT_CHALK_RUNTIME_PASS');
