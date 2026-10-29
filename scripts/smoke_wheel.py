@@ -79,6 +79,10 @@ assert not registry_evidence.safe_registry_artifact_url("https://nexus.invalid/n
 assert not registry_evidence.safe_registry_artifact_url("https://nexus.invalid/npm", "https://nexus.invalid:bad/npm/a.tgz")
 assert "lockfile_consistency.py" in release["core"]["files"]
 assert hashlib.sha256((core/"lockfile_consistency.py").read_bytes()).hexdigest()==release["core"]["files"]["lockfile_consistency.py"]
+import lockfile_consistency as lock_policy
+assert lock_policy.registry_artifact_url_allowed("https://nexus.invalid/npm", "git+ssh://git@github.com/org/repo.git")
+assert lock_policy.registry_artifact_url_allowed("https://nexus.invalid/npm", "file:///tmp/local-package")
+assert not lock_policy.registry_artifact_url_allowed("https://nexus.invalid/npm", "random://evil.invalid/archive")
 assert not (core/"desktop").exists() and not (core/".git").exists()
 subprocess.run([sys.executable, str(core/"dependency_live_roadmap_generator.py"), "--help"], check=True, capture_output=True)
 project=root/"project"

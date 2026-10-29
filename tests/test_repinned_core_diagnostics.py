@@ -57,6 +57,15 @@ class RepinnedCoreRegistryContractTests(unittest.TestCase):
             with self.subTest(url=url):
                 self.assertFalse(safe_registry_artifact_url(registry,url))
 
+    def test_valid_vcs_lockfile_resolution_is_separate_from_registry_admission(self) -> None:
+        from lockfile_consistency import registry_artifact_url_allowed
+        from registry_candidate_diagnostics import safe_registry_artifact_url
+        registry = "https://nexus.invalid/repository/npm"
+        uri = "git+ssh://git@github.com/example/project.git#v1"
+        self.assertTrue(registry_artifact_url_allowed(registry, uri))
+        self.assertFalse(safe_registry_artifact_url(registry, uri))
+        self.assertFalse(registry_artifact_url_allowed(registry, "unknown://outside.invalid/pkg"))
+
     def test_authoritative_registry_guard_remains_in_charge_of_versions(self) -> None:
         import dependency_live_roadmap_generator as core
         from registry_candidate_diagnostics import no_target_diagnostic_code, summarize_structural_candidates

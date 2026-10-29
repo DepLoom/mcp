@@ -3,7 +3,7 @@
 ## Dependencies and boundaries
 
 - Base: **DepLoom/mcp PR #6** (`feat/registry-diagnostics-projection-20261029`), not `main`. The diff of this dependent PR must contain only the Core gitlink repin, regenerated release inventory, regression guards and this note. Review and merge the base PR before integrating this dependent PR; no merge or release is part of P2.5.
-- Source Core: **DepLoom/core PR #4** commit `c6bc30e47d51b02d7b907af5a05cd0a638529c28`, not merged into Core `main`. The Git submodule points at that exact commit. Do not silently repoint the gitlink to a Core `main` that lacks the diagnostics.
+- Source Core: **DepLoom/core PR #4** commit `49232ab510da8fa854f36d84a639f3db28ab363c`, not merged into Core `main`. The Git submodule points at that exact commit. Do not silently repoint the gitlink to a Core `main` that lacks the diagnostics.
 - Old embedded Core: `ba35b37c311fba13937ad4b2f46f760d57d9ab11` (`1.0.0-preview.20`). New Core is also `1.0.0-preview.20` — the upstream version string is not changed. If a new released version is required, use the separate release process; do not rename it in this PR.
 
 ## Review outcome (Core PR #4 and MCP PR #6)
@@ -33,4 +33,9 @@
 
 ## P2.6 security review / repin update
 
-This stacked PR now targets Core PR #4 hardening commit `c6bc30e47d51b02d7b907af5a05cd0a638529c28` and inherits the separate MCP PR #6 sanitization/counter-consistency update. Core now rejects dot/encoded traversal, userinfo, query-bearing tarballs, malformed ports and out-of-prefix redirects **before** contacting their destinations. The installed-wheel smoke asserts the new guard and the bundled `lockfile_consistency.py` hash. Full CI and live OSV must be rerun on the exact updated repin head; no merge/release is approved.
+This stacked PR now targets Core PR #4 hardening commit `49232ab510da8fa854f36d84a639f3db28ab363c` and inherits the separate MCP PR #6 sanitization/counter-consistency update. Core now rejects dot/encoded traversal, userinfo, query-bearing tarballs, malformed ports and out-of-prefix redirects **before** contacting their destinations. The installed-wheel smoke asserts the new guard and the bundled `lockfile_consistency.py` hash. Full CI and live OSV must be rerun on the exact updated repin head; no merge/release is approved.
+
+
+### P2.6 lockfile protocol compatibility
+
+The final Core guard keeps npm tarball admission HTTP(S)-only and fail-closed, while the separate lockfile resolution policy allows recognized VCS schemes (`git`, `git+ssh`, `git+https`, `ssh`) without URL passwords, plus local `file://` paths. Remote `file://host`, unknown schemes, malformed ports and credential-bearing VCS URLs remain rejected. Regression coverage and installed-wheel assertions pin this behavior.

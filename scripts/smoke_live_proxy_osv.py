@@ -242,7 +242,7 @@ def main() -> int:
                                     for x in (source_row, full_row, compact_row))
                     )
                     core_release_verified = (
-                        core_pin == "c6bc30e47d51b02d7b907af5a05cd0a638529c28"
+                        core_pin == "49232ab510da8fa854f36d84a639f3db28ab363c"
                         and (full_blueprint.get("runtimeProvenance") or {}).get("core", {})
                             .get("matchesExpectedRelease") is True
                     )

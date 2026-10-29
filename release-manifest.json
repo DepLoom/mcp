@@ -1,7 +1,7 @@
 {
   "blueprintSchemaVersion": 2,
   "core": {
-    "contentSha256": "52318ea3a7adc8ce58a6bdbd5951cf3e9c0d28aba0a5559460db89a88e65da6f",
+    "contentSha256": "b44da62eeb783b1e05ebcfdf97b45f0210cdecdf121086a0377bcbbb747c41ab",
     "files": {
       "VERSION": "2698c63efcc74d9adc7a29889fc4ecc7fadfb58c4588db3f117f9d87cfaaff40",
       "analyze_verification_telemetry.py": "1ee235ef0b9cf275fe34c22cf16cb4049e88fb19953096ddaecbb73d7a700e6f",
@@ -84,7 +84,7 @@
       "iterative_target_deferrals.py": "f92426c77d50bba4c81740f470d71605592d165e0b7260e5bc5118ca1f57b64d",
       "iterative_task.py": "a7b245714ec9e92713a6c98f2e472c81fc13e7a8b77ed9f4a28760c5fbce5bdb",
       "iterative_trial_workspace.py": "d9e140c72553244cfea3a8055faa97ecc85342ffcd73b4d70f45aea0151a09a2",
-      "lockfile_consistency.py": "12bb0614bd8b3d4ef6078bdade9e33eb99badf43b6d789cf0c5da129ba547a5a",
+      "lockfile_consistency.py": "8e413e8fe6d2536172ebbff376e23c303229acff44b80cdd01ba82701bab2771",
       "lockfile_preflight.py": "b13ee58c00905c27223062e872f0c3219239b76249a19b3ea6c15e1fd1238924",
       "manual_dependency_audit.py": "2c7b393466c3b2b1e030fbacbb28b52697b7b21eddcb09c80c15e93eee8e3340",
       "materialization_retention.py": "9e4c37f073de700ef4a0d0fe2a5225a3b71b7e3e814c1fd48ab59189af5f6abf",
@@ -139,7 +139,7 @@
       "yarn_berry.py": "bd769e797823ff99129983f8295a52b5aac1f01f9be2c2a8eac9ffeaf20903d2"
     },
     "repository": "https://github.com/DepLoom/core",
-    "revision": "c6bc30e47d51b02d7b907af5a05cd0a638529c28",
+    "revision": "49232ab510da8fa854f36d84a639f3db28ab363c",
     "version": "1.0.0-preview.20"
   },
   "mcpVersion": "0.2.0",
