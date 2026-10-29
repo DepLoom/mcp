@@ -96,6 +96,22 @@ async def run():
      code=chalk.get("noTargetDiagnosticCode")
      if code not in safe_codes:code=None
      reason=str(chalk.get("reason") or "")
+     # A failed Core subprocess can embed paths / URLs in error.detail.
+     # Publish only known exception / policy class names and a numeric exit.
+     error_obj=response.get("error") if isinstance(response.get("error"),dict) else {}
+     error_detail=error_obj.get("detail") or ""
+     error_detail=error_detail if isinstance(error_detail,str) else ""
+     safe_failure_classes=(
+         "DECISION_CONTRACT_INVALID","BaselineConstraintVerificationError",
+         "ValueError","TypeError","KeyError","AttributeError","RuntimeError",
+         "AssertionError","UnboundLocalError","OverflowError","SyntaxError",
+         "ModuleNotFoundError","ImportError","Z3Exception","unsat",
+         "required update","required assignment","candidate search",
+         "NO_INSTALLABLE_ARTIFACT","Traceback")
+     safe_failure_markers=[x for x in safe_failure_classes if x.lower() in error_detail.lower()]
+     planner_message=str(error_obj.get("message") or "")
+     exit_match=re.search(r"planner exited with code ([0-9]{1,3})",planner_message)
+     exit_code=int(exit_match.group(1)) if exit_match else None
      # Whitelist typed symbolic categories; never propagate free-text strings.
      reason_codes=[
          key for key in (
@@ -118,6 +134,8 @@ async def run():
        "ok":response.get("ok") is True,
        # Safe typed code only: do not serialize untrusted error messages,
        # subprocess stderr, registry URLs or environment paths.
+       "coreFailureMarkers":safe_failure_markers,
+       "coreExitCode":exit_code,
        "errorCode":((error_code if re.fullmatch(r"[a-z][a-z0-9_-]{0,79}",error_code)
                       else "UNSAFE_OR_MISSING_CODE")
                      if isinstance((error_code := ((response.get("error") or {}).get("code")
