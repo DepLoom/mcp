@@ -92,6 +92,7 @@
         "done": { "type": ["string", "null"] }
       }
     },
+    "registryDiagnostics": { "$ref": "#/definitions/registryDiagnostics" },
     "dependencies": {
       "type": "array",
       "items": {
@@ -111,6 +112,8 @@
           "status": {
             "$ref": "#/definitions/dependencyStatus"
           },
+          "noTargetDiagnosticCode": { "$ref": "#/definitions/noTargetDiagnosticCode" },
+          "registryCandidateDiagnostics": { "$ref": "#/definitions/registryCandidateDiagnostics" },
           "needsReview": { "type": "boolean" },
           "reason": { "type": ["string", "null"] },
           "nextAction": { "type": "string" },
@@ -223,6 +226,228 @@
     }
   },
   "definitions": {
+    "registryDiagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "authority",
+        "rejectionCounts"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "authority": {
+          "const": "STRUCTURAL_REGISTRY_EVIDENCE_ONLY"
+        },
+        "examinedVersions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rejectedVersions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "noInstallableArtifactRows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rejectionCounts": {
+          "$ref": "#/definitions/registryRejectionCounts"
+        },
+        "projectionTruncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "registryCandidateDiagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "authority",
+        "rejectionCounts",
+        "rejectionSamples",
+        "rejectedArtifactOrigins"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "authority": {
+          "const": "STRUCTURAL_REGISTRY_EVIDENCE_ONLY"
+        },
+        "examined": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "accepted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rejected": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "upgradeCandidates": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "acceptedUpgradeCandidates": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rejectedUpgradeCandidates": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "allUpgradeCandidatesRejected": {
+          "type": "boolean"
+        },
+        "rejectionCounts": {
+          "$ref": "#/definitions/registryRejectionCounts"
+        },
+        "configuredRegistry": {
+          "$ref": "#/definitions/registryIdentity"
+        },
+        "metadataRequestBase": {
+          "$ref": "#/definitions/registryIdentity"
+        },
+        "metadataRequestBaseAuthority": {
+          "const": "CONFIGURATION_NOT_HTTP_TRACE"
+        },
+        "rejectionSamples": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/definitions/registryRejectionSample"
+          }
+        },
+        "rejectedArtifactOrigins": {
+          "type": "array",
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "maxLength": 265,
+            "pattern": "^https?://[^/?#@]+$"
+          }
+        },
+        "physicalProbe": {
+          "$ref": "#/definitions/registryPhysicalProbe"
+        },
+        "projectionTruncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "registryIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "origin",
+        "pathPrefix"
+      ],
+      "properties": {
+        "origin": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 265,
+          "pattern": "^https?://[^/?#@]+$"
+        },
+        "pathPrefix": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 160,
+          "pattern": "^/"
+        }
+      }
+    },
+    "registryRejectionCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "FOREIGN_TARBALL_ORIGIN": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "BAD_REGISTRY_PATH": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "MISSING_DIST_TARBALL": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "HTTP_ARTIFACT_UNAVAILABLE": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "registryRejectionSample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "version"
+      ],
+      "properties": {
+        "code": {
+          "enum": [
+            "FOREIGN_TARBALL_ORIGIN",
+            "BAD_REGISTRY_PATH",
+            "MISSING_DIST_TARBALL",
+            "HTTP_ARTIFACT_UNAVAILABLE"
+          ]
+        },
+        "version": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]{1,32})?(?:\\+[0-9A-Za-z.-]{1,24})?$"
+        }
+      }
+    },
+    "registryPhysicalProbe": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unprobed": {
+          "type": "boolean"
+        },
+        "failureCounts": {
+          "$ref": "#/definitions/registryRejectionCounts"
+        },
+        "statusCounts": {
+          "type": "object",
+          "maxProperties": 16,
+          "patternProperties": {
+            "^[a-z][a-z0-9-]{0,39}$": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "noTargetDiagnosticCode": {
+      "enum": [
+        "NO_INSTALLABLE_ARTIFACT",
+        "NO_PUBLISHED_UPGRADE_CANDIDATE",
+        "UNRESOLVED_TARGET_CONSTRAINT_OR_POLICY",
+        "CANDIDATE_CAP"
+      ]
+    },
     "decisionContract": {
       "type": "object",
       "required": ["version", "targetMode", "objective", "mutablePackages", "approvedVersionLines"],
