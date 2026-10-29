@@ -323,7 +323,7 @@ async def run():
      cls=re.findall(r"(?m)^([A-Za-z][A-Za-z0-9]{0,40}(?:Error|Exception)):",raw)
      frames=[]
      for fname,lineno,fun in re.findall(
-       r'File "[^"\\n]*[/\\]([A-Za-z_][A-Za-z0-9_]*\\.py)", line ([0-9]{1,6}), in ([A-Za-z_][A-Za-z0-9_]{0,75})',
+       r'File "[^"\n]*?([A-Za-z_][A-Za-z0-9_]*\.py)", line ([0-9]{1,6}), in ([A-Za-z_][A-Za-z0-9_]{0,75})',
        raw):
       if fname in ("dependency_live_roadmap_generator.py","draft_decision_contract.py",
                    "peer_solver_z3.py","peer_solver_model.py","verification_proof.py"):
