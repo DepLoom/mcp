@@ -39,3 +39,25 @@ python scripts/update_release_manifest.py --check
 ```
 
 The final release manifest changes only `schemaSha256` to bind the new JSON Schema. `core.revision`, `core.contentSha256`, Skill hashes and MCP version stay exactly pinned to their previous values. The wheel/sdist checks validate this unchanged Core inventory with the optional new schema.
+
+## P2.6 malformed evidence and credential hardening
+
+The projection now accepts only self-consistent Core candidate counts: totals,
+accepted/rejected counts, upgrade counts and the aggregate reason counts
+must agree with the supplied rejection decision. Inconsistent or unsupported
+evidence is omitted instead of becoming a false clean registry or
+`NO_INSTALLABLE_ARTIFACT` assertion. The code `NO_INSTALLABLE_ARTIFACT`
+requires corroborating, internally consistent row evidence; `CANDIDATE_CAP`
+remains an independent status-bound limitation.
+
+Only conventional public registry path labels are retained in the full
+Blueprint. All opaque segments, including short tenant keys, are redacted.
+Physical status-count keys use a fixed allowlist; unknown/malicious keys are
+dropped with `projectionTruncated=true`. Compact responses continue to
+contain only counts/codes and `evidenceRef`, never private URL details.
+
+The companion Core security review tightens the *actual* URL admission
+predicate and prevents foreign redirects from being followed. This MCP change
+does not implement artifact authorization or reinterpret the Core solver.
+The compatibility rule remains: legacy pinned Core with no diagnostics
+emits no registry fields and cannot claim a clean result.

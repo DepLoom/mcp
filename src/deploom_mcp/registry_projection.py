@@ -27,6 +27,18 @@ _SAFE_HOST = re.compile(r"^[A-Za-z0-9.:_-]{1,253}$")
 _SAFE_SEGMENT = re.compile(r"^[a-zA-Z0-9._~@+-]{1,48}$")
 _SECRET_NAME = re.compile(r"(?i)token|api[-_]?key|secret|password|bearer|authorization|credential")
 _LONG_HEX = re.compile(r"(?i)^[0-9a-f]{24,}$")
+# Only known descriptive prefix labels may appear in the full Blueprint.
+# Short, innocent-looking tenant identifiers can be actual bearer credentials.
+_PUBLIC_PATH_LABELS = frozenset({
+    "repository", "repositories", "registry", "npm", "npm-group", "npm-hosted",
+    "public", "private", "api", "v1", "v2", "artifactory", "packages",
+})
+# Never emit a possibly sensitive key from fabricated physicalProbe metadata.
+_PROBE_STATUSES = frozenset({
+    "available", "missing-artifact", "empty-artifact", "foreign-registry-redirect",
+    "planning-only", "current-installed", "missing-tarball-url", "foreign-registry-url",
+    "redirect-limit-exceeded", "unknown",
+})
 
 
 def _count(value: Any) -> int | None:
@@ -67,7 +79,7 @@ def _origin(value: Any) -> str | None:
 
 
 def _path(value: Any) -> str | None:
-    """Keep only safe public registry path structure, never credential segments."""
+    """Never export raw nonstandard registry path segments or short secrets."""
     if not isinstance(value, str) or not value.startswith("/"):
         return None
     result = []
@@ -75,10 +87,10 @@ def _path(value: Any) -> str | None:
         if not segment:
             continue
         decoded = unquote(segment)
-        suspicious = (not _SAFE_SEGMENT.fullmatch(decoded)
-                      or _SECRET_NAME.search(decoded) is not None
-                      or _LONG_HEX.fullmatch(decoded) is not None)
-        result.append("[redacted]" if suspicious else decoded)
+        if decoded.lower() in _PUBLIC_PATH_LABELS and _SAFE_SEGMENT.fullmatch(decoded):
+            result.append(decoded.lower())
+        else:
+            result.append("[redacted]")
         if len(result) >= 12:
             break
     output = "/" + "/".join(result)
@@ -95,6 +107,15 @@ def project_registry_aggregate(raw: Any) -> dict[str, Any] | None:
     """The aggregate is always tiny and contains only known typed counters."""
     if not isinstance(raw, Mapping) or type(raw.get("schemaVersion")) is not int or raw["schemaVersion"] != 1 or raw.get("authority") != CORE_AUTHORITY:
         return None
+    counts = {name: _count(raw.get(name)) for name in
+              ("examinedVersions", "rejectedVersions", "noInstallableArtifactRows")}
+    reasons = _counter_map(raw.get("rejectionCounts"), REJECTION_CODES)
+    if (any(value is None for value in counts.values())
+        or counts["rejectedVersions"] > counts["examinedVersions"]
+        or not isinstance(raw.get("rejectionCounts"), Mapping)
+        or len(raw["rejectionCounts"]) != len(reasons)
+        or sum(reasons.values()) != counts["rejectedVersions"]):
+        return None
     result: dict[str, Any] = {"schemaVersion": 1, "authority": CORE_AUTHORITY}
     for name in ("examinedVersions", "rejectedVersions", "noInstallableArtifactRows"):
         n = _count(raw.get(name))
@@ -110,6 +131,25 @@ def project_registry_aggregate(raw: Any) -> dict[str, Any] | None:
 def project_registry_candidate(raw: Any) -> dict[str, Any] | None:
     """Render a bounded whitelist; everything else stays in Core's raw plan."""
     if not isinstance(raw, Mapping) or type(raw.get("schemaVersion")) is not int or raw["schemaVersion"] != 1 or raw.get("authority") != CORE_AUTHORITY:
+        return None
+    # A malformed/altered Core plan must not assert a false NO_INSTALLABLE.
+    required = ("examined", "accepted", "rejected", "upgradeCandidates",
+                "acceptedUpgradeCandidates", "rejectedUpgradeCandidates")
+    numbers = {k: _count(raw.get(k)) for k in required}
+    reasons = _counter_map(raw.get("rejectionCounts"), REJECTION_CODES)
+    if (any(v is None for v in numbers.values())
+        or numbers["accepted"] + numbers["rejected"] != numbers["examined"]
+        or numbers["acceptedUpgradeCandidates"] + numbers["rejectedUpgradeCandidates"] != numbers["upgradeCandidates"]
+        or numbers["upgradeCandidates"] > numbers["examined"]
+        or numbers["acceptedUpgradeCandidates"] > numbers["accepted"]
+        or numbers["rejectedUpgradeCandidates"] > numbers["rejected"]
+        or not isinstance(raw.get("rejectionCounts"), Mapping)
+        or len(raw["rejectionCounts"]) != len(reasons)
+        or sum(reasons.values()) != numbers["rejected"]
+        or type(raw.get("allUpgradeCandidatesRejected")) is not bool
+        or raw["allUpgradeCandidatesRejected"] != bool(
+            numbers["upgradeCandidates"] > 0 and numbers["acceptedUpgradeCandidates"] == 0
+            and numbers["rejectedUpgradeCandidates"] == numbers["upgradeCandidates"])):
         return None
     projected: dict[str, Any] = {"schemaVersion": 1, "authority": CORE_AUTHORITY}
     for field in ("examined", "accepted", "rejected", "upgradeCandidates",
@@ -156,7 +196,7 @@ def project_registry_candidate(raw: Any) -> dict[str, Any] | None:
         if type(physical.get("unprobed")) is bool:
             p["unprobed"] = physical["unprobed"]
         p["failureCounts"] = _counter_map(physical.get("failureCounts"), REJECTION_CODES)
-        p["statusCounts"] = _counter_map(physical.get("statusCounts"))
+        p["statusCounts"] = _counter_map(physical.get("statusCounts"), _PROBE_STATUSES)
         projected["physicalProbe"] = p
     # Capture clipped evidence honestly, without ever logging the discarded values.
     reason_counts = raw.get("rejectionCounts")
@@ -172,12 +212,32 @@ def project_registry_candidate(raw: Any) -> dict[str, Any] | None:
     return projected
 
 
-def project_no_target_code(value: Any, draft_status: str) -> str | None:
-    if (isinstance(value, str) and value in NO_TARGET_CODES
-        and ((draft_status == "no-target" and value != "CANDIDATE_CAP")
-             or (draft_status == "candidate-search-truncated" and value == "CANDIDATE_CAP"))):
-        return value
-    return None
+def project_no_target_code(value: Any, draft_status: str,
+                           diagnostic: Mapping[str, Any] | None = None) -> str | None:
+    """The typed NO_TARGET assertion needs internally consistent evidence."""
+    if not isinstance(value, str) or value not in NO_TARGET_CODES:
+        return None
+    if draft_status == "candidate-search-truncated":
+        return "CANDIDATE_CAP" if value == "CANDIDATE_CAP" else None
+    if draft_status != "no-target" or value == "CANDIDATE_CAP":
+        return None
+    if not isinstance(diagnostic, Mapping):
+        return None
+    total = diagnostic.get("upgradeCandidates")
+    if value == "NO_INSTALLABLE_ARTIFACT":
+        if not (diagnostic.get("allUpgradeCandidatesRejected") is True and
+                type(total) is int and total > 0 and
+                diagnostic.get("acceptedUpgradeCandidates") == 0 and
+                diagnostic.get("rejectedUpgradeCandidates") == total):
+            return None
+    elif value == "NO_PUBLISHED_UPGRADE_CANDIDATE":
+        if total != 0:
+            return None
+    elif value == "UNRESOLVED_TARGET_CONSTRAINT_OR_POLICY":
+        if not (type(total) is int and total > 0 and
+                diagnostic.get("allUpgradeCandidatesRejected") is False):
+            return None
+    return value
 
 
 def compact_registry_candidate(full: Any, ref: str) -> dict[str, Any] | None:

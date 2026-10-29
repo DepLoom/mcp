@@ -295,7 +295,7 @@ def transcode_upgrade_blueprint(
         diagnostic = project_registry_candidate(row.get("registryCandidateDiagnostics"))
         if diagnostic is not None:
             dependencies[-1]["registryCandidateDiagnostics"] = diagnostic
-        code = project_no_target_code(row.get("noTargetDiagnosticCode"), status_draft)
+        code = project_no_target_code(row.get("noTargetDiagnosticCode"), status_draft, diagnostic)
         if code is not None:
             dependencies[-1]["noTargetDiagnosticCode"] = code
 

@@ -450,6 +450,7 @@ def _compact_payload(
         })
         code = project_no_target_code(
             row.get("noTargetDiagnosticCode"), str(row.get("status") or "").lower().replace("_", "-"),
+            row.get("registryCandidateDiagnostics"),
         )
         if code is not None:
             dependencies[-1]["noTargetDiagnosticCode"] = code

@@ -177,7 +177,7 @@ class RegistryDiagnosticProjectionTests(unittest.TestCase):
         bp = transcode(p, m)
         self.assertNotIn("registryDiagnostics", bp)
         self.assertNotIn("registryCandidateDiagnostics", bp["dependencies"][0])
-        self.assertEqual(bp["dependencies"][0]["noTargetDiagnosticCode"], "NO_INSTALLABLE_ARTIFACT")
+        self.assertNotIn("noTargetDiagnosticCode", bp["dependencies"][0])
         jsonschema.validate(bp, SCHEMA)
 
     def test_untrusted_strings_and_credentials_are_never_forwarded(self):
@@ -188,7 +188,6 @@ class RegistryDiagnosticProjectionTests(unittest.TestCase):
         diag["metadataRequestBase"] = diag["configuredRegistry"]
         diag["rejectedArtifactOrigins"] = [f"https://user:{marker}@bad.example.invalid/path?token={marker}"]
         diag["rejectionSamples"] = [{"code": "FOREIGN_TARBALL_ORIGIN", "version": f"https://host/{marker}"}]
-        diag["rejectionCounts"][f"https://host/{marker}"] = 1
         diag["physicalProbe"]["statusCounts"] = {"planning-only": 1, marker: 2}
         clean = project_registry_candidate(diag)
         self.assertIsNotNone(clean)
@@ -209,8 +208,8 @@ class RegistryDiagnosticProjectionTests(unittest.TestCase):
         self.assertEqual(project_registry_candidate(diag)["rejectionSamples"], [])
         self.assertEqual(clean["physicalProbe"]["statusCounts"], {"planning-only": 1})
         self.assertNotIn("configuredRegistry", compact_registry_candidate(clean, "#/dependencies/0"))
-        self.assertEqual(project_registry_aggregate({"schemaVersion": 1, "authority": diag["authority"],
-                                                    "rejectionCounts": {f"https://host/{marker}": 8}})["rejectionCounts"], {})
+        self.assertIsNone(project_registry_aggregate({"schemaVersion": 1, "authority": diag["authority"],
+                                                     "rejectionCounts": {f"https://host/{marker}": 8}}))
 
     def test_sanitizer_handles_bad_types_without_echo_or_crash(self):
         diag = core_registry_data()
@@ -218,10 +217,7 @@ class RegistryDiagnosticProjectionTests(unittest.TestCase):
         diag["examined"] = "12;rm"
         diag["metadataRequestBase"] = {"origin": "https://x/../../secret", "pathPrefix": None}
         clean = project_registry_candidate(diag)
-        self.assertNotIn("examined", clean)
-        self.assertEqual(clean["rejectionCounts"], {})
-        self.assertIsNone(clean["metadataRequestBase"]["pathPrefix"])
-        self.assertNotIn("secret", json.dumps(clean))
+        self.assertIsNone(clean, "malformed counts must not become false clean evidence")
 
     def test_projection_caps_examples_and_flags_truncation(self):
         p, m = fixture()
