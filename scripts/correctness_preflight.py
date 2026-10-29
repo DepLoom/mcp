@@ -115,7 +115,7 @@ def make_positive_candidate(baseline: pathlib.Path, candidate: pathlib.Path,
 PACKAGED_STDIO_PROGRAM = r"""
 import asyncio, hashlib, json, os, pathlib, sys
 import deploom_mcp
-from deploom_mcp.distribution import release_manifest_path, resolve_core_dir
+from deploom_mcp.distribution import release_manifest_path, resolve_core_dir, skill_root
 from mcp import ClientSession, StdioServerParameters, stdio_client
 
 home=pathlib.Path.cwd().resolve()
@@ -124,6 +124,13 @@ core=resolve_core_dir()
 assert core.is_relative_to(home / 'venv') and (core/'registry_candidate_diagnostics.py').is_file()
 release=json.loads(release_manifest_path().read_text(encoding='utf-8'))
 assert hashlib.sha256((core/'registry_candidate_diagnostics.py').read_bytes()).hexdigest()==release['core']['files']['registry_candidate_diagnostics.py']
+skill=skill_root()
+contract_file=skill/'contract.json'
+contract=json.loads(contract_file.read_text(encoding='utf-8'))
+assert hashlib.sha256(contract_file.read_bytes()).hexdigest()==release['skillManifestSha256']
+assert contract['bundleSha256']==release['skill']['bundleSha256']
+for rel,expected in contract['files'].items():
+    assert hashlib.sha256((skill/rel).read_bytes()).hexdigest()==expected
 project=home/'empty-project'
 project.mkdir()
 manifest=project/'package.json'
@@ -166,6 +173,7 @@ result=asyncio.run(check())
 assert hashlib.sha256(manifest.read_bytes()).hexdigest()==original, 'MCP edited source'
 print(json.dumps({'status':'PASS','transport':'REAL_PACKAGED_MCP_STDIO',
                   'coreRevision':release['core']['revision'],
+                  'skillBundleSha256':contract['bundleSha256'],
                   'planningAuthority':'PLANNING_ONLY','verificationStatus':'NOT_VERIFIED',
                   'baselineUnchanged':True},sort_keys=True))
 """
@@ -397,8 +405,7 @@ def breaking_demo(wheel: pathlib.Path, snapshot_dir: pathlib.Path | None = None)
             # Deliberately copy only the unsolved baseline. No gold reference,
             # agent logs, credentials, or independent evaluation code.
             copy_source(baseline, snapshot_dir)
-        baseline_result = verify_chalk_candidate(baseline, baseline, baseline_mode=True)
-        # Baseline must also be scored on a distinct disposable copy.
+        # The baseline oracle always receives a distinct disposable copy.
         seed_copy = root / "baseline-control"
         copy_source(baseline, seed_copy)
         baseline_result = verify_chalk_candidate(baseline, seed_copy, baseline_mode=True)
@@ -450,7 +457,11 @@ def breaking_demo(wheel: pathlib.Path, snapshot_dir: pathlib.Path | None = None)
             "referenceCodePatchPASS": patched["status"] == "PASS",
             "unsafeControlsFAIL": all(x["status"] == "FAIL" and x["npmNotInvoked"]
                                        for x in negative.values()),
-            "realPackagedStdioPASS": stdio.get("status") == "PASS",
+            "realPackagedStdioPASS": (
+                stdio.get("status") == "PASS"
+                and stdio.get("coreRevision") == release["core"]["revision"]
+                and stdio.get("skillBundleSha256") == skill["bundleSha256"]
+            ),
         }
         return {
             "status": "PASS" if all(checks.values()) else "FAIL",
@@ -487,6 +498,7 @@ def breaking_demo(wheel: pathlib.Path, snapshot_dir: pathlib.Path | None = None)
                 "authority": stdio.get("planningAuthority"),
                 "verificationStatus": stdio.get("verificationStatus"),
                 "coreRevisionObserved": stdio.get("coreRevision"),
+                "skillBundleSha256Observed": stdio.get("skillBundleSha256"),
             },
             "claims": {
                 "agentMigration": "NOT_RUN", "benchmark": "NOT_RUN",
