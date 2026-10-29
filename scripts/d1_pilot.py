@@ -409,8 +409,10 @@ def launch(args):
     if cb and not ca:verdict="B_CORRECT_A_INCORRECT"
     elif ca and not cb:verdict="B_INCORRECT_A_CORRECT"
     elif ca and cb:
-        am=aa["measurement"]["wallSeconds"]
-        bm=bb["measurement"]["wallSeconds"]
+        # Compare total task wall including B's MCP preparation overhead;
+        # retain CLI-only timing separately for causal interpretation.
+        am=aa["measurement"]["wallIncludingMcpSetupSeconds"]
+        bm=bb["measurement"]["wallIncludingMcpSetupSeconds"]
         verdict="B_FASTER_PILOT_ONLY" if bm<am else ("B_SLOWER_PILOT_ONLY" if bm>am else "TIE_PILOT_ONLY")
     else:verdict="BOTH_INCORRECT"
     full={"status":"OBSERVED_PILOT_NOT_STATISTICAL","experimentalArms":["A","B"],
