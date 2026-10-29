@@ -202,6 +202,11 @@ class RegistryDiagnosticProjectionTests(unittest.TestCase):
         self.assertEqual(clean["configuredRegistry"]["pathPrefix"], "/repository/[redacted]/npm")
         self.assertEqual(clean["rejectionSamples"], [])
         self.assertTrue(clean["projectionTruncated"])
+        # A secret-bearing string could otherwise masquerade as a plain
+        # version label in a full Blueprint's rejectionSamples.
+        diag["rejectionSamples"] = [{"code": "FOREIGN_TARBALL_ORIGIN", "version": marker},
+                                     {"code": "FOREIGN_TARBALL_ORIGIN", "version": "4.17.20-secret"}]
+        self.assertEqual(project_registry_candidate(diag)["rejectionSamples"], [])
         self.assertEqual(clean["physicalProbe"]["statusCounts"], {"planning-only": 1})
         self.assertNotIn("configuredRegistry", compact_registry_candidate(clean, "#/dependencies/0"))
         self.assertEqual(project_registry_aggregate({"schemaVersion": 1, "authority": diag["authority"],

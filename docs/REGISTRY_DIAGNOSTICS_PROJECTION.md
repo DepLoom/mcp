@@ -5,7 +5,7 @@ The Core diagnostic PR [DepLoom/core#4](https://github.com/DepLoom/core/pull/4) 
 ## Full Blueprint (`artifacts.blueprint`)
 
 - `registryDiagnostics`: aggregated `schemaVersion=1`, `authority=STRUCTURAL_REGISTRY_EVIDENCE_ONLY`, `examinedVersions`, `rejectedVersions`, `noInstallableArtifactRows`, and `rejectionCounts`.
-- `dependencies[].registryCandidateDiagnostics`: observed counts, `rejectionCounts`, at most four validated `rejectionSamples` and `rejectedArtifactOrigins`, sanitized configured registry origin/path, and *already-observed* `physicalProbe` status. It can include `projectionTruncated=true`; raw published Core `artifacts.plan` remains the more complete evidence.
+- `dependencies[].registryCandidateDiagnostics`: observed counts, `rejectionCounts`, at most four strictly semver-shaped, credential-filtered `rejectionSamples` and `rejectedArtifactOrigins`, sanitized configured registry origin/path, and *already-observed* `physicalProbe` status. It can include `projectionTruncated=true`; raw published Core `artifacts.plan` remains the more complete evidence.
 - `dependencies[].noTargetDiagnosticCode`: one of `NO_INSTALLABLE_ARTIFACT`, `NO_PUBLISHED_UPGRADE_CANDIDATE`, `UNRESOLVED_TARGET_CONSTRAINT_OR_POLICY` for a `NO_TARGET` row, or `CANDIDATE_CAP` for a `CANDIDATE_SEARCH_TRUNCATED` row.
 
 No field is created for the old bundled Core if the Core did not emit it. An absent field means *not evaluated by that Core*, **not zero known rejected candidates**. The full Blueprint refuses to assert `MATERIALIZED`, `PROJECT_VERIFIED`, or physical compatibility.

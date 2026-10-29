@@ -22,7 +22,7 @@ CORE_AUTHORITY = "STRUCTURAL_REGISTRY_EVIDENCE_ONLY"
 MAX_EXAMPLES = 4
 MAX_COUNTER = 2_147_483_647
 _SAFE_STATUS = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
-_SAFE_VERSION = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$")
+_SAFE_VERSION = re.compile(r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]{1,32})?(?:\+[0-9A-Za-z.-]{1,24})?$")
 _SAFE_HOST = re.compile(r"^[A-Za-z0-9.:_-]{1,253}$")
 _SAFE_SEGMENT = re.compile(r"^[a-zA-Z0-9._~@+-]{1,48}$")
 _SECRET_NAME = re.compile(r"(?i)token|api[-_]?key|secret|password|bearer|authorization|credential")
@@ -132,7 +132,8 @@ def project_registry_candidate(raw: Any) -> dict[str, Any] | None:
         if not isinstance(item, dict):
             continue
         code, version = item.get("code"), item.get("version")
-        if code in REJECTION_CODES and isinstance(version, str) and _SAFE_VERSION.fullmatch(version):
+        if (code in REJECTION_CODES and isinstance(version, str) and len(version) <= 64
+            and _SAFE_VERSION.fullmatch(version) and not _SECRET_NAME.search(version)):
             examples.append({"code": code, "version": version})
             if len(examples) >= MAX_EXAMPLES:
                 break
