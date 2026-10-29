@@ -205,17 +205,26 @@ def installed_provenance(python: Path, root: Path, env: dict[str, str]) -> dict:
         "p=pathlib.Path(deploom_mcp.__file__).resolve();"
         "core=resolve_core_dir();"
         "m=json.loads(release_manifest_path().read_text(encoding='utf-8'));"
-        "assert p.is_relative_to(pathlib.Path(sys.prefix).resolve());"
-        "assert core.is_relative_to(pathlib.Path(sys.prefix).resolve());"
-        "assert hashlib.sha256((core/'registry_candidate_diagnostics.py').read_bytes()).hexdigest()"
-        "==m['core']['files']['registry_candidate_diagnostics.py'];"
         "print(json.dumps({'coreRevision':m['core']['revision'],"
-        "'mcpVersion':m['mcpVersion'],'inventoryCount':len(m['core']['files'])}))"
+        "'mcpVersion':m['mcpVersion'],'inventoryCount':len(m['core']['files']),"
+        "'wheelPackage':p.is_relative_to(pathlib.Path(sys.prefix).resolve()),"
+        "'wheelCore':core.is_relative_to(pathlib.Path(sys.prefix).resolve()),"
+        "'coreHashMatches':hashlib.sha256((core/'registry_candidate_diagnostics.py').read_bytes()).hexdigest()"
+        "==m['core']['files']['registry_candidate_diagnostics.py']}))"
     )
     proc = invoke([str(python), "-I", "-c", code], root, env)
     if proc.returncode:
-        raise RuntimeError("installed-wheel provenance check failed")
-    return json.loads(proc.stdout)
+        # Do not echo raw subprocess stderr (may contain private environment).
+        kind = ("MISSING_MODULE" if "ModuleNotFoundError" in proc.stderr else
+                "IMPORT_FAILURE" if "ImportError" in proc.stderr else
+                "OTHER_RUNTIME_FAILURE")
+        raise RuntimeError("installed-wheel provenance subprocess: " + kind)
+    provenance = json.loads(proc.stdout)
+    flags = ("wheelPackage", "wheelCore", "coreHashMatches")
+    mismatches = [name for name in flags if provenance.pop(name, None) is not True]
+    if mismatches:
+        raise RuntimeError("installed-wheel provenance mismatch: " + ",".join(mismatches))
+    return provenance
 
 
 async def packaged_plan(python: Path, project: Path, out: Path,
