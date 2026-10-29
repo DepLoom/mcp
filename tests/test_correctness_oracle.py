@@ -23,7 +23,7 @@ from correctness_oracle import (
 )
 from e2e_fixture import BUILD_JS, PACKAGE_JSON, SRC_INDEX_JS, VERIFY_JS
 from e2e_pilot import canonical_fixture_files_intact
-from correctness_preflight import seeded_registry
+from correctness_preflight import seeded_registry, verify_chalk_frozen, _public_source_digest
 
 
 def write_json(path: pathlib.Path, value: dict) -> None:
@@ -230,6 +230,20 @@ class PublicChalkBreakingApiPolicyTests(unittest.TestCase):
             "https://malicious.invalid/chalk-5.3.0.tgz")
         write_json(self.candidate / "package-lock.json", lock)
         self._blocked("CHALK_FOREIGN_LOCK_ARTIFACT")
+
+    def test_future_pilot_requires_immutable_baseline_digest(self):
+        expected = _public_source_digest(self.base)
+        bad = verify_chalk_frozen(self.base, self.candidate, "0" * 64)
+        self.assertEqual("FAIL", bad["status"])
+        self.assertEqual("FROZEN_INPUT_DIGEST_MISMATCH", bad["reason"])
+        self.assertFalse(bad["baselineVerified"])
+        # Even with the correct seed, forged scripts fail *before* npm.
+        (self.candidate / "test.cjs").unlink()
+        outcome = verify_chalk_frozen(self.base, self.candidate, expected)
+        self.assertEqual("FAIL", outcome["status"])
+        self.assertTrue(outcome["baselineVerified"])
+        self.assertEqual("FROZEN_SOURCE_SET_CHANGED", outcome["reason"])
+        self.assertNotIn("install", outcome["checks"])
 
     def test_deleted_or_added_source_does_not_fool_oracle(self):
         (self.candidate / "README.md").unlink()
