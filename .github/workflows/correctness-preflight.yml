@@ -10,6 +10,7 @@ on:
       - "scripts/e2e_pilot.py"
       - "tests/test_correctness_oracle.py"
       - "docs/P1_CORRECTNESS_BENCH_PREFLIGHT.md"
+      - "docs/P2_CHALK_BREAKING_API_DEMO.md"
       - ".github/workflows/correctness-preflight.yml"
   workflow_dispatch:
 
@@ -64,3 +65,44 @@ jobs:
             scripts/correctness_preflight.py
             tests/test_correctness_oracle.py
           retention-days: 2
+
+  public-breaking-api:
+    name: Chalk 4->5 real install / breaking behavior (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install test runtime and build prerequisites
+        run: python -m pip install -e . build setuptools wheel
+      - name: Focused independent-oracle negative regressions
+        run: python -m unittest discover -s tests -p test_correctness_oracle.py -v
+      - name: Build actual pinned Core/MCP wheel
+        run: python -m build --no-isolation
+      - name: Real Chalk breaking API demo (NO agent or migrations)
+        run: >-
+          python scripts/correctness_preflight.py breaking-demo
+          --wheel dist/deploom_mcp-0.2.0-py3-none-any.whl
+          --report "${{ runner.temp }}/p2-chalk-receipt.json"
+          --snapshot-dir "${{ runner.temp }}/p2-chalk-frozen-baseline"
+      - name: Archive public baseline + sanitized receipt only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2-chalk-${{ matrix.os }}-receipt
+          path: |
+            ${{ runner.temp }}/p2-chalk-receipt.json
+            ${{ runner.temp }}/p2-chalk-frozen-baseline/
+          if-no-files-found: ignore
+          retention-days: 7
