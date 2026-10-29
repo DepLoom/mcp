@@ -36,7 +36,24 @@ jobs:
         shell: bash
         run: |
           python -m build --no-isolation
-          python -m venv --system-site-packages "$RUNNER_TEMP/deploom-p1-wheel"
+          python -m venv "$RUNNER_TEMP/deploom-p1-wheel"
+          # Reuse dependency directories without processing the parent's
+          # editable-install .pth; exact same isolation as smoke_wheel.py.
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+          import sysconfig
+          venv_python = Path(os.environ["RUNNER_TEMP"]) / "deploom-p1-wheel/bin/python"
+          site = subprocess.check_output(
+              [str(venv_python), "-I", "-c",
+               "import sysconfig;print(sysconfig.get_path('purelib'))"],
+              text=True).strip()
+          dependency_paths = sorted({sysconfig.get_path("purelib"),
+                                     sysconfig.get_path("platlib")})
+          (Path(site) / "preflight_runtime_dependencies.pth").write_text(
+              "\n".join(dependency_paths) + "\n", encoding="utf-8")
+          PY
           "$RUNNER_TEMP/deploom-p1-wheel/bin/python" -m pip install --no-index --no-deps --ignore-installed dist/deploom_mcp-0.2.0-py3-none-any.whl
       - name: Packaged stdio and independent install/build/test (NO agents)
         shell: bash
