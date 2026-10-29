@@ -219,9 +219,17 @@ class Handler(BaseHTTPRequestHandler):
             if len(parts) == 3 and parts[1] == "-":
                 name, _, fname = parts
                 version = fname[len(name) + 1:-4]
-                data, _, _ = store.tarball(name, version)
-                self._send_bytes(data, "application/octet-stream")
-                return
+                # A known package name is NOT authority to synthesize an
+                # unpublished version. Otherwise this frozen registry can
+                # mask a wrong assignment by handing npm a made-up tarball.
+                if (fname.startswith(name + "-")
+                    and any(item["version"] == version
+                            for item in store.versions.get(name, ()))):
+                    data, _, _ = store.tarball(name, version)
+                    self._send_bytes(data, "application/octet-stream")
+                    return
+            self._send_json({"error": "unpublished fixture artifact"}, 404)
+            return
         meta = store.metadata(path)
         if meta is None:
             self._send_json({"error": f"package {path} not found"}, 404)
