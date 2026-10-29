@@ -133,7 +133,8 @@ def stop_owned(proc: subprocess.Popen) -> None:
 
 
 def execute(argv: list[str],cwd:Path,env:dict,wall_limit:int,tools_limit:int,
-            max_input:int,max_output:int,rate:tuple|None) -> dict:
+            max_input:int,max_output:int,rate:tuple|None,
+            max_api_estimate:float|None=None) -> dict:
     start=time.monotonic()
     collector=UsageCollector(tools_limit)
     reason={"why":None}
@@ -172,9 +173,15 @@ def execute(argv: list[str],cwd:Path,env:dict,wall_limit:int,tools_limit:int,
             ti=result["nativeUsage"]
             # Codex often exposes usage only at turn completion. These stops
             # can occur AFTER paid tokens were spent; record overshoot.
+            estimate=price_usd(ti,rate)
             if ((ti["input_tokens"] is not None and ti["input_tokens"]>max_input)
                 or (ti["output_tokens"] is not None and ti["output_tokens"]>max_output)):
                 reason["why"]="TOKEN_OVERSHOOT_REPORTED"
+                stop_owned(proc)
+                break
+            if (estimate is not None and max_api_estimate is not None
+                    and estimate>max_api_estimate):
+                reason["why"]="API_COST_SOFT_OVERSHOOT_REPORTED"
                 stop_owned(proc)
                 break
     finally:
@@ -200,6 +207,8 @@ def execute(argv: list[str],cwd:Path,env:dict,wall_limit:int,tools_limit:int,
             "inputTokensSoft":max_input,
             "outputTokensSoft":max_output,
             "tokenHardCapSupported":False,
+            "apiCostSoftCeilingUsd":max_api_estimate,
+            "apiCostHardCapSupported":False,
         },
         "tokenOvershoot":any(
             summary["nativeUsage"][k] is not None and summary["nativeUsage"][k]>cap
@@ -310,6 +319,13 @@ def launch(args):
         raise RuntimeError("RECORD_MANUAL_ASSISTANCE_EXPLICITLY")
     if args.out.exists():
         raise RuntimeError("OUTPUT_EXISTS")
+    if args.seed.resolve() in args.out.resolve().parents or args.out.resolve() == args.seed.resolve():
+        raise RuntimeError("OUTPUT_OVERLAPS_FROZEN_SEED")
+    if any(x is not None and (x < 0 or not float(x) < float("inf"))
+           for x in (args.input_rate,args.cached_rate,args.output_rate,args.max_api_estimate)):
+        raise RuntimeError("INVALID_COST_LIMIT_OR_RATE")
+    if args.manual_a < 0 or args.manual_b < 0:
+        raise RuntimeError("INVALID_MANUAL_HELP_COUNT")
     gate=json.loads(args.mcp_preflight.read_text())
     if gate.get("gate")!="GO":
         raise RuntimeError("MCP_CHALK_PREFLIGHT_NO_GO")
@@ -338,9 +354,20 @@ def launch(args):
         workspace=root/"workspace"
         clone_seed(args.seed,workspace,EXPECTED_SOURCE_SHA)
         home=secure_home(root,logins)
+        # Do not give arbitrary user credentials or inherited private npm
+        # configuration to either agent. Auth stays in the private CODEX_HOME
+        # copied above, outside the editable seed and never in a public report.
+        secret_keys={"OPENAI_API_KEY","CODEX_API_KEY","GITHUB_TOKEN","GH_TOKEN",
+                     "NPM_TOKEN","NODE_AUTH_TOKEN","AWS_SECRET_ACCESS_KEY",
+                     "AZURE_OPENAI_API_KEY"}
         env={k:v for k,v in os.environ.items()
-             if k!="PYTHONPATH" and not k.startswith("DEPLOOM_")
+             if k not in secret_keys and k!="PYTHONPATH"
+             and not k.startswith("DEPLOOM_")
              and not k.lower().startswith("npm_config_")}
+        empty_home=root/"home"
+        empty_home.mkdir(mode=0o700)
+        env["HOME"]=str(empty_home)
+        if os.name=="nt":env["USERPROFILE"]=str(empty_home)
         env["CODEX_HOME"]=str(home)
         env["CI"]="true"
         env["NO_COLOR"]="1"
@@ -351,6 +378,7 @@ def launch(args):
         env["npm_config_audit"]="false"
         env["npm_config_fund"]="false"
         mcp_python=None
+        t0=time.monotonic()
         if arm=="B":
             vpath=root/"mcpvenv"
             subprocess.run([sys.executable,"-m","venv",str(vpath)],check=True,
@@ -360,12 +388,16 @@ def launch(args):
                                        "--no-input","--disable-pip-version-check",
                                        str(args.wheel)],capture_output=True,timeout=160)
             if installed.returncode:raise RuntimeError("B_MCP_INSTALL_FAILED")
+        mcp_setup_seconds=round(time.monotonic()-t0,3) if arm=="B" else 0.0
         cmd=codex_command(shutil.which(args.codex),workspace,args.model,args.effort,
                           mcp_python,root/"mcp-state")
         # Time begins just before codex exec. MCP startup, tool calls, npm
         # commands, permissions and retries are included in each arm's wall.
         measurement=execute(cmd,workspace,env,args.wall,args.tools,args.input_cap,
-                            args.output_cap,rate)
+                            args.output_cap,rate,args.max_api_estimate)
+        measurement["mcpWheelSetupWallSeconds"]=mcp_setup_seconds
+        measurement["wallIncludingMcpSetupSeconds"]=round(
+            measurement["wallSeconds"]+mcp_setup_seconds,3)
         independent=score_candidate(args.seed,workspace,EXPECTED_SOURCE_SHA)
         results[arm]={"measurement":measurement,"correctness":independent,
                       "manualHelpEvents":args.manual_a if arm=="A" else args.manual_b,
@@ -423,6 +455,7 @@ def main() -> int:
     run.add_argument("--input-rate",type=float)
     run.add_argument("--cached-rate",type=float)
     run.add_argument("--output-rate",type=float)
+    run.add_argument("--max-api-estimate",type=float,help="SOFT! observed turn-only API estimate, no hard spending cap")
     args=p.parse_args()
     try:
         if args.mode=="doctor":
