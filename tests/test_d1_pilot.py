@@ -35,6 +35,17 @@ class PilotContractTests(unittest.TestCase):
             evaluate({"responses":[dict(core,chalkTarget="5.6.2")]})["productGap"])
         self.assertEqual("NO_GO",evaluate({"responses":[dict(core,companionStatus="PROPOSED")]} )["gate"])
 
+    def test_core_required_unsat_is_distinct_from_missing_policy_target(self):
+        before={"ok":True,"chalkStatus":"NO_TARGET","chalkTarget":None,
+                "noTargetDiagnosticCode":"UNRESOLVED_TARGET_CONSTRAINT_OR_POLICY"}
+        required={"ok":False,"errorCode":"generator-failed","coreExitCode":3,
+                  "coreFailureMarkers":["unsat"]}
+        result=evaluate({"responses":[before,required]})
+        self.assertEqual("NO_GO",result["gate"])
+        self.assertEqual("EXACT_VERSION_OBJECTIVE_UNSUPPORTED_REQUIRED_UNSAT",
+                         result["productGap"])
+        self.assertFalse(result["exactVersionObjectiveSupported"])
+
     def test_required_core_movement_is_not_an_exact_version_contract(self):
         row={"ok":True,"authority":"PLANNING_ONLY","verificationStatus":"NOT_VERIFIED",
              "draftStatus":"DRAFT_READY","chalkStatus":"PROPOSED","chalkTarget":"5.3.0",
