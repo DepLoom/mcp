@@ -1,0 +1,51 @@
+name: p1-correctness-preflight
+
+on:
+  pull_request:
+    paths:
+      - "scripts/correctness_oracle.py"
+      - "scripts/correctness_preflight.py"
+      - "scripts/e2e_fixture.py"
+      - "scripts/e2e_registry.py"
+      - "scripts/e2e_pilot.py"
+      - "tests/test_correctness_oracle.py"
+      - "docs/P1_CORRECTNESS_BENCH_PREFLIGHT.md"
+      - ".github/workflows/correctness-preflight.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-oracle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install pinned source and packaging tools
+        run: python -m pip install -e . build setuptools wheel
+      - name: Targeted fail-closed oracle unit regression
+        run: python -m unittest discover -s tests -p test_correctness_oracle.py -v
+      - name: Build wheel for actual packaged stdio
+        run: python -m build --no-isolation
+      - name: Run isolated npm install/build/test oracle and packaged MCP stdio
+        run: |
+          python scripts/correctness_preflight.py selftest \
+            --wheel dist/deploom_mcp-0.2.0-py3-none-any.whl \
+            --report "${{ runner.temp }}/p1-correctness.json"
+      - name: Archive synthetic outcomes only (no raw logs or registry URLs)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-deterministic-synthetic-evidence
+          path: ${{ runner.temp }}/p1-correctness.json
+          if-no-files-found: warn
+          retention-days: 7
