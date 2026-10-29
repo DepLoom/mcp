@@ -48,6 +48,9 @@ from deploom_mcp.decisions import (
 )
 from deploom_mcp.distribution import resolve_core_dir, blueprint_schema_path
 from deploom_mcp.target_assessment import TARGET_PROJECTION_FIELDS, projected_health
+from deploom_mcp.registry_projection import (
+    project_no_target_code, project_registry_aggregate, project_registry_candidate,
+)
 
 BLUEPRINT_SCHEMA_VERSION = 2
 KIND = "upgrade-blueprint"
@@ -287,6 +290,14 @@ def transcode_upgrade_blueprint(
                 "scanState": row.get("scanState"),
             },
         })
+        # Optional additive Core evidence. The legacy bundled Core does not
+        # publish it; do not synthesize "zero rejected" on its behalf.
+        diagnostic = project_registry_candidate(row.get("registryCandidateDiagnostics"))
+        if diagnostic is not None:
+            dependencies[-1]["registryCandidateDiagnostics"] = diagnostic
+        code = project_no_target_code(row.get("noTargetDiagnosticCode"), status_draft)
+        if code is not None:
+            dependencies[-1]["noTargetDiagnosticCode"] = code
 
     per_project = {}
     for proposal in plan.get("proposals") or []:
@@ -420,6 +431,9 @@ def transcode_upgrade_blueprint(
         "artifacts": dict(artifacts),
         "blueprintFile": str(Path(blueprint_path).resolve()),
     }
+    registry_diagnostics = project_registry_aggregate(plan.get("registryDiagnostics"))
+    if registry_diagnostics is not None:
+        blueprint["registryDiagnostics"] = registry_diagnostics
     enrich_decisions(blueprint)
     return blueprint
 

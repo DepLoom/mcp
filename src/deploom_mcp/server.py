@@ -66,6 +66,9 @@ from deploom_mcp.decisions import (
 from deploom_mcp.target_assessment import target_assessment, target_decision_evidence
 from deploom_mcp.proxy_settings import ProxySettingError, resolve_system_proxy
 from deploom_mcp.decision_followups import evaluate_assignment, explain_conflict
+from deploom_mcp.registry_projection import (
+    compact_registry_candidate, project_no_target_code, project_registry_aggregate,
+)
 
 SERVER_NAME = "deploom-mcp"
 TOOL_NAME = "get_upgrade_plan"
@@ -405,7 +408,7 @@ def _compact_payload(
         key=lambda e: (0 if e.get("severity") == "BLOCKER" else 1,
                        str(e.get("package") or ""), str(e.get("evidenceRef") or ""), str(e.get("code") or "")),
     )
-    details_clipped = False
+    details_clipped = bool((blueprint.get("registryDiagnostics") or {}).get("projectionTruncated"))
 
     def detail(value):
         nonlocal details_clipped
@@ -445,6 +448,18 @@ def _compact_payload(
             "nextAction": row.get("nextAction") or "READ_PLANNER_EVIDENCE",
             "evidenceRef": f"#/dependencies/{len(dependencies)}",
         })
+        code = project_no_target_code(
+            row.get("noTargetDiagnosticCode"), str(row.get("status") or "").lower().replace("_", "-"),
+        )
+        if code is not None:
+            dependencies[-1]["noTargetDiagnosticCode"] = code
+        diagnostic = compact_registry_candidate(
+            row.get("registryCandidateDiagnostics"),
+            f"#/dependencies/{len(dependencies) - 1}/registryCandidateDiagnostics",
+        )
+        if diagnostic is not None:
+            dependencies[-1]["registryCandidateDiagnostics"] = diagnostic
+            details_clipped = details_clipped or bool(diagnostic.get("projectionTruncated"))
 
     draft_status = status.get("draftStatus")
     is_partial = draft_status == "DRAFT_PARTIAL"
@@ -524,6 +539,10 @@ def _compact_payload(
         },
         "recommendationGroups": groups,
         "dependencies": dependencies,
+        # Tiny typed aggregate, independently bounded even for very large
+        # plans. Never expose registry URL identities in compact responses.
+        **({"registryDiagnostics": project_registry_aggregate(blueprint["registryDiagnostics"])}
+           if project_registry_aggregate(blueprint.get("registryDiagnostics")) is not None else {}),
         "decisionEvidence": visible_evidence,
         "targetAssessment": compact_assessment,
         "decisionCompleteness": {

@@ -142,7 +142,7 @@
     "version": "1.0.0-preview.20"
   },
   "mcpVersion": "0.2.0",
-  "schemaSha256": "96fdc2c6c40af4b1086e2ff0974f0346eab79e601d0405b8188fee304cfbdc94",
+  "schemaSha256": "7e7d0857004da45163eb3fdc8c55cc506df547d4ac58cff1c4a4f5d04ea020e0",
   "schemaVersion": 1,
   "skill": {
     "bundleSha256": "cdfd3be94cd0eba58125f2d5e2094807dbdca022cd29ff35160573d6091762a1",
