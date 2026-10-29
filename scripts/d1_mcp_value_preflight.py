@@ -308,8 +308,33 @@ async def run():
     finally:res.close()
    except Exception:
     probe={"status":"UNAVAILABLE"}
+   # Diagnose ONLY this isolated public fixture, never read the caller's
+   # HOME, never export traceback/raw exception message/paths.
+   safe_failure={"class":None,"frames":[],"code":None}
+   try:
+    directory=pathlib.Path.home()/".deploom"/"diagnostics"
+    public_files=sorted(directory.glob("deploom-failure-*.json"))[-8:]
+    for path in public_files:
+     if not path.is_file() or path.stat().st_size>300000:continue
+     obj=json.loads(path.read_text(encoding="utf-8"))
+     if obj.get("schemaVersion")!="DEPLOOM_FAILURE_V2" or obj.get("code")!="TOOL_INTERNAL_ERROR":
+      continue
+     raw=str(obj.get("traceback") or "")
+     cls=re.findall(r"(?m)^([A-Za-z][A-Za-z0-9]{0,40}(?:Error|Exception)):",raw)
+     frames=[]
+     for fname,lineno,fun in re.findall(
+       r'File "[^"\\n]*[/\\]([A-Za-z_][A-Za-z0-9_]*\\.py)", line ([0-9]{1,6}), in ([A-Za-z_][A-Za-z0-9_]{0,75})',
+       raw):
+      if fname in ("dependency_live_roadmap_generator.py","draft_decision_contract.py",
+                   "peer_solver_z3.py","peer_solver_model.py","verification_proof.py"):
+       frames.append({"file":fname,"line":int(lineno),"function":fun})
+     safe_failure={"class":cls[-1] if cls else "UNKNOWN",
+                   "frames":frames[-7:],"code":"TOOL_INTERNAL_ERROR"}
+   except (OSError,ValueError,TypeError):
+    pass
    return {"responses":responses,"toolAvailable":True,
            "publicRegistryControl":probe,
+           "isolatedCoreFailure":safe_failure,
            "requiredFieldInMcpToolSchema":supports_required,
            "knownFieldsAdvertised":observed_fields,
            "inputSchemaType":(type(tool_schema).__name__
@@ -420,6 +445,9 @@ def main() -> int:
                 else:
                     env={k:v for k,v in os.environ.items()
                          if k!="PYTHONPATH" and not k.startswith("DEPLOOM_")}
+                    # Fresh isolated HOME: only generated public Chalk diagnostics.
+                    env["HOME"]=str(work)
+                    if os.name=="nt":env["USERPROFILE"]=str(work)
                     t=time.monotonic()
                     process=subprocess.run([str(python),"-I","-c",RUNTIME,str(project),EXPECTED_CORE_SHA],
                                            cwd=work,env=env,capture_output=True,timeout=240)
@@ -441,6 +469,7 @@ def main() -> int:
                         report.update(evaluate(payload))
                         report["requests"]=payload.get("responses",[])
                         report["publicRegistryControl"]=payload.get("publicRegistryControl")
+                        report["isolatedCoreFailure"]=payload.get("isolatedCoreFailure")
                         report["requiredFieldInMcpToolSchema"]=payload.get("requiredFieldInMcpToolSchema")
                         report["knownFieldsAdvertised"]=payload.get("knownFieldsAdvertised",[])
                         report["inputSchemaType"]=payload.get("inputSchemaType")
