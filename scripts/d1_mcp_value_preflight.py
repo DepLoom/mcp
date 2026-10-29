@@ -54,6 +54,9 @@ async def run():
    await session.initialize()
    tools=await session.list_tools()
    if "get_upgrade_plan" not in {t.name for t in tools.tools}: return {"toolAvailable":False}
+   tool=next(t for t in tools.tools if t.name=="get_upgrade_plan")
+   schema=tool.inputSchema if isinstance(tool.inputSchema,dict) else {}
+   supports_required="required_packages" in (schema.get("properties") or {})
    base={"project_path":str(project),"registry":"https://registry.npmjs.org",
          "target_level":"yellow","min_lag_ok_pct":80,"deadline_seconds":75,
          "use_system_proxy":True,"registry_metadata_ttl":0,
@@ -164,9 +167,14 @@ async def run():
       except Exception:
        assessment={"status":"CALL_FAILED"}
      responses[-1]["explicitVersionAssessment"]=assessment
-    except Exception:
-     responses.append({"ok":False,"errorCode":"CALL_FAILED","toolAvailable":True})
+    except Exception as exc:
+     # Never publish the exception text: it can contain paths or URLs.
+     kind=type(exc).__name__
+     if not re.fullmatch(r"[A-Za-z][A-Za-z0-9]{0,50}",kind):kind="OTHER"
+     responses.append({"ok":False,"errorCode":"CALL_FAILED",
+                       "exceptionType":kind,"toolAvailable":True})
    return {"responses":responses,"toolAvailable":True,
+           "requiredFieldInMcpToolSchema":supports_required,
            "coreRevision":manifest["core"]["revision"],
            "coreInventorySha256":manifest["core"]["contentSha256"],
            "mcpVersion":manifest["mcpVersion"],
@@ -258,6 +266,7 @@ def main() -> int:
                         payload=json.loads(process.stdout.decode("utf-8").splitlines()[-1])
                         report.update(evaluate(payload))
                         report["requests"]=payload.get("responses",[])
+                        report["requiredFieldInMcpToolSchema"]=payload.get("requiredFieldInMcpToolSchema")
                         report["coreRevision"]=payload.get("coreRevision")
                         report["coreInventorySha256"]=payload.get("coreInventorySha256")
                         report["skillBundleSha256"]=payload.get("skillBundleSha256")
