@@ -1,7 +1,7 @@
 {
   "blueprintSchemaVersion": 2,
   "core": {
-    "contentSha256": "2754cc65d77f0caf3ba4f86f87add9df2b192a5a0cc779464000d4e4ad415c60",
+    "contentSha256": "09b9445140412306a54ad5c3213bc9958bf90a0460ead7cdaeb1a2accb69262d",
     "files": {
       "VERSION": "2698c63efcc74d9adc7a29889fc4ecc7fadfb58c4588db3f117f9d87cfaaff40",
       "analyze_verification_telemetry.py": "1ee235ef0b9cf275fe34c22cf16cb4049e88fb19953096ddaecbb73d7a700e6f",
