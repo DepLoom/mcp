@@ -58,6 +58,31 @@ core=resolve_core_dir()
 assert core.name == "_core" and core.is_relative_to(root / "venv"), core
 assert blueprint_schema_path().is_file() and release_manifest_path().is_file()
 assert (skill_root()/"contract.json").is_file()
+# Core repin regression: the installed wheel must carry the newly pinned
+# diagnostics module. Import it from the wheel's private _core directory,
+# never from the source checkout or a globally installed Core.
+release=json.loads(release_manifest_path().read_text(encoding="utf-8"))
+import hashlib
+registry_module=core/"registry_candidate_diagnostics.py"
+assert registry_module.is_file() and "registry_candidate_diagnostics.py" in release["core"]["files"]
+assert hashlib.sha256(registry_module.read_bytes()).hexdigest()==release["core"]["files"]["registry_candidate_diagnostics.py"]
+sys.path.insert(0, str(core))
+import registry_candidate_diagnostics as registry_evidence
+assert registry_evidence.no_target_diagnostic_code("no-target", {"allUpgradeCandidatesRejected": True}) is None
+complete={"examined":2, "accepted":0, "rejected":2, "upgradeCandidates":1,
+          "acceptedUpgradeCandidates":0, "rejectedUpgradeCandidates":1,
+          "allUpgradeCandidatesRejected":True, "rejectionCounts":{"BAD_REGISTRY_PATH":2}}
+assert registry_evidence.no_target_diagnostic_code("no-target", complete)=="NO_INSTALLABLE_ARTIFACT"
+assert registry_evidence.safe_registry_artifact_url("https://nexus.invalid/npm", "https://nexus.invalid/npm/a.tgz")
+assert not registry_evidence.safe_registry_artifact_url("https://nexus.invalid/npm", "https://nexus.invalid/npm/../private/a.tgz")
+assert not registry_evidence.safe_registry_artifact_url("https://nexus.invalid/npm", "https://user:password@nexus.invalid/npm/a.tgz")
+assert not registry_evidence.safe_registry_artifact_url("https://nexus.invalid/npm", "https://nexus.invalid:bad/npm/a.tgz")
+assert "lockfile_consistency.py" in release["core"]["files"]
+assert hashlib.sha256((core/"lockfile_consistency.py").read_bytes()).hexdigest()==release["core"]["files"]["lockfile_consistency.py"]
+import lockfile_consistency as lock_policy
+assert lock_policy.registry_artifact_url_allowed("https://nexus.invalid/npm", "git+ssh://git@github.com/org/repo.git")
+assert lock_policy.registry_artifact_url_allowed("https://nexus.invalid/npm", "file:///tmp/local-package")
+assert not lock_policy.registry_artifact_url_allowed("https://nexus.invalid/npm", "random://evil.invalid/archive")
 assert not (core/"desktop").exists() and not (core/".git").exists()
 subprocess.run([sys.executable, str(core/"dependency_live_roadmap_generator.py"), "--help"], check=True, capture_output=True)
 project=root/"project"
