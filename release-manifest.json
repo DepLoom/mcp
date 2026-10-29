@@ -1,7 +1,7 @@
 {
   "blueprintSchemaVersion": 2,
   "core": {
-    "contentSha256": "b44da62eeb783b1e05ebcfdf97b45f0210cdecdf121086a0377bcbbb747c41ab",
+    "contentSha256": "0021e79cb6d3094ef4ed32ea3672f0a1d6e246b81dd026ffca99946626abb227",
     "files": {
       "VERSION": "2698c63efcc74d9adc7a29889fc4ecc7fadfb58c4588db3f117f9d87cfaaff40",
       "analyze_verification_telemetry.py": "1ee235ef0b9cf275fe34c22cf16cb4049e88fb19953096ddaecbb73d7a700e6f",
@@ -49,13 +49,13 @@
       "dependency_audit_branch.py": "c556a4ce33f105eb10763e0d874e4f2a03043bb94744ab68336a063a5d779f15",
       "dependency_compatibility_evidence.py": "6233e7d8bedca194fd030fa883aac57d9c3d51e79a342cec21420b04f757d192",
       "dependency_interaction.py": "af9f4e3b2458f2d58e557b3e241aaf4bab4596c6fbf59a0b355d46bb7215196c",
-      "dependency_live_roadmap_generator.py": "73a964909d6d130b7a293c48ecfd1f0458910b0c1b9fcd85d104d0dd3fa3df61",
+      "dependency_live_roadmap_generator.py": "67a6ed97db6430a63ae3ccef90dfa904311b099e39e20ae7717136edb7e3a625",
       "dependency_live_roadmap_worker.py": "1b76e6403c2964a45fd0fbca46031a0baa40bb5c3e4c6afdc943940973359aac",
       "dependency_release_branch.py": "072cec1182cf8d801fb9c727cd1266f0711f5eff49cb8799a304647ff17c87fe",
       "deploom_failure.py": "0f3d75cb02e3440379b736ab709cd916634a60e9f14d03b4be3cd14c162e8687",
       "document_locales/en.json": "13ad71aa6c1b9363a4868788c021ee3680158034803ee93bd55ebe3dd7ca0d34",
       "document_locales/ru.json": "138961b2f15433700cf2d99a35a05faba8c69c797d50c2353852d3e38eae5385",
-      "draft_decision_contract.py": "a5f5698f072d5eee2f8b3e5773c5f87ed49e13350af89cafeb4293d034133c03",
+      "draft_decision_contract.py": "45df524a91107f25711a5183dcace378251661ac5bdfe198b6bb5b82e945f692",
       "draft_input_identity.py": "c97d065dc75f99d3d19d7d04cad1dce58e4a4d5b06b8488bc0eff645e228c5f1",
       "frontend_source_policy.py": "3f4976857ffba83462518b23b4c09f8bd03a3037f5d1421a067632e56c158f5a",
       "git_hook_policy.py": "8c03535c58151cf98d14088a8775636d496cbb02dda9c6bad432c51511a98710",
@@ -139,11 +139,11 @@
       "yarn_berry.py": "bd769e797823ff99129983f8295a52b5aac1f01f9be2c2a8eac9ffeaf20903d2"
     },
     "repository": "https://github.com/DepLoom/core",
-    "revision": "49232ab510da8fa854f36d84a639f3db28ab363c",
+    "revision": "fd60e7f169cb5c3d6475a5dd69ff249a0d4bc995",
     "version": "1.0.0-preview.20"
   },
   "mcpVersion": "0.2.0",
-  "schemaSha256": "11f869aa8023a15a919008b88b73beaf6e709ac3c5df1555599c47bf1cd0889d",
+  "schemaSha256": "974ea52175ea09928cddae9694b5eb750cc1024520e758e64f23ed967fe81627",
   "schemaVersion": 1,
   "skill": {
     "bundleSha256": "cdfd3be94cd0eba58125f2d5e2094807dbdca022cd29ff35160573d6091762a1",
