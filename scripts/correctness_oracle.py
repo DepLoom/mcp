@@ -192,8 +192,10 @@ def verify_candidate(baseline: pathlib.Path, candidate: pathlib.Path,
             stage = root / "staged-copy"
             shutil.copytree(candidate, stage,
                 ignore=shutil.ignore_patterns(".git", "node_modules", "dist", "__pycache__"))
-            empty_config = root / "empty.npmrc"
-            empty_config.write_text("", encoding="utf-8")
+            user_config = root / "empty-user.npmrc"
+            global_config = root / "empty-global.npmrc"
+            user_config.write_text("", encoding="utf-8")
+            global_config.write_text("", encoding="utf-8")
             registry = (baseline / ".npmrc").read_text(encoding="utf-8").strip().split("=", 1)[1]
             env = {k: v for k, v in os.environ.items()
                    if not k.lower().startswith("npm_config_")
@@ -203,8 +205,8 @@ def verify_candidate(baseline: pathlib.Path, candidate: pathlib.Path,
                         "npm_config_fund": "false", "npm_config_ignore_scripts": "true",
                         "npm_config_fetch_retries": "0", "npm_config_update_notifier": "false",
                         "npm_config_cache": str(root / "cache"),
-                        "npm_config_userconfig": str(empty_config),
-                        "npm_config_globalconfig": str(empty_config),
+                        "npm_config_userconfig": str(user_config),
+                        "npm_config_globalconfig": str(global_config),
                         "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost"})
             stages = (
                 ("cleanInstall", npm_bin()+["ci", "--ignore-scripts", "--no-audit", "--no-fund"]),
