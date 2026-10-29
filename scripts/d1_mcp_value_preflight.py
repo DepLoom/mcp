@@ -227,6 +227,11 @@ def evaluate(payload: dict) -> dict:
         return {"gate":"NO_GO",
                 "productGap":"EXACT_VERSION_OBJECTIVE_NOT_SUPPORTED_BY_V1",
                 "incidentalTargetMatch":True}
+    if any(p.get("errorCode")=="generator-failed" and p.get("coreExitCode")==3
+           and "unsat" in (p.get("coreFailureMarkers") or []) for p in rows):
+        return {"gate":"NO_GO",
+                "productGap":"EXACT_VERSION_OBJECTIVE_UNSUPPORTED_REQUIRED_UNSAT",
+                "exactVersionObjectiveSupported":False}
     if any(p.get("chalkTarget") not in (None, "5.3.0") for p in rows):
         return {"gate":"NO_GO","productGap":"NO_EXACT_CHALK_5_3_0_TARGET"}
     if any(p.get("chalkStatus") in {"NO_CHANGE","POLICY_SATISFIED"} for p in rows):
