@@ -271,5 +271,35 @@ class RegistryDiagnosticProjectionTests(unittest.TestCase):
         self.assertNotIn("registryDiagnostics", comp)
 
 
+    def test_cross_row_aggregate_contradictions_are_omitted_not_reclassified(self):
+        for mutate in (
+            lambda p: p["registryDiagnostics"].update(examinedVersions=200),
+            lambda p: p["registryDiagnostics"].update(noInstallableArtifactRows=2),
+            lambda p: p["proposals"][0]["rows"][0]["registryCandidateDiagnostics"][
+                "rejectionCounts"].update(FOREIGN_TARBALL_ORIGIN=0),
+        ):
+            with self.subTest(mutate=repr(mutate)):
+                plan, manifest = fixture()
+                mutate(plan)
+                blueprint = transcode(plan, manifest)
+                jsonschema.validate(blueprint, SCHEMA)
+                self.assertNotIn("registryDiagnostics", blueprint)
+                self.assertEqual("NO_TARGET", blueprint["dependencies"][0]["status"])
+                self.assertIsNone(blueprint["dependencies"][0]["target"])
+                compact = compact_blueprint(blueprint)
+                self.assertNotIn("registryDiagnostics", compact)
+                self.assertEqual("NOT_VERIFIED", blueprint["status"]["verificationStatus"])
+
+    def test_inconsistent_row_cannot_leave_forged_aggregate_visible(self):
+        plan, manifest = fixture()
+        diag = plan["proposals"][0]["rows"][0]["registryCandidateDiagnostics"]
+        diag["rejected"] = 0
+        bp = transcode(plan, manifest)
+        self.assertNotIn("registryDiagnostics", bp)
+        self.assertNotIn("registryCandidateDiagnostics", bp["dependencies"][0])
+        self.assertNotIn("noTargetDiagnosticCode", bp["dependencies"][0])
+        self.assertEqual("NO_TARGET", bp["dependencies"][0]["status"])
+
+
 if __name__ == "__main__":
     unittest.main()
