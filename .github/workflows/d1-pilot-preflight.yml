@@ -8,6 +8,11 @@ on:
       - 'tests/test_d1_pilot.py'
       - 'tests/test_required_intent_bridge.py'
       - 'src/deploom_mcp/server.py'
+      - 'src/deploom_mcp/decisions.py'
+      - 'contracts/upgrade-blueprint.schema.json'
+      - 'upstream/deploom'
+      - 'release-manifest.json'
+      - 'tests/test_exact_version_objective.py'
       - 'docs/DECISION_CONTRACT.md'
       - 'docs/D1_PILOT_HANDOFF.md'
       - '.github/workflows/d1-pilot-preflight.yml'
@@ -32,6 +37,15 @@ jobs:
           node-version: '22'
       - name: Install actual pinned MCP and build prerequisites
         run: python -m pip install -e . build setuptools wheel
+      # Review-only inventory generation on an isolated CI checkout.
+      # The generated manifest must be committed and --check must pass before
+      # this stacked PR can be considered ready for integration/release.
+      - name: Generate candidate Core+schema manifest for review
+        run: |
+          python scripts/update_release_manifest.py
+          python -c "import json; d=json.load(open('release-manifest.json')); print(json.dumps({'coreRevision':d['core']['revision'],'coreContentSha256':d['core']['contentSha256'],'schemaSha256':d['schemaSha256'],'generatorSha256':d['core']['files']['dependency_live_roadmap_generator.py'],'contractSha256':d['core']['files']['draft_decision_contract.py']},sort_keys=True))"
+      - name: Targeted V2 exact contract, immutable and negative controls
+        run: python -m unittest discover -s tests -p test_exact_version_objective.py -v
       - name: Build exact checked-out wheel
         run: python -m build --no-isolation
       - name: Recreate P2 public frozen input and verify independent oracle
@@ -46,6 +60,7 @@ jobs:
           --frozen "${{ runner.temp }}/d1-frozen-chalk"
           --wheel dist/deploom_mcp-0.2.0-py3-none-any.whl
           --report "${{ runner.temp }}/d1-mcp-value.json"
+          --require-go
       - name: CLI native event parsing and explicitly fake dry run
         run: |
           python -m unittest discover -s tests -p test_d1_pilot.py -v
@@ -76,6 +91,8 @@ jobs:
             ${{ runner.temp }}/d1-frozen-chalk/
             scripts/d1_pilot.py
             scripts/d1_mcp_value_preflight.py
+            release-manifest.json
+            docs/DECISION_CONTRACT.md
             docs/D1_PILOT_HANDOFF.md
           include-hidden-files: true
           if-no-files-found: ignore
