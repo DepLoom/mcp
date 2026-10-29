@@ -11,12 +11,15 @@ import pathlib
 import sys
 import tempfile
 import unittest
+from urllib.error import HTTPError
+from urllib.request import urlopen
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from correctness_oracle import VERSIONS, OracleFailure, frozen_policy, verify_candidate
 from e2e_fixture import BUILD_JS, PACKAGE_JSON, SRC_INDEX_JS, VERIFY_JS
 from e2e_pilot import canonical_fixture_files_intact
+from correctness_preflight import seeded_registry
 
 
 def write_json(path: pathlib.Path, value: dict) -> None:
@@ -125,6 +128,24 @@ class IndependentOraclePolicyTests(unittest.TestCase):
         write_json(self.baseline / "package.json", PACKAGE_JSON)
         (self.baseline / "verify.js").write_text("process.exit(0)")
         self.assertFalse(canonical_fixture_files_intact(self.baseline))
+
+
+    def test_frozen_registry_never_synthesizes_unpublished_artifacts(self):
+        # A wrong-version lockfile must not become magically installable.
+        # Only localhost, no external registry or paid agent.
+        with seeded_registry() as registry:
+            good = (registry + "/kontur-fixture-a/-/kontur-fixture-a-1.9.0.tgz")
+            with urlopen(good, timeout=3) as response:
+                self.assertEqual(200, response.status)
+                self.assertGreater(len(response.read()), 0)
+            for uri in (
+                registry + "/kontur-fixture-a/-/kontur-fixture-a-99.0.0.tgz",
+                registry + "/kontur-fixture-a/-/different-1.9.0.tgz",
+                registry + "/not-published/-/not-published-1.0.0.tgz",
+            ):
+                with self.subTest(uri=uri), self.assertRaises(HTTPError) as failed:
+                    urlopen(uri, timeout=3)
+                self.assertEqual(404, failed.exception.code)
 
 
 if __name__ == "__main__":
