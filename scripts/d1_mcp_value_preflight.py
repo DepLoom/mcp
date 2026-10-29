@@ -55,9 +55,9 @@ async def run():
    tools=await session.list_tools()
    if "get_upgrade_plan" not in {t.name for t in tools.tools}: return {"toolAvailable":False}
    base={"project_path":str(project),"registry":"https://registry.npmjs.org",
-         "target_level":"yellow","min_lag_ok_pct":80,"deadline_seconds":40,
+         "target_level":"yellow","min_lag_ok_pct":80,"deadline_seconds":75,
          "use_system_proxy":True,"registry_metadata_ttl":0,
-         "draft_max_candidates":5}
+         "draft_max_candidates":128}
    requests=[
     dict(base,target_mode="pinned",mutable_packages=["chalk"],
          approved_version_lines={"chalk":[5]}),
@@ -134,7 +134,9 @@ def evaluate(payload: dict) -> dict:
         return {"gate":"NO_GO","productGap":"POLICY_ALREADY_SATISFIED_NO_MIGRATION_ACTION"}
     if any(p.get("errorCode")=="decision-contract-unsupported" for p in rows):
         return {"gate":"NO_GO","productGap":"UNSUPPORTED_EXACT_MIGRATION_DECISION_CONTRACT"}
-    if any(p.get("chalkStatus") in {"UNKNOWN_SECURITY","UNKNOWN_METADATA","BLOCKED","CANDIDATE_SEARCH_TRUNCATED"} for p in rows):
+    if any(p.get("chalkStatus")=="CANDIDATE_SEARCH_TRUNCATED" for p in rows):
+        return {"gate":"NO_GO","productGap":"CHALK_CANDIDATE_SEARCH_TRUNCATED_AT_CAP_128"}
+    if any(p.get("chalkStatus") in {"UNKNOWN_SECURITY","UNKNOWN_METADATA","BLOCKED"} for p in rows):
         return {"gate":"NO_GO","productGap":"UNRESOLVED_PLANNING_OR_SECURITY"}
     return {"gate":"NO_GO","productGap":"NO_ACTIONABLE_CHALK_TARGET"}
 
@@ -175,7 +177,7 @@ def main() -> int:
                          if k!="PYTHONPATH" and not k.startswith("DEPLOOM_")}
                     t=time.monotonic()
                     process=subprocess.run([str(python),"-I","-c",RUNTIME,str(project),EXPECTED_CORE_SHA],
-                                           cwd=work,env=env,capture_output=True,timeout=180)
+                                           cwd=work,env=env,capture_output=True,timeout=240)
                     report["mcpPlanWallSeconds"]=round(time.monotonic()-t,3)
                     if process.returncode:
                         report["productGap"]="PACKAGED_MCP_CALL_FAILED"
