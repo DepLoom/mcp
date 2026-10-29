@@ -6,6 +6,9 @@ on:
       - 'scripts/d1_pilot.py'
       - 'scripts/d1_mcp_value_preflight.py'
       - 'tests/test_d1_pilot.py'
+      - 'tests/test_required_intent_bridge.py'
+      - 'src/deploom_mcp/server.py'
+      - 'docs/DECISION_CONTRACT.md'
       - 'docs/D1_PILOT_HANDOFF.md'
       - '.github/workflows/d1-pilot-preflight.yml'
   workflow_dispatch:
@@ -46,6 +49,7 @@ jobs:
       - name: CLI native event parsing and explicitly fake dry run
         run: |
           python -m unittest discover -s tests -p test_d1_pilot.py -v
+          python -m unittest discover -s tests -p test_required_intent_bridge.py -v
           python scripts/d1_pilot.py dry-run --out "${{ runner.temp }}/d1-fake"
           python scripts/d1_pilot.py doctor
       - name: Display GO/NO_GO honestly (CI PASS does NOT imply MCP usefulness)

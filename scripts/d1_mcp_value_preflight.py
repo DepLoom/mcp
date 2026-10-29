@@ -32,7 +32,7 @@ STATUSES = {
 }
 # Runtime is installed from the provided wheel, NEVER imported from editable source.
 RUNTIME = r"""
-import asyncio,hashlib,json,os,pathlib,sys
+import asyncio,hashlib,json,os,pathlib,sys,re
 from mcp import ClientSession,StdioServerParameters,stdio_client
 import deploom_mcp
 from deploom_mcp.distribution import release_manifest_path,resolve_core_dir
@@ -54,6 +54,20 @@ async def run():
    await session.initialize()
    tools=await session.list_tools()
    if "get_upgrade_plan" not in {t.name for t in tools.tools}: return {"toolAvailable":False}
+   tool=next(t for t in tools.tools if t.name=="get_upgrade_plan")
+   tool_schema=getattr(tool,"inputSchema",None)
+   schema=tool_schema if isinstance(tool_schema,dict) else {}
+   # MCP SDKs may expose inputSchema through a serialization alias.
+   alternate=tool.model_dump(by_alias=True) if hasattr(tool,"model_dump") else {}
+   if not schema and isinstance(alternate,dict):
+    schema=alternate.get("inputSchema") or alternate.get("input_schema") or {}
+   properties=schema.get("properties") if isinstance(schema,dict) else {}
+   properties=properties if isinstance(properties,dict) else {}
+   known_fields=("project_path","target_level","mutable_packages",
+                 "approved_version_lines","required_packages",
+                 "draft_max_candidates")
+   observed_fields=[name for name in known_fields if name in properties]
+   supports_required="required_packages" in properties
    base={"project_path":str(project),"registry":"https://registry.npmjs.org",
          "target_level":"yellow","min_lag_ok_pct":80,"deadline_seconds":75,
          "use_system_proxy":True,"registry_metadata_ttl":0,
@@ -63,7 +77,11 @@ async def run():
          approved_version_lines={"chalk":[5]}),
     dict(base,target_mode="advisory",
          objective="latest-compatible-in-approved-lines",
-         mutable_packages=["chalk"],approved_version_lines={"chalk":[5]})
+         mutable_packages=["chalk"],approved_version_lines={"chalk":[5]}),
+    # This is the Core-supported legacy REQUIRED movement policy. It is NOT
+    # a pinned exact patch version and must not become an A/B GO on coincidence.
+    dict(base,target_mode="pinned",mutable_packages=["chalk"],
+         approved_version_lines={"chalk":[5]},required_packages=["chalk"])
    ]
    responses=[]
    for n,query in enumerate(requests):
@@ -74,6 +92,49 @@ async def run():
      rows={r.get("package"):r for r in response.get("dependencies",[]) if isinstance(r,dict)}
      chalk=rows.get("chalk") or {}
      companion=rows.get("is-number") or {}
+     regdiag=chalk.get("registryCandidateDiagnostics") or {}
+     if not isinstance(regdiag,dict):regdiag={}
+     counts=regdiag.get("rejectionCounts") or {}
+     if not isinstance(counts,dict):counts={}
+     safe_counts={k: v for k,v in counts.items()
+        if k in {"FOREIGN_TARBALL_ORIGIN","BAD_REGISTRY_PATH",
+                 "MISSING_DIST_TARBALL","HTTP_ARTIFACT_UNAVAILABLE"}
+        and type(v) is int and 0<=v<=100000}
+     safe_codes={"CANDIDATE_CAP","NO_INSTALLABLE_ARTIFACT",
+        "NO_PUBLISHED_UPGRADE_CANDIDATE",
+        "UNRESOLVED_TARGET_CONSTRAINT_OR_POLICY"}
+     code=chalk.get("noTargetDiagnosticCode")
+     if code not in safe_codes:code=None
+     reason=str(chalk.get("reason") or "")
+     # A failed Core subprocess can embed paths / URLs in error.detail.
+     # Publish only known exception / policy class names and a numeric exit.
+     error_obj=response.get("error") if isinstance(response.get("error"),dict) else {}
+     error_detail=error_obj.get("detail") or ""
+     error_detail=error_detail if isinstance(error_detail,str) else ""
+     safe_failure_classes=(
+         "DECISION_CONTRACT_INVALID","BaselineConstraintVerificationError",
+         "ValueError","TypeError","KeyError","AttributeError","RuntimeError",
+         "AssertionError","UnboundLocalError","OverflowError","SyntaxError",
+         "ModuleNotFoundError","ImportError","Z3Exception","unsat",
+         "required update","required assignment","candidate search",
+         "USER_BASELINE_REQUIRED_UPDATE", "NO_FEASIBLE_ASSIGNMENT",
+         "PROJECT_NODE_ENGINE_CONFLICT","USER_APPROVED_VERSION_LINE",
+         "EXACT_SOLVER_UNSAT","manifest", "lockfile",
+         "NO_INSTALLABLE_ARTIFACT","Traceback")
+     safe_failure_markers=[x for x in safe_failure_classes if x.lower() in error_detail.lower()]
+     planner_message=str(error_obj.get("message") or "")
+     exit_match=re.search(r"planner exited with code ([0-9]{1,3})",planner_message)
+     exit_code=int(exit_match.group(1)) if exit_match else None
+     # Whitelist typed symbolic categories; never propagate free-text strings.
+     reason_codes=[
+         key for key in (
+           "LATEST_CANDIDATE_UNKNOWN","USER_APPROVED_VERSION_LINE",
+           "PEER_RESOLUTION_DEFERRED","NO_INSTALLABLE_ARTIFACT",
+           "candidate list capped","policy-driven target",
+           "no installable","нет policy-driven target",
+           "runtime","engine","type declarations",
+         ) if key.lower() in reason.lower()
+     ]
      def safe_status(v):
       return v if type(v) is str and v in {
        "PROPOSED","NO_TARGET","NO_CHANGE","POLICY_SATISFIED","BLOCKED",
@@ -84,22 +145,71 @@ async def run():
       return v if type(v) is str and re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+",v) else None
      responses.append({
        "ok":response.get("ok") is True,
-       "errorCode":(response.get("error") or {}).get("code")
-           if (response.get("error") or {}).get("code") in {
-            "decision-contract-unsupported","decision-contract-mismatch",
-            "invalid-args","invalid-policy","internal-error","timeout"} else "OTHER_OR_NONE",
+       # Safe typed code only: do not serialize untrusted error messages,
+       # subprocess stderr, registry URLs or environment paths.
+       "coreFailureMarkers":safe_failure_markers,
+       "coreExitCode":exit_code,
+       "errorCode":((error_code if re.fullmatch(r"[a-z][a-z0-9_-]{0,79}",error_code)
+                      else "UNSAFE_OR_MISSING_CODE")
+                     if isinstance((error_code := ((response.get("error") or {}).get("code")
+                                                   if isinstance(response.get("error"),dict)
+                                                   else None)),str)
+                     else "OTHER_OR_NONE"),
        "draftStatus":status.get("draftStatus") if status.get("draftStatus") in {"DRAFT_READY","DRAFT_PARTIAL"} else "OTHER",
        "authority":status.get("authority") if status.get("authority") in {"PLANNING_ONLY","UNKNOWN"} else "OTHER",
        "verificationStatus":status.get("verificationStatus") if status.get("verificationStatus") in {"NOT_VERIFIED","UNKNOWN"} else "OTHER",
        "chalkStatus":safe_status(chalk.get("status")),
        "chalkTarget":safe_version(chalk.get("target")),
+       "chalkCurrent":safe_version(chalk.get("current")),
+       "noTargetDiagnosticCode":code,
+       "registryStructuralRejections":safe_counts,
+       "registryExaminedVersions":(regdiag.get("examinedVersions")
+                                    if type(regdiag.get("examinedVersions")) is int else None),
+       "registryAcceptedVersions":(regdiag.get("acceptedVersions")
+                                    if type(regdiag.get("acceptedVersions")) is int else None),
+       "reasonMarkers":reason_codes,
+       "requiredPackagesRequested":(response.get("policy") or {}).get("requestedRequiredPackages") or [],
        "companionStatus":safe_status(companion.get("status")),
        "companionTarget":safe_version(companion.get("target")),
        "toolAvailable":True,
      })
-    except Exception:
-     responses.append({"ok":False,"errorCode":"CALL_FAILED","toolAvailable":True})
+     # An exact version can be *inspected* with an existing read-only tool,
+     # but this never recomputes solver peers, OSV or runtime compatibility.
+     blueprint=(response.get("artifacts") or {}).get("blueprint")
+     assessment={"status":"NOT_AVAILABLE"}
+     if isinstance(blueprint,str) and blueprint and response.get("ok") is True:
+      try:
+       alternative=decode(await session.call_tool("evaluate_assignment",{
+          "blueprint_path":blueprint,"assignment":{"chalk":"5.3.0"}}))
+       whitelist={"REPLAN_REQUIRED","REVIEW_REQUIRED",
+          "BLOCKED_BY_KNOWN_CONSTRAINTS","MATCHES_PUBLISHED_PLAN",
+          "STALE_BLUEPRINT"}
+       vv=alternative.get("verdict")
+       safechecks={"PINNED_TARGET_CHANGE_REQUIRES_REPLAN",
+          "ALTERNATIVE_PEER_SECURITY_POLICY_NOT_RECHECKED",
+          "IMMUTABLE_PACKAGE_CHANGED","EXCLUDED_PACKAGE_CHANGED",
+          "MAJOR_LINE_NOT_APPROVED","PUBLISHED_BLOCKERS_REQUIRE_REASSESSMENT",
+          "WORKSPACE_RECONCILIATION_REQUIRED","PARTIAL_BLUEPRINT"}
+       assessment={"status":vv if vv in whitelist else "OTHER",
+            "authority":alternative.get("authority"),
+            "compatibility":alternative.get("compatibility"),
+            "peerConstraints":alternative.get("peerConstraints"),
+            "checks":sorted({x.get("code") for x in (alternative.get("checks") or [])
+                              if isinstance(x,dict) and x.get("code") in safechecks})}
+      except Exception:
+       assessment={"status":"CALL_FAILED"}
+     responses[-1]["explicitVersionAssessment"]=assessment
+    except Exception as exc:
+     # Never publish the exception text: it can contain paths or URLs.
+     kind=type(exc).__name__
+     if not re.fullmatch(r"[A-Za-z][A-Za-z0-9]{0,50}",kind):kind="OTHER"
+     responses.append({"ok":False,"errorCode":"CALL_FAILED",
+                       "exceptionType":kind,"toolAvailable":True})
    return {"responses":responses,"toolAvailable":True,
+           "requiredFieldInMcpToolSchema":supports_required,
+           "knownFieldsAdvertised":observed_fields,
+           "inputSchemaType":(type(tool_schema).__name__
+                if type(tool_schema).__name__ in ("dict","JsonSchemaDict","Schema") else "OTHER"),
            "coreRevision":manifest["core"]["revision"],
            "coreInventorySha256":manifest["core"]["contentSha256"],
            "mcpVersion":manifest["mcpVersion"],
@@ -126,8 +236,18 @@ def evaluate(payload: dict) -> dict:
         and p.get("companionStatus") != "PROPOSED"
         and p.get("companionTarget") in (None, "7.0.0")
     ]
+    # Core decisionContract V1 permits major version lines, but exposes no
+    # exact-version selection objective. A coincidentally matching target from
+    # latest-major selection must not count as a proven requested exact goal.
     if exact:
-        return {"gate":"GO", "productGap":None}
+        return {"gate":"NO_GO",
+                "productGap":"EXACT_VERSION_OBJECTIVE_NOT_SUPPORTED_BY_V1",
+                "incidentalTargetMatch":True}
+    if any(p.get("errorCode")=="generator-failed" and p.get("coreExitCode")==3
+           and "unsat" in (p.get("coreFailureMarkers") or []) for p in rows):
+        return {"gate":"NO_GO",
+                "productGap":"EXACT_VERSION_OBJECTIVE_UNSUPPORTED_REQUIRED_UNSAT",
+                "exactVersionObjectiveSupported":False}
     if any(p.get("chalkTarget") not in (None, "5.3.0") for p in rows):
         return {"gate":"NO_GO","productGap":"NO_EXACT_CHALK_5_3_0_TARGET"}
     if any(p.get("chalkStatus") in {"NO_CHANGE","POLICY_SATISFIED"} for p in rows):
@@ -138,7 +258,8 @@ def evaluate(payload: dict) -> dict:
         return {"gate":"NO_GO","productGap":"CHALK_CANDIDATE_SEARCH_TRUNCATED_AT_CAP_128"}
     if any(p.get("chalkStatus") in {"UNKNOWN_SECURITY","UNKNOWN_METADATA","BLOCKED"} for p in rows):
         return {"gate":"NO_GO","productGap":"UNRESOLVED_PLANNING_OR_SECURITY"}
-    return {"gate":"NO_GO","productGap":"NO_ACTIONABLE_CHALK_TARGET"}
+    return {"gate":"NO_GO","productGap":"NO_ACTIONABLE_CHALK_TARGET",
+            "exactVersionObjectiveSupported":False}
 
 
 def main() -> int:
@@ -181,10 +302,23 @@ def main() -> int:
                     report["mcpPlanWallSeconds"]=round(time.monotonic()-t,3)
                     if process.returncode:
                         report["productGap"]="PACKAGED_MCP_CALL_FAILED"
+                        # Never emit subprocess stderr, which may expose paths
+                        # or private registry/auth diagnostics. Record only a
+                        # fixed-class failure marker.
+                        stderr=process.stderr.decode("utf-8",errors="replace")
+                        names=("SyntaxError","NameError","AttributeError",
+                               "UnboundLocalError","TypeError","KeyError",
+                               "AssertionError","ImportError","ModuleNotFoundError",
+                               "RuntimeError","McpError","ExceptionGroup")
+                        report["failureClass"]=next(
+                            (n for n in names if n in stderr),"OTHER")
                     else:
                         payload=json.loads(process.stdout.decode("utf-8").splitlines()[-1])
                         report.update(evaluate(payload))
                         report["requests"]=payload.get("responses",[])
+                        report["requiredFieldInMcpToolSchema"]=payload.get("requiredFieldInMcpToolSchema")
+                        report["knownFieldsAdvertised"]=payload.get("knownFieldsAdvertised",[])
+                        report["inputSchemaType"]=payload.get("inputSchemaType")
                         report["coreRevision"]=payload.get("coreRevision")
                         report["coreInventorySha256"]=payload.get("coreInventorySha256")
                         report["skillBundleSha256"]=payload.get("skillBundleSha256")

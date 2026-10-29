@@ -148,6 +148,7 @@ def _build_request(
     objective: str = OBJECTIVES[0],
     mutable_packages: Optional[List[str]] = None,
     approved_version_lines: Optional[Dict[str, List[int]]] = None,
+    required_packages: Optional[List[str]] = None,
     draft_max_candidates: int = 3,
     previous_evidence_digest: Optional[str] = None,
     use_system_proxy: Optional[bool] = None,
@@ -167,6 +168,21 @@ def _build_request(
         })
     except ValueError as exc:
         return _error("invalid-intent", str(exc)), None
+    # Existing pinned Core supports the legacy 'required' policy in its
+    # baseline intent. This means "must move", NOT "exact requested version".
+    # Keep it separate from decisionContract V1 major-line bounds: embedding
+    # it in approvedVersionLines would silently change its meaning.
+    required: list[str] = []
+    if required_packages is not None:
+        if (not isinstance(required_packages, list)
+            or len(required_packages) > 1024
+            or any(not isinstance(x, str) or not x.strip()
+                   for x in required_packages)):
+            return _error("invalid-intent", "required_packages must be an array of at most 1024 non-empty names"), None
+        required = sorted(set(x.strip() for x in required_packages))
+        if (contract["mutablePackages"] is not None
+                and any(x not in contract["mutablePackages"] for x in required)):
+            return _error("invalid-intent", "required_packages must be inside mutable_packages"), None
     if isinstance(draft_max_candidates, bool) or not isinstance(draft_max_candidates, int) or not (1 <= draft_max_candidates <= MAX_DRAFT_CANDIDATES):
         return _error("invalid-candidate-cap", f"draft_max_candidates must be an integer in [1, {MAX_DRAFT_CANDIDATES}]"), None
     if previous_evidence_digest is not None and (not isinstance(previous_evidence_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", previous_evidence_digest)):
@@ -215,6 +231,13 @@ def _build_request(
             name = item.strip()
             if name not in exclusions:
                 exclusions.append(name)
+
+    if any(name in exclusions for name in required):
+        return _error("invalid-intent", "required_packages cannot also be excluded"), None
+    if required:
+        # The Core input is a trusted, normalized user-requested intent. Core
+        # still owns candidate selection, compatibility and solver status.
+        contract = {**contract, "policies": {name: "required" for name in required}}
 
     # Resolve (but do NOT create) the managed state location. Every write the
     # boundary performs -- run artifacts, registry metadata cache, exclusive
@@ -531,6 +554,11 @@ def _compact_payload(
             "exclusions": list(policy.get("exclusions") or []),
             "policyHash": policy.get("policyHash"),
             **{k: policy[k] for k in ("decisionContract", "coreContractSupport") if k in policy},
+            # Requested legacy Core intent, not solver-proven version authority.
+            **({"requestedRequiredPackages": sorted(
+                k for k, v in ((policy.get("intent") or {}).get("policies") or {}).items()
+                if v == "required"
+            )} if ((policy.get("intent") or {}).get("policies") or {}) else {}),
         },
         "summary": {
             "totalDependencies": summary.get("totalDependencies"),
@@ -742,6 +770,7 @@ def get_upgrade_plan(
     objective: str = OBJECTIVES[0],
     mutable_packages: Optional[List[str]] = None,
     approved_version_lines: Optional[Dict[str, List[int]]] = None,
+    required_packages: Optional[List[str]] = None,
     draft_max_candidates: int = 3,
     previous_evidence_digest: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -763,6 +792,7 @@ def get_upgrade_plan(
         objective=objective,
         mutable_packages=mutable_packages,
         approved_version_lines=approved_version_lines,
+        required_packages=required_packages,
         draft_max_candidates=draft_max_candidates,
         previous_evidence_digest=previous_evidence_digest,
     )
@@ -786,7 +816,9 @@ def get_upgrade_plan(
         "PLANNING_ONLY; a PROPOSED verdict means 'can be proposed', NOT 'already "
         "updated'. target_mode selects pinned targets or advisory suggestions; "
         "neither relaxes compatibility constraints. mutable_packages limits changes "
-        "while retaining the other packages as constraints. draft_max_candidates "
+        "while retaining the other packages as constraints. required_packages "
+        "asks the existing Core to move those packages, but does not pin an "
+        "exact version or certify runtime compatibility. draft_max_candidates "
         "widens candidate evidence independently of the deadline. Review critical "
         "evidence and workspaceCoverage before acting within existing user authority."
     ),
@@ -806,6 +838,7 @@ async def get_upgrade_plan_tool(
     objective: str = OBJECTIVES[0],
     mutable_packages: Optional[List[str]] = None,
     approved_version_lines: Optional[Dict[str, List[int]]] = None,
+    required_packages: Optional[List[str]] = None,
     draft_max_candidates: int = 3,
     previous_evidence_digest: Optional[str] = None,
     ctx: Context = None,  # type: ignore[assignment]  # injected by MCPServer
@@ -825,6 +858,7 @@ async def get_upgrade_plan_tool(
         objective=objective,
         mutable_packages=mutable_packages,
         approved_version_lines=approved_version_lines,
+        required_packages=required_packages,
         draft_max_candidates=draft_max_candidates,
         previous_evidence_digest=previous_evidence_digest,
     )
