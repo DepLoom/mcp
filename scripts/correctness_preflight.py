@@ -120,9 +120,14 @@ from deploom_mcp.distribution import release_manifest_path, resolve_core_dir, sk
 from mcp import ClientSession, StdioServerParameters, stdio_client
 
 home=pathlib.Path.cwd().resolve()
-assert pathlib.Path(deploom_mcp.__file__).resolve().is_relative_to(home / 'venv'), 'not a packaged wheel'
-core=resolve_core_dir()
-assert core.is_relative_to(home / 'venv') and (core/'registry_candidate_diagnostics.py').is_file()
+# Windows temp paths may have RUNNER~1 vs runneradmin aliases. The running
+# interpreter's sys.prefix is the authoritative installed-wheel root.
+installed=pathlib.Path(sys.prefix).resolve()
+if not pathlib.Path(deploom_mcp.__file__).resolve().is_relative_to(installed):
+    raise RuntimeError('P2_WHEEL_ORIGIN_MISMATCH')
+core=resolve_core_dir().resolve()
+if not core.is_relative_to(installed) or not (core/'registry_candidate_diagnostics.py').is_file():
+    raise RuntimeError('P2_CORE_ORIGIN_MISMATCH')
 release=json.loads(release_manifest_path().read_text(encoding='utf-8'))
 assert hashlib.sha256((core/'registry_candidate_diagnostics.py').read_bytes()).hexdigest()==release['core']['files']['registry_candidate_diagnostics.py']
 skill=skill_root()
@@ -205,7 +210,15 @@ def packaged_stdio(wheel: pathlib.Path, directory: pathlib.Path, registry: str) 
         result = subprocess.run([str(executable), "-I", "-c", PACKAGED_STDIO_PROGRAM, registry],
                                 cwd=home, env=clean_env, capture_output=True, text=True, timeout=100)
         if result.returncode:
-            return {"status": "FAIL", "reason": "PACKAGED_STDIO_ASSERTION_FAILED",
+            # Only typed diagnostic codes may leave the subprocess; never
+            # forward stderr or OS paths into public evidence artifacts.
+            recognized = (
+                "P2_WHEEL_ORIGIN_MISMATCH", "P2_CORE_ORIGIN_MISMATCH",
+                "ModuleNotFoundError", "ImportError", "AssertionError",
+            )
+            error = next((code for code in recognized if code in result.stderr),
+                         "PACKAGED_STDIO_ASSERTION_FAILED")
+            return {"status": "FAIL", "reason": error,
                     "exitCode": result.returncode}
         parsed = json.loads(result.stdout.strip().splitlines()[-1])
         return parsed if parsed.get("status") == "PASS" else {"status": "FAIL", "reason": "STDIO_NOT_CONFIRMED"}
@@ -496,6 +509,7 @@ def breaking_demo(wheel: pathlib.Path, snapshot_dir: pathlib.Path | None = None)
             },
             "mcp": {
                 "status": stdio.get("status"),
+                "failureCode": stdio.get("reason"),
                 "authority": stdio.get("planningAuthority"),
                 "verificationStatus": stdio.get("verificationStatus"),
                 "coreRevisionObserved": stdio.get("coreRevision"),
