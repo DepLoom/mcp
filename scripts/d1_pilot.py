@@ -406,7 +406,10 @@ def launch(args):
     aa,bb=results["A"],results["B"]
     ca=aa["correctness"]["status"]=="PASS"
     cb=bb["correctness"]["status"]=="PASS"
-    if cb and not ca:verdict="B_CORRECT_A_INCORRECT"
+    b_mcp_used=bb["measurement"]["toolCalls"].get("mcp_tool_call",0)>0
+    if not b_mcp_used:
+        verdict="B_DID_NOT_USE_MCP_NO_MCP_EFFECT_CLAIM"
+    elif cb and not ca:verdict="B_CORRECT_A_INCORRECT"
     elif ca and not cb:verdict="B_INCORRECT_A_CORRECT"
     elif ca and cb:
         # Compare total task wall including B's MCP preparation overhead;
@@ -420,7 +423,8 @@ def launch(args):
           "frozenSha256":EXPECTED_SOURCE_SHA,
           "wheelSha256":gate.get("wheelSha256"),
           "cachedNetworkComparability":"BEST_EFFORT_COLD_SEPARATE_CACHE_LIVE_NETWORK",
-          "agentSessions":2,"result":verdict,"arms":results}
+          "agentSessions":2,"result":verdict,
+          "bActuallyCalledMcp":b_mcp_used,"arms":results}
     (args.out/"pair-summary.json").write_text(json.dumps(full,sort_keys=True,indent=2)+"\n")
     return full
 
