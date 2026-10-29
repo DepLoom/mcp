@@ -110,6 +110,15 @@ async def run():
        "EXACT_TARGET_NOT_AN_UPGRADE","EXPLICIT_USER_TARGET",
        "USER_EXACT_TARGET","PROJECT_NODE_ENGINE_CONFLICT",
        "REGISTRY_TARGET_UNAVAILABLE","PEER_RESOLUTION_DEFERRED")
+     # Existing Core's safe, fixed reason fragments disclose WHICH admission
+     # guard denied the real exact version without exposing registry URLs,
+     # tokens, free-form errors or raw planner output.
+     guard_reasons={
+       "target absent from registry metadata":"TARGET_VERSION_METADATA_ABSENT",
+       "registry tarball origin or metadata rejected":"TARGET_TARBALL_ORIGIN_OR_METADATA_REJECTED",
+       "type declaration guard rejected target":"TARGET_TYPES_GUARD_BLOCKED",
+       "runtime entrypoint guard rejected target":"TARGET_ENTRYPOINT_GUARD_BLOCKED",
+     }
      plan_path=(response.get("artifacts") or {}).get("plan")
      if isinstance(plan_path,str):
       try:
@@ -123,6 +132,8 @@ async def run():
            text_field=str(item.get(field) or "")
            for code in public_codes:
             if code in text_field: safe_plan_reasons.add(code)
+           for fragment,code in guard_reasons.items():
+            if fragment in text_field: safe_plan_reasons.add(code)
       except (OSError,ValueError,TypeError,KeyError):
        pass
      regdiag=chalk.get("registryCandidateDiagnostics") or {}
