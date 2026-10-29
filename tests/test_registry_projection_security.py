@@ -92,3 +92,40 @@ class DiagnosticsSecurityReviewTests(unittest.TestCase):
         self.assertEqual("PLANNING_ONLY",bp["status"]["authority"])
         self.assertEqual("NOT_VERIFIED",bp["status"]["verificationStatus"])
         self.assertEqual("UNKNOWN",bp["status"]["compatibility"])
+
+
+    def test_physical_probe_counters_must_reconcile(self):
+        good = valid()
+        self.assertEqual(1, project_registry_candidate(good)["physicalProbe"]["observed"])
+        for physical in (
+            {"observed": 0, "unprobed": True, "statusCounts": {"available": 1}, "failureCounts": {}},
+            {"observed": 1, "unprobed": True, "statusCounts": {"available": 1}, "failureCounts": {}},
+            {"observed": 1, "unprobed": False, "statusCounts": {"planning-only": 1}, "failureCounts": {}},
+            {"observed": 1, "unprobed": False, "statusCounts": {"missing-artifact": 1}, "failureCounts": {}},
+            {"observed": 1, "unprobed": False, "statusCounts": {"available": 1},
+             "failureCounts": {"HTTP_ARTIFACT_UNAVAILABLE": 1}},
+            {"observed": 1, "unprobed": False, "statusCounts": {"available": -1}, "failureCounts": {}},
+            {"observed": "1", "unprobed": False, "statusCounts": {"available": 1}, "failureCounts": {}},
+        ):
+            with self.subTest(physical=physical):
+                candidate = copy.deepcopy(good)
+                candidate["physicalProbe"] = physical
+                projected = project_registry_candidate(candidate)
+                self.assertIsNotNone(projected, "valid structural evidence should survive")
+                self.assertNotIn("physicalProbe", projected)
+                self.assertTrue(projected["projectionTruncated"])
+                full = fixture(candidate)
+                row = full["dependencies"][0]
+                self.assertEqual("NO_TARGET", row["status"])
+                self.assertEqual("NO_INSTALLABLE_ARTIFACT", row["noTargetDiagnosticCode"])
+                self.assertNotIn("physicalProbe", row["registryCandidateDiagnostics"])
+                self.assertNotIn("physicalProbe",
+                                 compact_blueprint(full)["dependencies"][0]["registryCandidateDiagnostics"])
+
+    def test_extra_unknown_probe_status_does_not_invent_availability(self):
+        candidate = valid()
+        candidate["physicalProbe"]["statusCounts"] = {"planning-only": 1, "token=SECRET": 99}
+        projected = project_registry_candidate(candidate)
+        self.assertEqual({"planning-only": 1}, projected["physicalProbe"]["statusCounts"])
+        self.assertTrue(projected["projectionTruncated"])
+        self.assertNotIn("SECRET", json.dumps(projected))
