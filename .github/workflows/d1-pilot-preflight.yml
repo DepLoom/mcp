@@ -35,15 +35,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install actual pinned MCP and build prerequisites
-        run: python -m pip install -e . build setuptools wheel
-      # Review-only inventory generation on an isolated CI checkout.
-      # The generated manifest must be committed and --check must pass before
-      # this stacked PR can be considered ready for integration/release.
+      # The inventory MUST be generated before the installed-package build,
+      # since build_support deliberately rejects stale Core gitlinks.
+      # Review checkout only; final PR will commit the exact generated file.
       - name: Generate candidate Core+schema manifest for review
         run: |
           python scripts/update_release_manifest.py
           python -c "import json; d=json.load(open('release-manifest.json')); print(json.dumps({'coreRevision':d['core']['revision'],'coreContentSha256':d['core']['contentSha256'],'schemaSha256':d['schemaSha256'],'generatorSha256':d['core']['files']['dependency_live_roadmap_generator.py'],'contractSha256':d['core']['files']['draft_decision_contract.py']},sort_keys=True))"
+      - name: Install actual pinned MCP and build prerequisites
+        run: python -m pip install -e . build setuptools wheel
       - name: Targeted V2 exact contract, immutable and negative controls
         run: python -m unittest discover -s tests -p test_exact_version_objective.py -v
       - name: Build exact checked-out wheel
