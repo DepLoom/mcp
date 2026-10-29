@@ -149,6 +149,7 @@ def _build_request(
     mutable_packages: Optional[List[str]] = None,
     approved_version_lines: Optional[Dict[str, List[int]]] = None,
     required_packages: Optional[List[str]] = None,
+    exact_targets: Optional[Dict[str, str]] = None,
     draft_max_candidates: int = 3,
     previous_evidence_digest: Optional[str] = None,
     use_system_proxy: Optional[bool] = None,
@@ -165,6 +166,7 @@ def _build_request(
         contract = normalize_decision_contract({
             "targetMode": target_mode, "objective": objective,
             "mutablePackages": mutable_packages, "approvedVersionLines": approved_version_lines,
+            "exactTargets": exact_targets or {},
         })
     except ValueError as exc:
         return _error("invalid-intent", str(exc)), None
@@ -183,6 +185,9 @@ def _build_request(
         if (contract["mutablePackages"] is not None
                 and any(x not in contract["mutablePackages"] for x in required)):
             return _error("invalid-intent", "required_packages must be inside mutable_packages"), None
+    if exact_targets:
+        if required_packages and any(name in exact_targets for name in required_packages):
+            return _error("invalid-intent", "exact target must not also be a separate required movement"), None
     if isinstance(draft_max_candidates, bool) or not isinstance(draft_max_candidates, int) or not (1 <= draft_max_candidates <= MAX_DRAFT_CANDIDATES):
         return _error("invalid-candidate-cap", f"draft_max_candidates must be an integer in [1, {MAX_DRAFT_CANDIDATES}]"), None
     if previous_evidence_digest is not None and (not isinstance(previous_evidence_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", previous_evidence_digest)):
@@ -234,6 +239,8 @@ def _build_request(
 
     if any(name in exclusions for name in required):
         return _error("invalid-intent", "required_packages cannot also be excluded"), None
+    if any(name in exclusions for name in (contract.get("exactTargets") or {})):
+        return _error("invalid-intent", "exact_targets cannot also be excluded"), None
     if required:
         # The Core input is a trusted, normalized user-requested intent. Core
         # still owns candidate selection, compatibility and solver status.
@@ -771,6 +778,7 @@ def get_upgrade_plan(
     mutable_packages: Optional[List[str]] = None,
     approved_version_lines: Optional[Dict[str, List[int]]] = None,
     required_packages: Optional[List[str]] = None,
+    exact_targets: Optional[Dict[str, str]] = None,
     draft_max_candidates: int = 3,
     previous_evidence_digest: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -793,6 +801,7 @@ def get_upgrade_plan(
         mutable_packages=mutable_packages,
         approved_version_lines=approved_version_lines,
         required_packages=required_packages,
+        exact_targets=exact_targets,
         draft_max_candidates=draft_max_candidates,
         previous_evidence_digest=previous_evidence_digest,
     )
@@ -818,7 +827,9 @@ def get_upgrade_plan(
         "neither relaxes compatibility constraints. mutable_packages limits changes "
         "while retaining the other packages as constraints. required_packages "
         "asks the existing Core to move those packages, but does not pin an "
-        "exact version or certify runtime compatibility. draft_max_candidates "
+        "exact version. objective='explicit-version-targets' with exact_targets "
+        "provides exact stable semver assignments through Core's real peer/engine "
+        "solver; unknown security/runtime remains NOT_VERIFIED. draft_max_candidates "
         "widens candidate evidence independently of the deadline. Review critical "
         "evidence and workspaceCoverage before acting within existing user authority."
     ),
@@ -839,6 +850,7 @@ async def get_upgrade_plan_tool(
     mutable_packages: Optional[List[str]] = None,
     approved_version_lines: Optional[Dict[str, List[int]]] = None,
     required_packages: Optional[List[str]] = None,
+    exact_targets: Optional[Dict[str, str]] = None,
     draft_max_candidates: int = 3,
     previous_evidence_digest: Optional[str] = None,
     ctx: Context = None,  # type: ignore[assignment]  # injected by MCPServer
@@ -859,6 +871,7 @@ async def get_upgrade_plan_tool(
         mutable_packages=mutable_packages,
         approved_version_lines=approved_version_lines,
         required_packages=required_packages,
+        exact_targets=exact_targets,
         draft_max_candidates=draft_max_candidates,
         previous_evidence_digest=previous_evidence_digest,
     )
