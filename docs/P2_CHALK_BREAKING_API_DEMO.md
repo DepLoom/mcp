@@ -18,6 +18,14 @@ python -m build --no-isolation
 python scripts/correctness_preflight.py breaking-demo --wheel dist/deploom_mcp-0.2.0-py3-none-any.whl --report ./p2-chalk-receipt.json --snapshot-dir ./p2-chalk-frozen-baseline
 ```
 
+A later agent output is scored **separately, without any agent access to the oracle**, using the recorded baselineSourceSha256 from this receipt and the public frozen snapshot:
+
+```bash
+python scripts/correctness_preflight.py breaking-verify --baseline ./p2-chalk-frozen-baseline --candidate ./isolated-agent-output --expected-baseline-sha256 <receipt.provenance.baselineSourceSha256> --report ./p2-independent-verdict.json
+```
+
+This second command fails closed on any baseline SHA drift **before npm**, and only the independent evaluator may execute it. The future agent gets only the snapshot and task; it is not given this verifier, source gold patch, or any results from other slots.
+
 The command spends **zero agent/model tokens**. It requires the public npm registry at setup and during independent fresh `npm ci`; it does not simulate external network availability. The resulting receipt has an overall PASS only if **all** controls and actual packaged stdio PASS. On a required network failure it must fail, never fabricate proof.
 
 On GitHub Actions, run the existing `correctness-preflight.yml` new `public-breaking-api` job (Node 22, Windows/Linux). The independent oracle and tests are in the *harness checkout*, **not** in the unsolved baseline copied by `--snapshot-dir`. That snapshot contains only the starting project (source, read-only build/test scripts, manifest, actual resolved lockfile). **Never deliver the control/reference patch or the evaluator source to an experimental agent.** The evaluator is public repository code, so a future experiment must prohibit tools that read the evaluator/repository source beyond the isolated task slot; an unrestricted web agent could otherwise discover the gold patch.
