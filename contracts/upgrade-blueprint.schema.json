@@ -4,130 +4,430 @@
   "title": "Upgrade Blueprint",
   "description": "Machine-readable planning output of the DepLoom planner exposed through the headless boundary (src/deploom_mcp/blueprint.py). schemaVersion 2 projects the Draft run plan.json/result.json without recomputation. A planning-only blueprint MUST carry verificationStatus=NOT_VERIFIED, authority=PLANNING_ONLY, compatibility=UNKNOWN and parallelExecutionSafety=UNPROVEN; it MUST NOT claim CONSTRAINT_SATISFIED/MATERIALIZED/PROJECT_VERIFIED for any dependency.",
   "type": "object",
-  "required": ["schemaVersion", "kind", "generatedAt", "source", "policy", "status", "summary", "dependencies"],
+  "required": [
+    "schemaVersion",
+    "kind",
+    "generatedAt",
+    "source",
+    "policy",
+    "status",
+    "summary",
+    "dependencies"
+  ],
   "properties": {
-    "schemaVersion": { "const": 2 },
-    "kind": { "const": "upgrade-blueprint" },
-    "generatedAt": { "type": ["string", "null"] },
-    "elapsedMs": { "type": ["number", "null"] },
+    "schemaVersion": {
+      "const": 2
+    },
+    "kind": {
+      "const": "upgrade-blueprint"
+    },
+    "generatedAt": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "elapsedMs": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
     "deadline": {
       "description": "Planner deadline clock as published in result.json: a deadlineSeconds budget and remainingMs when the run finished.",
-      "type": ["object", "number", "null"],
+      "type": [
+        "object",
+        "number",
+        "null"
+      ],
       "properties": {
-        "deadlineSeconds": { "type": "number" },
-        "remainingMs": { "type": "number" }
+        "deadlineSeconds": {
+          "type": "number"
+        },
+        "remainingMs": {
+          "type": "number"
+        }
       },
-      "required": ["deadlineSeconds", "remainingMs"]
+      "required": [
+        "deadlineSeconds",
+        "remainingMs"
+      ]
     },
     "run": {
       "type": "object",
       "properties": {
-        "runId": { "type": ["string", "null"] },
-        "workspaceId": { "type": ["string", "null"] },
-        "projectId": { "type": ["string", "null"] },
-        "mode": { "type": ["string", "null"] },
-        "generator": { "type": "string" }
+        "runId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workspaceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "projectId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "generator": {
+          "type": "string"
+        }
       }
     },
     "source": {
       "type": "object",
-      "required": ["project"],
+      "required": [
+        "project"
+      ],
       "properties": {
         "project": {
           "type": "object",
-          "required": ["name", "path"],
+          "required": [
+            "name",
+            "path"
+          ],
           "properties": {
-            "name": { "type": "string" },
-            "path": { "type": "string", "description": "Absolute path; only read, never written." }
+            "name": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string",
+              "description": "Absolute path; only read, never written."
+            }
           }
         },
-        "inputFiles": { "type": "array", "items": { "type": "string" } },
-        "inputHashes": { "type": "object" },
-        "semanticInputHash": { "type": ["string", "null"] },
-        "semanticInputsByProject": { "type": "object" },
-        "inputCoverage": { "type": ["object", "null"] }
+        "inputFiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "inputHashes": {
+          "type": "object"
+        },
+        "semanticInputHash": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "semanticInputsByProject": {
+          "type": "object"
+        },
+        "inputCoverage": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
       }
     },
     "policy": {
       "type": "object",
       "properties": {
-        "targetLevel": { "enum": ["yellow", "green"] },
-        "minLagOkPct": { "type": "integer" },
-        "policyHash": { "type": ["string", "null"] },
-        "intent": { "type": ["object", "null"] },
-        "acceptancePolicy": { "type": ["object", "null"] },
-        "exclusions": { "type": "array", "items": { "type": "string" } },
-        "decisionContract": { "$ref": "#/definitions/decisionContract" },
-        "coreContractSupport": { "enum": ["V1", "LEGACY"] }
+        "targetLevel": {
+          "enum": [
+            "yellow",
+            "green"
+          ]
+        },
+        "minLagOkPct": {
+          "type": "integer"
+        },
+        "policyHash": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "intent": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "acceptancePolicy": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "exclusions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "decisionContract": {
+          "$ref": "#/definitions/decisionContract"
+        },
+        "coreContractSupport": {
+          "enum": [
+            "V1",
+            "LEGACY"
+          ]
+        }
       }
     },
     "status": {
       "type": "object",
-      "required": ["verificationStatus", "authority", "compatibility", "draftStatus"],
+      "required": [
+        "verificationStatus",
+        "authority",
+        "compatibility",
+        "draftStatus"
+      ],
       "properties": {
-        "draftStatus": { "enum": ["DRAFT_READY", "DRAFT_PARTIAL", null] },
-        "verificationStatus": { "enum": ["NOT_VERIFIED"] },
-        "authority": { "enum": ["PLANNING_ONLY"] },
-        "compatibility": { "enum": ["UNKNOWN"] },
-        "partialReason": { "type": ["string", "null"] },
-        "parallelExecutionSafety": { "const": "UNPROVEN" },
-        "verificationBoundaryNote": { "type": "string" }
+        "draftStatus": {
+          "enum": [
+            "DRAFT_READY",
+            "DRAFT_PARTIAL",
+            null
+          ]
+        },
+        "verificationStatus": {
+          "enum": [
+            "NOT_VERIFIED"
+          ]
+        },
+        "authority": {
+          "enum": [
+            "PLANNING_ONLY"
+          ]
+        },
+        "compatibility": {
+          "enum": [
+            "UNKNOWN"
+          ]
+        },
+        "partialReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parallelExecutionSafety": {
+          "const": "UNPROVEN"
+        },
+        "verificationBoundaryNote": {
+          "type": "string"
+        }
       }
     },
     "summary": {
       "type": "object",
       "properties": {
-        "totalDependencies": { "type": "integer" },
-        "proposed": { "type": "integer" },
-        "needsReview": { "type": "integer" },
-        "statusCounts": { "type": "object", "additionalProperties": { "type": "integer" } },
-        "draftCounts": { "type": "object", "additionalProperties": { "type": "integer" } },
-        "metadataKnown": { "type": ["integer", "null"] },
-        "metadataTotal": { "type": ["integer", "null"] },
-        "securityKnown": { "type": ["integer", "null"] },
-        "securityTotal": { "type": ["integer", "null"] },
-        "insufficientData": { "type": "boolean" },
-        "processed": { "type": ["integer", "null"] },
-        "processedTotal": { "type": ["integer", "null"] },
-        "done": { "type": ["string", "null"] }
+        "totalDependencies": {
+          "type": "integer"
+        },
+        "proposed": {
+          "type": "integer"
+        },
+        "needsReview": {
+          "type": "integer"
+        },
+        "statusCounts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "draftCounts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "metadataKnown": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "metadataTotal": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "securityKnown": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "securityTotal": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "insufficientData": {
+          "type": "boolean"
+        },
+        "processed": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "processedTotal": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "done": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     },
-    "registryDiagnostics": { "$ref": "#/definitions/registryDiagnostics" },
+    "registryDiagnostics": {
+      "$ref": "#/definitions/registryDiagnostics"
+    },
     "dependencies": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["package", "status"],
+        "required": [
+          "package",
+          "status"
+        ],
         "properties": {
-          "project": { "type": ["string", "null"] },
-          "package": { "type": "string" },
-          "declarationId": { "type": "string" },
-          "kind": { "type": ["string", "null"] },
-          "requestedSpec": { "type": ["string", "null"] },
-          "current": { "type": ["string", "null"] },
-          "target": { "type": ["string", "null"] },
-          "targetYellow": { "type": ["string", "null"] },
-          "targetGreen": { "type": ["string", "null"] },
-          "latest": { "type": ["string", "null"] },
+          "project": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "package": {
+            "type": "string"
+          },
+          "declarationId": {
+            "type": "string"
+          },
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requestedSpec": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "current": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "targetYellow": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "targetGreen": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "latest": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "status": {
             "$ref": "#/definitions/dependencyStatus"
           },
-          "noTargetDiagnosticCode": { "$ref": "#/definitions/noTargetDiagnosticCode" },
-          "registryCandidateDiagnostics": { "$ref": "#/definitions/registryCandidateDiagnostics" },
-          "needsReview": { "type": "boolean" },
-          "reason": { "type": ["string", "null"] },
-          "nextAction": { "type": "string" },
-          "decisionReasons": { "type": "array", "items": { "$ref": "#/definitions/decisionEvidence" } },
-          "group": { "type": ["integer", "null"] },
-          "breakingChanges": { "type": "array", "items": { "type": "string" } },
-          "migrationNotes": { "type": "array", "items": { "type": "string" } },
+          "noTargetDiagnosticCode": {
+            "$ref": "#/definitions/noTargetDiagnosticCode"
+          },
+          "registryCandidateDiagnostics": {
+            "$ref": "#/definitions/registryCandidateDiagnostics"
+          },
+          "needsReview": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "nextAction": {
+            "type": "string"
+          },
+          "decisionReasons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/decisionEvidence"
+            }
+          },
+          "group": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "breakingChanges": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "migrationNotes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "evidence": {
             "type": "object",
             "properties": {
-              "candidateSearchTruncated": { "type": "boolean" },
-              "peerCompatUnresolved": { "type": "boolean" },
-              "draftUnknown": { "type": ["string", "null"] },
-              "scanState": { "type": ["string", "null"] }
+              "candidateSearchTruncated": {
+                "type": "boolean"
+              },
+              "peerCompatUnresolved": {
+                "type": "boolean"
+              },
+              "draftUnknown": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "scanState": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
             }
           }
         }
@@ -138,90 +438,241 @@
       "items": {
         "type": "object",
         "properties": {
-          "group": { "type": "integer" },
-          "packages": { "type": "array", "items": { "type": "string" } },
-          "count": { "type": "integer" },
-          "needsReview": { "type": "boolean" },
-          "kind": { "const": "display-priority" },
-          "parallelSafety": { "const": "UNPROVEN" }
+          "group": {
+            "type": "integer"
+          },
+          "packages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "count": {
+            "type": "integer"
+          },
+          "needsReview": {
+            "type": "boolean"
+          },
+          "kind": {
+            "const": "display-priority"
+          },
+          "parallelSafety": {
+            "const": "UNPROVEN"
+          }
         }
       }
     },
     "solverComponents": {
       "type": "array",
       "description": "z3 solver components from solver-components.json; planning artifacts, not proof of parallel-safe installation.",
-      "items": { "type": "object" }
+      "items": {
+        "type": "object"
+      }
     },
-    "unknowns": { "type": "array", "items": { "type": "object" } },
-    "conflicts": { "type": "array", "items": { "type": "object" } },
-    "unresolved": { "type": "array", "items": { "type": "object" } },
-    "perProject": { "type": "object" },
-    "projections": { "type": "object" },
+    "unknowns": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "unresolved": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "perProject": {
+      "type": "object"
+    },
+    "projections": {
+      "type": "object"
+    },
     "targetAssessment": {
       "description": "Published health of the exact final chosen/kept versions, distinct from current coverage and physical verification. Missing or invalid target evidence fails closed. A fully assessed policy violation can have evidenceComplete=true.",
       "type": "object",
-      "required": ["scope", "aggregate", "projects", "evidenceComplete", "needsReview"],
+      "required": [
+        "scope",
+        "aggregate",
+        "projects",
+        "evidenceComplete",
+        "needsReview"
+      ],
       "properties": {
-        "scope": { "const": "FINAL_PLANNED_ASSIGNMENT" },
-        "aggregate": { "type": "object" },
-        "projects": { "type": "object", "additionalProperties": { "type": "object" } },
-        "evidenceComplete": { "type": "boolean" },
-        "needsReview": { "type": "boolean" }
+        "scope": {
+          "const": "FINAL_PLANNED_ASSIGNMENT"
+        },
+        "aggregate": {
+          "type": "object"
+        },
+        "projects": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        },
+        "evidenceComplete": {
+          "type": "boolean"
+        },
+        "needsReview": {
+          "type": "boolean"
+        }
       }
     },
     "hashes": {
       "type": "object",
       "properties": {
-        "plan": { "type": ["string", "null"] },
-        "prompt": { "type": ["string", "null"] }
+        "plan": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "prompt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     },
     "artifacts": {
       "type": "object",
       "properties": {
-        "manifest": { "type": "string" },
-        "plan": { "type": "string" },
-        "prompt": { "type": "string" },
-        "summary": { "type": "string" },
-        "solverComponents": { "type": "string" }
+        "manifest": {
+          "type": "string"
+        },
+        "plan": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "solverComponents": {
+          "type": "string"
+        }
       }
     },
-    "blueprintFile": { "type": "string" },
-    "decisionEvidence": { "type": "array", "items": { "$ref": "#/definitions/decisionEvidence" } },
+    "blueprintFile": {
+      "type": "string"
+    },
+    "decisionEvidence": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/decisionEvidence"
+      }
+    },
     "workspaceCoverage": {
       "type": "object",
-      "required": ["mode", "reconciliationRequired", "jointAssignment", "discoveryComplete"],
+      "required": [
+        "mode",
+        "reconciliationRequired",
+        "jointAssignment",
+        "discoveryComplete"
+      ],
       "properties": {
-        "mode": { "const": "SINGLE_MANIFEST_PLANNING" },
-        "jointAssignment": { "const": "NOT_COMPUTED" },
-        "workspaceGraphCoverage": { "enum": ["PARTIAL", "SINGLE_PROJECT"] },
-        "reconciliationRequired": { "type": "boolean" },
-        "discoveryComplete": { "type": "boolean" },
-        "discoveredManifests": { "type": "array", "items": { "type": "string" } },
-        "evaluatedManifests": { "type": "array", "items": { "type": "string" } },
-        "unevaluatedManifests": { "type": "array", "items": { "type": "string" } },
-        "nextAction": { "type": "string" }
+        "mode": {
+          "const": "SINGLE_MANIFEST_PLANNING"
+        },
+        "jointAssignment": {
+          "const": "NOT_COMPUTED"
+        },
+        "workspaceGraphCoverage": {
+          "enum": [
+            "PARTIAL",
+            "SINGLE_PROJECT"
+          ]
+        },
+        "reconciliationRequired": {
+          "type": "boolean"
+        },
+        "discoveryComplete": {
+          "type": "boolean"
+        },
+        "discoveredManifests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evaluatedManifests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "unevaluatedManifests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "nextAction": {
+          "type": "string"
+        }
       }
     },
-    "runtimeProvenance": { "type": "object" },
-    "objectiveEvidence": { "type": "object" },
-    "planningOptions": { "type": "object" },
+    "runtimeProvenance": {
+      "type": "object"
+    },
+    "objectiveEvidence": {
+      "type": "object"
+    },
+    "planningOptions": {
+      "type": "object"
+    },
     "identities": {
       "type": "object",
       "properties": {
-        "semanticInputHash": { "type": ["string", "null"] },
-        "policyDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "evidenceDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "decisionDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "evidenceScope": { "const": "PUBLISHED_PLANNING_EVIDENCE" }
+        "semanticInputHash": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "policyDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "evidenceDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "decisionDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "evidenceScope": {
+          "const": "PUBLISHED_PLANNING_EVIDENCE"
+        }
       }
     },
     "recovery": {
       "type": "object",
       "properties": {
-        "draftMaxCandidates": { "type": "integer", "minimum": 1, "maximum": 128 },
-        "previousEvidenceComparison": { "enum": ["NOT_PROVIDED", "UNCHANGED_EVIDENCE", "EVIDENCE_CHANGED"] },
-        "nextAction": { "type": "string" }
+        "draftMaxCandidates": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 128
+        },
+        "previousEvidenceComparison": {
+          "enum": [
+            "NOT_PROVIDED",
+            "UNCHANGED_EVIDENCE",
+            "EVIDENCE_CHANGED"
+          ]
+        },
+        "nextAction": {
+          "type": "string"
+        }
       }
     }
   },
@@ -450,31 +901,156 @@
     },
     "decisionContract": {
       "type": "object",
-      "required": ["version", "targetMode", "objective", "mutablePackages", "approvedVersionLines"],
+      "required": [
+        "version",
+        "targetMode",
+        "objective",
+        "mutablePackages",
+        "approvedVersionLines"
+      ],
       "properties": {
-        "version": { "const": 1 },
-        "targetMode": { "enum": ["pinned", "advisory"] },
-        "objective": { "enum": ["minimum-change-to-policy", "latest-compatible-in-approved-lines"] },
-        "mutablePackages": { "type": ["array", "null"], "items": { "type": "string" } },
+        "version": {
+          "enum": [
+            1,
+            2
+          ]
+        },
+        "targetMode": {
+          "enum": [
+            "pinned",
+            "advisory"
+          ]
+        },
+        "objective": {
+          "enum": [
+            "minimum-change-to-policy",
+            "latest-compatible-in-approved-lines",
+            "explicit-version-targets"
+          ]
+        },
+        "mutablePackages": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
         "approvedVersionLines": {
           "type": "object",
-          "additionalProperties": { "type": "array", "items": { "type": "integer", "minimum": 0 } }
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "exactTargets": {
+          "type": "object",
+          "maxProperties": 256,
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+          }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "version": {
+                "const": 2
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "objective": {
+                "const": "explicit-version-targets"
+              }
+            },
+            "required": [
+              "exactTargets"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "objective": {
+                "const": "explicit-version-targets"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "version": {
+                "const": 2
+              }
+            },
+            "required": [
+              "exactTargets"
+            ]
+          }
+        }
+      ]
     },
     "decisionEvidence": {
       "type": "object",
-      "required": ["code", "severity", "message", "nextAction", "evidenceRef"],
+      "required": [
+        "code",
+        "severity",
+        "message",
+        "nextAction",
+        "evidenceRef"
+      ],
       "properties": {
-        "code": { "type": "string" },
-        "severity": { "enum": ["BLOCKER", "REVIEW", "INFO"] },
-        "package": { "type": ["string", "null"] },
-        "scope": { "enum": ["project", "aggregate"] },
-        "project": { "type": ["string", "null"] },
-        "message": { "type": "string" },
-        "nextAction": { "type": "string" },
-        "evidenceRef": { "type": "string" },
-        "lifecycle": { "enum": ["CURRENT_ROW", "ACTIVE_FINAL", "UNRESOLVED_LEGACY"] }
+        "code": {
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "BLOCKER",
+            "REVIEW",
+            "INFO"
+          ]
+        },
+        "package": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "enum": [
+            "project",
+            "aggregate"
+          ]
+        },
+        "project": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "nextAction": {
+          "type": "string"
+        },
+        "evidenceRef": {
+          "type": "string"
+        },
+        "lifecycle": {
+          "enum": [
+            "CURRENT_ROW",
+            "ACTIVE_FINAL",
+            "UNRESOLVED_LEGACY"
+          ]
+        }
       }
     },
     "dependencyStatus": {
