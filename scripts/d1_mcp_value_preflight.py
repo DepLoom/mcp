@@ -310,14 +310,24 @@ async def run():
     probe={"status":"UNAVAILABLE"}
    # Diagnose ONLY this isolated public fixture, never read the caller's
    # HOME, never export traceback/raw exception message/paths.
-   safe_failure={"class":None,"frames":[],"code":None}
+   safe_failure={"class":None,"frames":[],"code":None,
+                 "isolatedDiagnosticCount":0,"observedCodeTypes":[]}
    try:
     directory=pathlib.Path.home()/".deploom"/"diagnostics"
     public_files=sorted(directory.glob("deploom-failure-*.json"))[-8:]
+    safe_failure["isolatedDiagnosticCount"]=len(public_files)
     for path in public_files:
      if not path.is_file() or path.stat().st_size>300000:continue
      obj=json.loads(path.read_text(encoding="utf-8"))
-     if obj.get("schemaVersion")!="DEPLOOM_FAILURE_V2" or obj.get("code")!="TOOL_INTERNAL_ERROR":
+     if obj.get("schemaVersion")!="DEPLOOM_FAILURE_V2":
+      continue
+     label=obj.get("code")
+     if label in ("TOOL_INTERNAL_ERROR","EXACT_SOLVER_UNSAT_PROVEN",
+                  "GLOBAL_EXACT_EXCLUSION_UNSAT_PROVEN"):
+      safe_failure["observedCodeTypes"].append(label)
+     else:
+      safe_failure["observedCodeTypes"].append("OTHER")
+     if obj.get("code") not in ("TOOL_INTERNAL_ERROR",):
       continue
      raw=str(obj.get("traceback") or "")
      cls=re.findall(r"(?m)^([A-Za-z][A-Za-z0-9]{0,40}(?:Error|Exception)):",raw)
@@ -328,8 +338,8 @@ async def run():
       if fname in ("dependency_live_roadmap_generator.py","draft_decision_contract.py",
                    "peer_solver_z3.py","peer_solver_model.py","verification_proof.py"):
        frames.append({"file":fname,"line":int(lineno),"function":fun})
-     safe_failure={"class":cls[-1] if cls else "UNKNOWN",
-                   "frames":frames[-7:],"code":"TOOL_INTERNAL_ERROR"}
+     safe_failure.update({"class":cls[-1] if cls else "UNKNOWN",
+                   "frames":frames[-7:],"code":"TOOL_INTERNAL_ERROR"})
    except (OSError,ValueError,TypeError):
     pass
    return {"responses":responses,"toolAvailable":True,
