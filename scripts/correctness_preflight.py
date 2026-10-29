@@ -198,21 +198,22 @@ def reference_edit(project: Path, registry: str, env: dict[str, str]) -> None:
         raise RuntimeError("reference lockfile update failed against synthetic local registry")
 
 
-def installed_provenance(python: Path, root: Path, env: dict[str, str]) -> dict:
+def installed_provenance(wheel_root: Path, root: Path, env: dict[str, str]) -> dict:
     code = (
-        "import json,pathlib,sys,hashlib,deploom_mcp;"
+        "import sys;sys.path.insert(0,sys.argv[1]);"
+        "import json,pathlib,hashlib,deploom_mcp;"
         "from deploom_mcp.distribution import resolve_core_dir,release_manifest_path;"
         "p=pathlib.Path(deploom_mcp.__file__).resolve();"
         "core=resolve_core_dir();"
         "m=json.loads(release_manifest_path().read_text(encoding='utf-8'));"
         "print(json.dumps({'coreRevision':m['core']['revision'],"
         "'mcpVersion':m['mcpVersion'],'inventoryCount':len(m['core']['files']),"
-        "'wheelPackage':p.is_relative_to(pathlib.Path(sys.prefix).resolve()),"
-        "'wheelCore':core.is_relative_to(pathlib.Path(sys.prefix).resolve()),"
+        "'wheelPackage':p.is_relative_to(pathlib.Path(sys.argv[1]).resolve()),"
+        "'wheelCore':core.is_relative_to(pathlib.Path(sys.argv[1]).resolve()),"
         "'coreHashMatches':hashlib.sha256((core/'registry_candidate_diagnostics.py').read_bytes()).hexdigest()"
         "==m['core']['files']['registry_candidate_diagnostics.py']}))"
     )
-    proc = invoke([str(python), "-I", "-c", code], root, env)
+    proc = invoke([sys.executable, "-I", "-c", code, str(wheel_root)], root, env)
     if proc.returncode:
         # Do not echo raw subprocess stderr (may contain private environment).
         kind = ("MISSING_MODULE" if "ModuleNotFoundError" in proc.stderr else
@@ -227,10 +228,17 @@ def installed_provenance(python: Path, root: Path, env: dict[str, str]) -> dict:
     return provenance
 
 
-async def packaged_plan(python: Path, project: Path, out: Path,
+WHEEL_ENTRY = (
+    "import sys,runpy;sys.path.insert(0,sys.argv[1]);"
+    "runpy.run_module('deploom_mcp',run_name='__main__')"
+)
+
+
+async def packaged_plan(wheel_root: Path, project: Path, out: Path,
                         registry: str, env: dict[str, str]) -> dict:
-    params = StdioServerParameters(command=str(python),
-                                   args=["-I", "-m", "deploom_mcp"],
+    # Run the actual wheel's __main__ over stdio, not any editable checkout.
+    params = StdioServerParameters(command=sys.executable,
+                                   args=["-I", "-c", WHEEL_ENTRY, str(wheel_root)],
                                    cwd=str(out.parent), env=env)
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as client:
@@ -295,11 +303,11 @@ def verify_blueprint(result: dict, schema: dict) -> str:
     return "PASS" if bp.get("status", {}).get("authority") == "PLANNING_ONLY" else "FALSE_BLUEPRINT_AUTHORITY"
 
 
-def run_preflight(python: Path, wheel: Path) -> dict:
+def run_preflight(wheel_root: Path, wheel: Path) -> dict:
     with tempfile.TemporaryDirectory(prefix="deploom-p1-correctness-") as td:
         root = Path(td).resolve()
         env = isolated_env(root)
-        provenance = installed_provenance(python, root, env)
+        provenance = installed_provenance(wheel_root, root, env)
         if provenance.get("inventoryCount") != 134:
             raise RuntimeError("the expected P2.6 Core pin was not installed")
         release = json.loads((ROOT / "release-manifest.json").read_text(encoding="utf-8"))
@@ -316,7 +324,7 @@ def run_preflight(python: Path, wheel: Path) -> dict:
             checks["baseline_fixture_input"] = (
                 "PASS" if json.loads((baseline / "package.json").read_text())["dependencies"] == BASELINE
                 else "BASELINE_WRONG")
-            planned = asyncio.run(packaged_plan(python, baseline, root / "plan-good",
+            planned = asyncio.run(packaged_plan(wheel_root, baseline, root / "plan-good",
                                                 reg.base, env))
             checks["packaged_stdio_plan"] = plan_oracle(planned)
             checks["full_blueprint_schema"] = verify_blueprint(planned, schema)
@@ -355,7 +363,7 @@ def run_preflight(python: Path, wheel: Path) -> dict:
             with patch.dict(os.environ, env, clear=True):
                 make_fixture(str(blocked), reg.base)
             before = fingerprints(blocked)
-            plan = asyncio.run(packaged_plan(python, blocked, root / "plan-foreign",
+            plan = asyncio.run(packaged_plan(wheel_root, blocked, root / "plan-foreign",
                                              reg.base, env))
             checks["foreign_tarball_blocked"] = plan_oracle(plan, expect_foreign=True)
             checks["foreign_blueprint_schema"] = verify_blueprint(plan, schema)
@@ -392,11 +400,18 @@ def run_preflight(python: Path, wheel: Path) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--wheel-python", type=Path, required=True)
+    parser.add_argument("--wheel-root", type=Path, required=True)
     parser.add_argument("--wheel", type=Path, required=True)
     parser.add_argument("--json-out", type=Path, required=True)
     args = parser.parse_args()
-    report = run_preflight(args.wheel_python.resolve(), args.wheel.resolve())
+    try:
+        report = run_preflight(args.wheel_root.resolve(), args.wheel.resolve())
+    except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        # Always save a non-secret FAIL receipt; raw exceptions may contain
+        # registry values or environment paths and must not enter artifacts.
+        report = {"status": "FAIL", "stage": "INFRASTRUCTURE_OR_FIXTURE",
+                  "errorType": type(exc).__name__, "agentMigrationCorrectness": "NOT_TESTED",
+                  "agentSessionCount": 0, "checks": {}}
     args.json_out.parent.mkdir(parents=True, exist_ok=True)
     args.json_out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n",
                              encoding="utf-8")

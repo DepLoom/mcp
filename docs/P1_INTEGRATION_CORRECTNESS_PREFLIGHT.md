@@ -40,7 +40,7 @@ Use the focused local unit suite:
 python -m unittest discover -s tests -p test_correctness_preflight.py -v
 \`\`\`
 
-Use the optional [correctness-preflight workflow](../.github/workflows/correctness-preflight.yml) for a real packaged-wheel run on Ubuntu + Node 22 + Python 3.12. It installs a wheel in a separate venv outside checkout; tests create only localhost inputs. A workflow failure is **FAIL**, not a claim that the harness ran successfully. The receipt records \`agentMigrationCorrectness=NOT_TESTED\` even if every deterministic gate passes.
+Use the optional [correctness-preflight workflow](../.github/workflows/correctness-preflight.yml) for a real packaged-wheel run on Ubuntu + Node 22 + Python 3.12. It installs the wheel into a temporary isolated --target directory outside checkout, explicitly prepended for a -I runtime; tests create only localhost inputs. A workflow failure is **FAIL**, not a claim that the harness ran successfully. The receipt records \`agentMigrationCorrectness=NOT_TESTED\` even if every deterministic gate passes.
 
 **Limitations:** the three tiny packages do not have real breaking API adaptations or cross-cohort peer conflicts; a green result is *smoke/reliability evidence*, not realistic migration quality. The known target values are fixed fixture oracle values, not evidence of a globally optimal dependency assignment. No installed-tree security audit against a live authority is asserted by this offline fixture. Corporate Nexus and proprietary application behavior remain untested.
 
