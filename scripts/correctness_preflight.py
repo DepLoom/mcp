@@ -534,11 +534,25 @@ def main() -> int:
         report = {"status": "FAIL", "reason": "PREFLIGHT_INFRASTRUCTURE_" + type(exc).__name__}
     output.parent.mkdir(parents=True,exist_ok=True)
     output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(json.dumps({"status":report["status"],"report":output.name,
-                      "reason":report.get("reason"),
-                      "negativeCases":len(report.get("negativeRejections", {})),
-                      "packagedStdio":report.get("packagedMcpStdio",{}).get("status","NOT_RUN")},
-                     sort_keys=True))
+    summary = {"status": report["status"], "report": output.name,
+               "reason": report.get("reason")}
+    if args.mode == "breaking-demo":
+        control = report.get("controls", {})
+        summary.update({
+            "negativeCases": len(control.get("unsafe", {})),
+            "packagedStdio": (report.get("mcp") or {}).get("status", "NOT_RUN"),
+            "baseline": "PASS" if report.get("checks", {}).get("baselinePASS") else "NOT_PASS",
+            "versionOnlyInstall": "PASS" if report.get("checks", {}).get("versionOnlyInstallPASS") else "NOT_PASS",
+            "versionOnlyBehavior": "FAIL_AS_EXPECTED" if report.get("checks", {}).get("versionOnlyRuntimeFAIL") else "NOT_CONFIRMED",
+            "referencePatch": "PASS" if report.get("checks", {}).get("referenceCodePatchPASS") else "NOT_PASS",
+            "setupWallSeconds": report.get("setupWallSeconds"),
+        })
+    else:
+        summary.update({
+            "negativeCases": len(report.get("negativeRejections", {})),
+            "packagedStdio": report.get("packagedMcpStdio", {}).get("status", "NOT_RUN"),
+        })
+    print(json.dumps(summary, sort_keys=True))
     return 0 if report.get("status")=="PASS" else 1
 
 
