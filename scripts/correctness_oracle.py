@@ -231,3 +231,178 @@ def verify_candidate(baseline: pathlib.Path, candidate: pathlib.Path,
         evidence["reason"] = "ORACLE_INFRASTRUCTURE_" + type(exc).__name__
     evidence["wallSeconds"] = round(time.monotonic()-start, 3)
     return evidence
+
+
+# P2: public Chalk 4 -> 5, documented removal of .keyword() and ESM-only v5.
+# This is an independent evaluator; do not distribute its reference patch in
+# the future participant's editable workspace.
+CHALK_REGISTRY = "https://registry.npmjs.org/"
+CHALK_BASELINE = {"chalk": "4.1.2", "is-number": "7.0.0"}
+CHALK_TARGET = {"chalk": "5.3.0", "is-number": "7.0.0"}
+CHALK_MUTABLE = frozenset({"package.json", "package-lock.json", "src/format.cjs"})
+CHALK_FROZEN = frozenset({"build.cjs", "test.cjs", ".npmrc", "src/index.cjs"})
+CHALK_RUNTIME_ORACLE = r"""
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const render=require('./src/format.cjs');
+assert.equal(require('is-number')('42'), true);
+Promise.resolve().then(async()=>{
+  // No agent can pass by hardcoding the one build/test example.
+  for (const name of ['Ada', 'Lin', 'Ada & Lin']) {
+    const message = await render(name);
+    assert.equal(message, 'READY ' + name);
+  }
+  const output=JSON.parse(fs.readFileSync('dist/result.json','utf8'));
+  assert.deepEqual(output, {message:'READY Ada', excluded:'7.0.0'});
+  console.log('INDEPENDENT_CHALK_RUNTIME_PASS');
+}).catch(error=>{console.error(error.name);process.exitCode=1;});
+"""
+
+
+def chalk_static_contract(baseline: pathlib.Path, candidate: pathlib.Path,
+                          *, baseline_mode: bool = False) -> dict[str, str]:
+    """Reject scope forgery before network, build, tests, or oracle execution."""
+    before = source_files(baseline)
+    after = source_files(candidate)
+    if baseline.resolve() == candidate.resolve() or (
+        baseline.resolve() in candidate.resolve().parents or
+        candidate.resolve() in baseline.resolve().parents
+    ):
+        raise OracleFailure("WORKTREE_NOT_ISOLATED")
+    if not CHALK_FROZEN.issubset(before) or set(before) - CHALK_MUTABLE != set(after) - CHALK_MUTABLE:
+        raise OracleFailure("FROZEN_SOURCE_SET_CHANGED")
+    if any(after[key] != before[key] for key in before if key not in CHALK_MUTABLE):
+        raise OracleFailure("FROZEN_SCRIPTS_OR_SOURCE_CHANGED")
+    if baseline_mode and after.get("src/format.cjs") != before.get("src/format.cjs"):
+        raise OracleFailure("BASELINE_SOURCE_CHANGED")
+    if "src/format.cjs" not in after:
+        raise OracleFailure("FORMAT_SOURCE_MISSING")
+    old = read_json(baseline / "package.json")
+    current = read_json(candidate / "package.json")
+    old_other, new_other = dict(old), dict(current)
+    old_other.pop("dependencies", None)
+    new_other.pop("dependencies", None)
+    if old_other != new_other or old.get("dependencies") != CHALK_BASELINE:
+        raise OracleFailure("BASELINE_OR_MANIFEST_SCOPE_CHANGED")
+    wanted = CHALK_BASELINE if baseline_mode else CHALK_TARGET
+    if current.get("dependencies") != wanted:
+        raise OracleFailure("CHALK_TARGET_OR_EXCLUSION_VIOLATION")
+    baseline_lock = read_json(baseline / "package-lock.json")
+    lock = read_json(candidate / "package-lock.json")
+    if baseline_lock.get("lockfileVersion") != 3 or lock.get("lockfileVersion") != 3:
+        raise OracleFailure("CHALK_LOCK_VERSION")
+    if baseline_mode and digest((baseline / "package-lock.json").read_bytes()) != digest(
+        (candidate / "package-lock.json").read_bytes()
+    ):
+        raise OracleFailure("BASELINE_LOCK_CHANGED")
+    packages = lock.get("packages")
+    if not isinstance(packages, dict):
+        raise OracleFailure("LOCK_PACKAGES_INVALID")
+    root = packages.get("")
+    if not isinstance(root, dict) or root.get("dependencies") != wanted:
+        raise OracleFailure("CHALK_LOCK_ROOT_MISMATCH")
+    if not baseline_mode and set(packages) != {
+        "", "node_modules/chalk", "node_modules/is-number"
+    }:
+        raise OracleFailure("CHALK_UNEXPECTED_LOCK_PACKAGES")
+    for name, version in wanted.items():
+        entry = packages.get("node_modules/" + name)
+        if not isinstance(entry, dict) or entry.get("version") != version:
+            raise OracleFailure("CHALK_LOCK_PACKAGE_VERSION")
+    # Reject credential/query/path aliases even if npm itself would accept them.
+    for key, entry in packages.items():
+        if key == "":
+            continue
+        if not isinstance(entry, dict):
+            raise OracleFailure("CHALK_BAD_LOCK_ENTRY")
+        resolved, integrity = entry.get("resolved"), entry.get("integrity")
+        if not isinstance(integrity, str) or not re.fullmatch(r"sha512-[A-Za-z0-9+/]+={0,2}", integrity):
+            raise OracleFailure("CHALK_INTEGRITY_INVALID")
+        if not isinstance(resolved, str):
+            raise OracleFailure("CHALK_LOCK_RESOLVED_MISSING")
+        try:
+            parsed = urlsplit(resolved)
+            pkg = key.split("node_modules/")[-1]
+            suffix = f"/{pkg}/-/{pkg}-{entry.get('version')}.tgz"
+            if (parsed.scheme != "https" or parsed.netloc != "registry.npmjs.org"
+                or parsed.path != suffix or parsed.query or parsed.fragment
+                or parsed.username or parsed.password):
+                raise OracleFailure("CHALK_FOREIGN_LOCK_ARTIFACT")
+        except ValueError:
+            raise OracleFailure("CHALK_FOREIGN_LOCK_ARTIFACT") from None
+    if (baseline / ".npmrc").read_text(encoding="utf-8") != ("registry=" + CHALK_REGISTRY + "\n"):
+        raise OracleFailure("CHALK_REGISTRY_NOT_FROZEN")
+    return before
+
+
+def _chalk_oracle_env(root: pathlib.Path) -> dict[str, str]:
+    """No ambient npm credentials/config, no project lifecycle scripts at install."""
+    env = {k: v for k, v in os.environ.items()
+           if not k.lower().startswith(("npm_config_", "node_options"))
+           and k not in {"NPM_TOKEN", "NODE_AUTH_TOKEN", "HTTP_PROXY", "HTTPS_PROXY",
+                         "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"}}
+    user = root / "user.npmrc"
+    global_config = root / "global.npmrc"
+    user.write_text("", encoding="utf-8")
+    global_config.write_text("", encoding="utf-8")
+    env.update({
+        "npm_config_userconfig": str(user),
+        "npm_config_globalconfig": str(global_config),
+        "npm_config_registry": CHALK_REGISTRY,
+        "npm_config_cache": str(root / "npm-cache"),
+        "npm_config_audit": "false", "npm_config_fund": "false",
+        "npm_config_ignore_scripts": "true",
+        "npm_config_fetch_retries": "0", "npm_config_update_notifier": "false",
+        "FORCE_COLOR": "0", "CI": "true",
+    })
+    return env
+
+
+def verify_chalk_candidate(baseline: pathlib.Path, candidate: pathlib.Path,
+                           *, baseline_mode: bool = False) -> dict[str, Any]:
+    """Independent real npm/build/test/runtime replay on a separate working copy.
+
+    If version-only install succeeds but runtime/build/test fail, retain the
+    install exitCode=0 while final status is FAIL. No agent-provided log is
+    trusted. A rejected unsafe candidate performs NO npm command.
+    """
+    start = time.monotonic()
+    report: dict[str, Any] = {
+        "status": "FAIL", "reason": None, "checks": {},
+        "authority": "INDEPENDENT_PUBLIC_BREAKING_API_ORACLE_NOT_MCP",
+    }
+    try:
+        frozen = chalk_static_contract(baseline, candidate, baseline_mode=baseline_mode)
+        report["checks"]["frozenPolicy"] = "PASS"
+        report["frozenSourceCount"] = len(frozen)
+        with tempfile.TemporaryDirectory(prefix="deploom-chalk-oracle-") as td:
+            temp = pathlib.Path(td)
+            stage = temp / "candidate"
+            shutil.copytree(candidate, stage, ignore=shutil.ignore_patterns(
+                ".git", "node_modules", "dist", "__pycache__"
+            ))
+            frozen_stage = source_files(stage)
+            env = _chalk_oracle_env(temp)
+            stages = [
+                ("install", npm_bin() + ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]),
+                ("build", npm_bin() + ["run", "build", "--ignore-scripts=false"]),
+                ("test", npm_bin() + ["test", "--ignore-scripts=false"]),
+                ("runtime", [shutil.which("node") or "node", "-e", CHALK_RUNTIME_ORACLE]),
+            ]
+            for name, cmd in stages:
+                result = run_command(cmd, stage, env, timeout=80)
+                report["checks"][name] = result
+                if name == "install" and result["exitCode"] != 0:
+                    raise OracleFailure("CHALK_CLEAN_INSTALL_FAILED")
+            if source_files(stage) != frozen_stage:
+                raise OracleFailure("CHALK_CHECKS_MUTATED_SOURCE")
+            if any(report["checks"][name]["exitCode"] != 0 for name in
+                   ("build", "test", "runtime")):
+                raise OracleFailure("CHALK_RUNTIME_BEHAVIOR_BROKEN")
+        report["status"] = "PASS"
+    except OracleFailure as exc:
+        report["reason"] = str(exc)
+    except (OSError, KeyError, TypeError, ValueError, UnicodeError) as exc:
+        report["reason"] = "CHALK_ORACLE_INFRASTRUCTURE_" + type(exc).__name__
+    report["wallSeconds"] = round(time.monotonic() - start, 3)
+    return report

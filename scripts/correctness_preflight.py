@@ -17,6 +17,7 @@ import io
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -29,7 +30,11 @@ from urllib.parse import urlsplit
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
-from correctness_oracle import VERSIONS, npm_bin, read_json, source_files, verify_candidate
+from correctness_oracle import (
+    VERSIONS, npm_bin, read_json, source_files, verify_candidate,
+    CHALK_BASELINE, CHALK_TARGET, CHALK_REGISTRY, _chalk_oracle_env,
+    verify_chalk_candidate, OracleFailure,
+)
 from e2e_fixture import make_fixture
 from e2e_registry import Handler, PackageStore
 
@@ -111,15 +116,27 @@ def make_positive_candidate(baseline: pathlib.Path, candidate: pathlib.Path,
 PACKAGED_STDIO_PROGRAM = r"""
 import asyncio, hashlib, json, os, pathlib, sys
 import deploom_mcp
-from deploom_mcp.distribution import release_manifest_path, resolve_core_dir
+from deploom_mcp.distribution import release_manifest_path, resolve_core_dir, skill_root
 from mcp import ClientSession, StdioServerParameters, stdio_client
 
 home=pathlib.Path.cwd().resolve()
-assert pathlib.Path(deploom_mcp.__file__).resolve().is_relative_to(home / 'venv'), 'not a packaged wheel'
-core=resolve_core_dir()
-assert core.is_relative_to(home / 'venv') and (core/'registry_candidate_diagnostics.py').is_file()
+# Windows temp paths may have RUNNER~1 vs runneradmin aliases. The running
+# interpreter's sys.prefix is the authoritative installed-wheel root.
+installed=pathlib.Path(sys.prefix).resolve()
+if not pathlib.Path(deploom_mcp.__file__).resolve().is_relative_to(installed):
+    raise RuntimeError('P2_WHEEL_ORIGIN_MISMATCH')
+core=resolve_core_dir().resolve()
+if not core.is_relative_to(installed) or not (core/'registry_candidate_diagnostics.py').is_file():
+    raise RuntimeError('P2_CORE_ORIGIN_MISMATCH')
 release=json.loads(release_manifest_path().read_text(encoding='utf-8'))
 assert hashlib.sha256((core/'registry_candidate_diagnostics.py').read_bytes()).hexdigest()==release['core']['files']['registry_candidate_diagnostics.py']
+skill=skill_root()
+contract_file=skill/'contract.json'
+contract=json.loads(contract_file.read_text(encoding='utf-8'))
+assert hashlib.sha256(contract_file.read_bytes()).hexdigest()==release['skillManifestSha256']
+assert contract['bundleSha256']==release['skill']['bundleSha256']
+for rel,expected in contract['files'].items():
+    assert hashlib.sha256((skill/rel).read_bytes()).hexdigest()==expected
 project=home/'empty-project'
 project.mkdir()
 manifest=project/'package.json'
@@ -162,6 +179,7 @@ result=asyncio.run(check())
 assert hashlib.sha256(manifest.read_bytes()).hexdigest()==original, 'MCP edited source'
 print(json.dumps({'status':'PASS','transport':'REAL_PACKAGED_MCP_STDIO',
                   'coreRevision':release['core']['revision'],
+                  'skillBundleSha256':contract['bundleSha256'],
                   'planningAuthority':'PLANNING_ONLY','verificationStatus':'NOT_VERIFIED',
                   'baselineUnchanged':True},sort_keys=True))
 """
@@ -179,23 +197,40 @@ def packaged_stdio(wheel: pathlib.Path, directory: pathlib.Path, registry: str) 
     clean_env = {k: v for k, v in os.environ.items()
                  if k != "PYTHONPATH" and not k.startswith("DEPLOOM_")}
     clean_env["DEPLOOM_MCP_STATE_DIR"] = str(home / "state")
-    site = subprocess.check_output(
-        [str(executable), "-I", "-c", "import sysconfig;print(sysconfig.get_path('purelib'))"],
-        cwd=home, env=clean_env, text=True).strip()
-    import sysconfig
-    dependencies = sorted({sysconfig.get_path("purelib"), sysconfig.get_path("platlib")})
-    (pathlib.Path(site) / "preflight_runtime_libraries.pth").write_text(
-        "\n".join(dependencies) + "\n", encoding="utf-8")
-    subprocess.run([str(executable), "-m", "pip", "install", "--no-index", "--no-deps", str(wheel)],
-                   cwd=home, env=clean_env, check=True, capture_output=True, timeout=100)
+    # A .pth bridge to the caller's editable environment is not reliable on
+    # Windows (some resolved sys.prefix paths differ from the short temp path).
+    # Install the actual wheel with its runtime dependencies in this isolated
+    # interpreter. Nothing is imported from the source checkout.
+    import time
+    started = time.monotonic()
+    install = subprocess.run(
+        [str(executable), "-m", "pip", "install",
+         "--disable-pip-version-check", "--no-input", str(wheel)],
+        cwd=home, env=clean_env, capture_output=True, text=True, timeout=160)
+    setup_time = round(time.monotonic() - started, 3)
+    if install.returncode != 0:
+        return {"status": "FAIL", "reason": "PACKAGED_RUNTIME_INSTALL_FAILED",
+                "setupWallSeconds": setup_time}
     try:
         result = subprocess.run([str(executable), "-I", "-c", PACKAGED_STDIO_PROGRAM, registry],
                                 cwd=home, env=clean_env, capture_output=True, text=True, timeout=100)
         if result.returncode:
-            return {"status": "FAIL", "reason": "PACKAGED_STDIO_ASSERTION_FAILED",
+            # Only typed diagnostic codes may leave the subprocess; never
+            # forward stderr or OS paths into public evidence artifacts.
+            recognized = (
+                "P2_WHEEL_ORIGIN_MISMATCH", "P2_CORE_ORIGIN_MISMATCH",
+                "ModuleNotFoundError", "ImportError", "AssertionError",
+            )
+            error = next((code for code in recognized if code in result.stderr),
+                         "PACKAGED_STDIO_ASSERTION_FAILED")
+            return {"status": "FAIL", "reason": error,
                     "exitCode": result.returncode}
         parsed = json.loads(result.stdout.strip().splitlines()[-1])
-        return parsed if parsed.get("status") == "PASS" else {"status": "FAIL", "reason": "STDIO_NOT_CONFIRMED"}
+        if parsed.get("status") == "PASS":
+            parsed["setupWallSeconds"] = setup_time
+            return parsed
+        return {"status": "FAIL", "reason": "STDIO_NOT_CONFIRMED",
+                "setupWallSeconds": setup_time}
     except (OSError, subprocess.TimeoutExpired, ValueError, IndexError):
         return {"status": "FAIL", "reason": "PACKAGED_STDIO_INFRASTRUCTURE"}
 
@@ -274,34 +309,317 @@ def verify_external(baseline: pathlib.Path, candidate: pathlib.Path) -> dict:
         return verify_candidate(baseline, candidate)
 
 
+
+# A *real public* breaking-API case, not a fake package. Chalk 4.1.2
+# exposes .keyword() in CJS; Chalk 5.3.0 is ESM-only and removes .keyword().
+# The gold patch is evaluator-only and is never exported to the agent seed.
+_CHALK_FORMAT_V4 = """\
+'use strict';
+const chalk = require('chalk');
+module.exports = name => chalk.keyword('orange')('READY ' + name);
+"""
+_CHALK_GOLD_PATCH = """\
+'use strict';
+module.exports = async name => {
+  const {default: chalk} = await import('chalk');
+  return chalk.yellow('READY ' + name);
+};
+"""
+_CHALK_BUILD = """\
+'use strict';
+const fs = require('node:fs');
+const render = require('./src/format.cjs');
+Promise.resolve().then(() => render('Ada')).then(message => {
+  if (message !== 'READY Ada') throw new Error('BREAKING_API_BUILD_FAILED');
+  fs.mkdirSync('dist', {recursive: true});
+  fs.writeFileSync('dist/result.json',
+    JSON.stringify({message, excluded: '7.0.0'}) + '\\n');
+}).catch(error => {console.error(error.name);process.exitCode=1;});
+"""
+_CHALK_TEST = """\
+'use strict';
+const assert=require('node:assert/strict');
+const render=require('./src/format.cjs');
+Promise.resolve().then(() => render('Ada')).then(message => {
+  assert.equal(message, 'READY Ada');
+  assert.equal(require('is-number')('42'), true);
+}).catch(error => {console.error(error.name);process.exitCode=1;});
+"""
+_CHALK_INDEX = """\
+'use strict';
+module.exports = require('./format.cjs');
+"""
+_CHALK_README = """# Chalk 4 -> 5 public breaking-API exercise
+
+Change only chalk from 4.1.2 to 5.3.0 and adapt src/format.cjs while preserving
+the existing output READY Ada. Keep is-number at 7.0.0. Do not edit test.cjs,
+build.cjs, src/index.cjs or their package scripts. The independent evaluator
+is NOT in this workspace. No test bypass, unrelated file changes, or release.
+"""
+
+
+def _chalk_write_baseline(root: pathlib.Path, env: dict[str, str]) -> None:
+    root.mkdir()
+    (root / "src").mkdir()
+    manifest = {
+        "name": "deploom-public-chalk-breaking-demo", "version": "1.0.0",
+        "private": True, "scripts": {
+            "build": "node build.cjs", "test": "node test.cjs",
+        }, "dependencies": dict(CHALK_BASELINE),
+    }
+    (root / "package.json").write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    for name, content in {
+        ".npmrc": "registry=" + CHALK_REGISTRY + "\n",
+        "src/format.cjs": _CHALK_FORMAT_V4,
+        "src/index.cjs": _CHALK_INDEX,
+        "build.cjs": _CHALK_BUILD,
+        "test.cjs": _CHALK_TEST,
+        "README.md": _CHALK_README,
+    }.items():
+        (root / name).write_text(content, encoding="utf-8")
+    _chalk_make_lock(root, env)
+
+
+def _chalk_make_lock(project: pathlib.Path, env: dict[str, str]) -> None:
+    result = subprocess.run(
+        npm_bin() + ["install", "--package-lock-only", "--ignore-scripts",
+                     "--no-audit", "--no-fund", "--registry", CHALK_REGISTRY],
+        cwd=project, env=env, capture_output=True, text=True, timeout=100)
+    if result.returncode:
+        # Cannot call this a product failure when public registry is offline.
+        raise RuntimeError("PUBLIC_REGISTRY_BOOTSTRAP_UNAVAILABLE")
+
+
+def _chalk_version_only(baseline: pathlib.Path, candidate: pathlib.Path,
+                        env: dict[str, str]) -> None:
+    copy_source(baseline, candidate)
+    path = candidate / "package.json"
+    manifest = read_json(path)
+    manifest["dependencies"] = dict(CHALK_TARGET)
+    path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    _chalk_make_lock(candidate, env)
+
+
+def _public_source_digest(source: pathlib.Path) -> str:
+    files = source_files(source)
+    payload = json.dumps(files, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(payload).hexdigest()
+
+
+def breaking_demo(wheel: pathlib.Path, snapshot_dir: pathlib.Path | None = None) -> dict:
+    import time
+    start = time.monotonic()
+    with tempfile.TemporaryDirectory(prefix="deploom-p2-chalk-") as td:
+        root = pathlib.Path(td)
+        env = _chalk_oracle_env(root)
+        baseline = root / "baseline"
+        _chalk_write_baseline(baseline, env)
+        target = root / "version-only"
+        _chalk_version_only(baseline, target, env)
+        reference = root / "reference"
+        copy_source(target, reference)
+        (reference / "src" / "format.cjs").write_text(
+            _CHALK_GOLD_PATCH, encoding="utf-8")
+        setup = round(time.monotonic() - start, 3)
+        if snapshot_dir is not None:
+            if snapshot_dir.exists():
+                raise RuntimeError("SNAPSHOT_DESTINATION_EXISTS")
+            # Deliberately copy only the unsolved baseline. No gold reference,
+            # agent logs, credentials, or independent evaluation code.
+            copy_source(baseline, snapshot_dir)
+        # The baseline oracle always receives a distinct disposable copy.
+        seed_copy = root / "baseline-control"
+        copy_source(baseline, seed_copy)
+        baseline_result = verify_chalk_candidate(baseline, seed_copy, baseline_mode=True)
+        version_only = verify_chalk_candidate(baseline, target)
+        patched = verify_chalk_candidate(baseline, reference)
+        shortcut = root / "hardcoded-success"
+        copy_source(reference, shortcut)
+        (shortcut / "src" / "format.cjs").write_text(
+            "module.exports = name => 'READY Ada';\n", encoding="utf-8")
+        # This counterfeit can pass the app's Ada-only build and unit test,
+        # but must fail the external multi-input runtime oracle.
+        hardcoded = verify_chalk_candidate(baseline, shortcut)
+        negative = {}
+        for case in ("foreign-lock", "excluded-upgraded", "deleted-tests",
+                     "forged-build-script", "fake-evidence"):
+            work = root / case
+            copy_source(reference, work)
+            if case == "foreign-lock":
+                lock = read_json(work / "package-lock.json")
+                lock["packages"]["node_modules/chalk"]["resolved"] = (
+                    "https://example.invalid/chalk-5.3.0.tgz")
+                (work / "package-lock.json").write_text(json.dumps(lock))
+            elif case == "excluded-upgraded":
+                manifest = read_json(work / "package.json")
+                manifest["dependencies"]["is-number"] = "7.0.1"
+                (work / "package.json").write_text(json.dumps(manifest))
+            elif case == "deleted-tests":
+                (work / "test.cjs").unlink()
+            elif case == "forged-build-script":
+                manifest = read_json(work / "package.json")
+                manifest["scripts"]["build"] = "node -e 'console.log(1)'"
+                (work / "package.json").write_text(json.dumps(manifest))
+            elif case == "fake-evidence":
+                (work / "fake-evidence.json").write_text('{"outcome":"PASSED"}')
+            outcome = verify_chalk_candidate(baseline, work)
+            negative[case] = {
+                "status": outcome["status"],
+                "reason": outcome["reason"],
+                "npmNotInvoked": "install" not in outcome["checks"],
+            }
+        stdio = packaged_stdio(wheel, root, CHALK_REGISTRY)
+        release = read_json(ROOT / "release-manifest.json")
+        skill = read_json(ROOT / "skills" / "deploom-upgrade" / "contract.json")
+        versions = {}
+        for key, argv in (("node", ["node", "--version"]),
+                          ("npm", npm_bin() + ["--version"]),
+                          ("python", [sys.executable, "--version"])):
+            ver = subprocess.run(argv, capture_output=True, text=True, timeout=10)
+            versions[key] = (ver.stdout or ver.stderr).strip().splitlines()[0] if ver.returncode == 0 else "UNAVAILABLE"
+        checks = {
+            "baselinePASS": baseline_result["status"] == "PASS",
+            "versionOnlyInstallPASS": version_only["checks"].get("install", {}).get("exitCode") == 0,
+            "versionOnlyRuntimeFAIL": version_only["status"] == "FAIL" and all(
+                version_only["checks"].get(x, {}).get("exitCode") not in (None, 0)
+                for x in ("build", "test", "runtime")),
+            "referenceCodePatchPASS": patched["status"] == "PASS",
+            "hardcodedSuccessRejected": (
+                hardcoded["status"] == "FAIL"
+                and hardcoded["checks"].get("install", {}).get("exitCode") == 0
+                and hardcoded["checks"].get("build", {}).get("exitCode") == 0
+                and hardcoded["checks"].get("test", {}).get("exitCode") == 0
+                and hardcoded["checks"].get("runtime", {}).get("exitCode") not in (0, None)
+            ),
+            "unsafeControlsFAIL": all(x["status"] == "FAIL" and x["npmNotInvoked"]
+                                       for x in negative.values()),
+            "realPackagedStdioPASS": (
+                stdio.get("status") == "PASS"
+                and stdio.get("coreRevision") == release["core"]["revision"]
+                and stdio.get("skillBundleSha256") == skill["bundleSha256"]
+            ),
+        }
+        return {
+            "status": "PASS" if all(checks.values()) else "FAIL",
+            "case": "PUBLIC_CHALK_4_1_2_TO_5_3_0_BREAKING_API",
+            "checks": checks, "controls": {
+                "baseline": baseline_result,
+                "versionOnly": version_only,
+                "referencePatch": patched,
+                "hardcodedAdapter": hardcoded,
+                "unsafe": negative,
+            },
+            "setupWallSeconds": setup,
+            "totalWallSeconds": round(time.monotonic() - start, 3),
+            "provenance": {
+                "mcpWheelSha256": hashlib.sha256(wheel.read_bytes()).hexdigest(),
+                "coreRevision": release["core"]["revision"],
+                "coreInventorySha256": release["core"]["contentSha256"],
+                "skillBundleSha256": skill["bundleSha256"],
+                "skillContractSha256": hashlib.sha256(
+                    (ROOT / "skills/deploom-upgrade/contract.json").read_bytes()).hexdigest(),
+                "baselineLockSha256": hashlib.sha256(
+                    (baseline / "package-lock.json").read_bytes()).hexdigest(),
+                "targetLockSha256": hashlib.sha256(
+                    (target / "package-lock.json").read_bytes()).hexdigest(),
+                "baselineSourceSha256": _public_source_digest(baseline),
+                "packageVersions": {
+                    "before": dict(CHALK_BASELINE), "after": dict(CHALK_TARGET),
+                },
+                "registryAuthority": "PUBLIC_NPMJS_LOCKED_INTEGRITY",
+                "networkMode": "LIVE_PUBLIC_NPM_WITH_LOCKFILE_INTEGRITY",
+                "runtimeVersions": versions,
+            },
+            "mcp": {
+                "status": stdio.get("status"),
+                "failureCode": stdio.get("reason"),
+                "authority": stdio.get("planningAuthority"),
+                "verificationStatus": stdio.get("verificationStatus"),
+                "setupWallSeconds": stdio.get("setupWallSeconds"),
+                "coreRevisionObserved": stdio.get("coreRevision"),
+                "skillBundleSha256Observed": stdio.get("skillBundleSha256"),
+            },
+            "claims": {
+                "agentMigration": "NOT_RUN", "benchmark": "NOT_RUN",
+                "mcpMigrationExecution": "NOT_SUPPORTED",
+                "securityAudit": "NOT_RUN",
+                "manualReferencePatch": "EVALUATOR_ONLY",
+            },
+        }
+
+
+def verify_chalk_frozen(baseline: pathlib.Path, candidate: pathlib.Path,
+                        expected_baseline_sha256: str) -> dict:
+    """Future pilot scorer; reject changed frozen seed before touching npm."""
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_baseline_sha256):
+        return {"status": "FAIL", "reason": "MISSING_OR_BAD_BASELINE_SHA"}
+    try:
+        observed = _public_source_digest(baseline)
+    except (OracleFailure, OSError, ValueError, UnicodeError):
+        return {"status": "FAIL", "reason": "INVALID_FROZEN_BASELINE",
+                "baselineVerified": False}
+    if observed != expected_baseline_sha256:
+        return {"status": "FAIL", "reason": "FROZEN_INPUT_DIGEST_MISMATCH",
+                "baselineVerified": False}
+    report = verify_chalk_candidate(baseline, candidate)
+    report["baselineVerified"] = True
+    report["baselineSourceSha256"] = observed
+    report["agentClaimedOutcomeIgnored"] = True
+    report["mcpExecutionAuthority"] = "PLANNING_ONLY"
+    return report
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("mode", choices=["selftest", "verify"])
+    ap.add_argument("mode", choices=["selftest", "verify", "breaking-demo", "breaking-verify"])
     ap.add_argument("--wheel", type=pathlib.Path)
     ap.add_argument("--baseline", type=pathlib.Path)
     ap.add_argument("--candidate", type=pathlib.Path)
     ap.add_argument("--report", type=pathlib.Path, required=True)
+    ap.add_argument("--snapshot-dir", type=pathlib.Path, help="write only the unsolved public baseline for future pilot")
+    ap.add_argument("--expected-baseline-sha256", help="required frozen source digest for breaking-verify")
     args = ap.parse_args()
-    if args.mode == "selftest" and not args.wheel:
+    if args.mode in ("selftest", "breaking-demo") and not args.wheel:
         ap.error("--wheel is required for packaged stdio selftest")
-    if args.mode == "verify" and (not args.baseline or not args.candidate):
+    if args.mode in ("verify", "breaking-verify") and (not args.baseline or not args.candidate):
         ap.error("--baseline and --candidate are required for independent verification")
+    if args.mode == "breaking-verify" and not args.expected_baseline_sha256:
+        ap.error("--expected-baseline-sha256 is required for breaking-verify")
     output = args.report.resolve()
     sources = [p.resolve() for p in (args.baseline,args.candidate) if p]
     if any(output == source or source in output.parents for source in sources):
         ap.error("--report must live outside baseline and candidate")
     try:
         report = (selftest(args.wheel) if args.mode == "selftest"
+                  else breaking_demo(args.wheel.resolve(), args.snapshot_dir.resolve() if args.snapshot_dir else None)
+                  if args.mode == "breaking-demo"
+                  else verify_chalk_frozen(args.baseline, args.candidate, args.expected_baseline_sha256)
+                  if args.mode == "breaking-verify"
                   else verify_external(args.baseline, args.candidate))
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         report = {"status": "FAIL", "reason": "PREFLIGHT_INFRASTRUCTURE_" + type(exc).__name__}
     output.parent.mkdir(parents=True,exist_ok=True)
     output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(json.dumps({"status":report["status"],"report":output.name,
-                      "reason":report.get("reason"),
-                      "negativeCases":len(report.get("negativeRejections", {})),
-                      "packagedStdio":report.get("packagedMcpStdio",{}).get("status","NOT_RUN")},
-                     sort_keys=True))
+    summary = {"status": report["status"], "report": output.name,
+               "reason": report.get("reason")}
+    if args.mode == "breaking-demo":
+        control = report.get("controls", {})
+        summary.update({
+            "negativeCases": len(control.get("unsafe", {})),
+            "packagedStdio": (report.get("mcp") or {}).get("status", "NOT_RUN"),
+            "baseline": "PASS" if report.get("checks", {}).get("baselinePASS") else "NOT_PASS",
+            "versionOnlyInstall": "PASS" if report.get("checks", {}).get("versionOnlyInstallPASS") else "NOT_PASS",
+            "versionOnlyBehavior": "FAIL_AS_EXPECTED" if report.get("checks", {}).get("versionOnlyRuntimeFAIL") else "NOT_CONFIRMED",
+            "referencePatch": "PASS" if report.get("checks", {}).get("referenceCodePatchPASS") else "NOT_PASS",
+            "hardcodedAdapter": "REJECTED" if report.get("checks", {}).get("hardcodedSuccessRejected") else "NOT_CONFIRMED",
+            "setupWallSeconds": report.get("setupWallSeconds"),
+        })
+    else:
+        summary.update({
+            "negativeCases": len(report.get("negativeRejections", {})),
+            "packagedStdio": report.get("packagedMcpStdio", {}).get("status", "NOT_RUN"),
+        })
+    print(json.dumps(summary, sort_keys=True))
     return 0 if report.get("status")=="PASS" else 1
 
 
