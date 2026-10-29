@@ -29,7 +29,7 @@ class PilotContractTests(unittest.TestCase):
         core={"ok":True,"authority":"PLANNING_ONLY","verificationStatus":"NOT_VERIFIED",
               "draftStatus":"DRAFT_READY","chalkStatus":"PROPOSED","chalkTarget":"5.3.0",
               "companionStatus":"NO_CHANGE","companionTarget":None}
-        self.assertEqual("EXACT_VERSION_OBJECTIVE_NOT_SUPPORTED_BY_V1",
+        self.assertEqual("EXACT_VERSION_OBJECTIVE_NOT_ECHOED",
             evaluate({"responses":[core]})["productGap"])
         self.assertEqual("NO_EXACT_CHALK_5_3_0_TARGET",
             evaluate({"responses":[dict(core,chalkTarget="5.6.2")]})["productGap"])
@@ -54,7 +54,7 @@ class PilotContractTests(unittest.TestCase):
         verdict=evaluate({"responses":[row]})
         self.assertEqual("NO_GO",verdict["gate"])
         self.assertTrue(verdict["incidentalTargetMatch"])
-        self.assertEqual("EXACT_VERSION_OBJECTIVE_NOT_SUPPORTED_BY_V1",
+        self.assertEqual("EXACT_VERSION_OBJECTIVE_NOT_ECHOED",
                          verdict["productGap"])
 
 
