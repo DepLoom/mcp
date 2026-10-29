@@ -280,7 +280,12 @@ def plan_oracle(result: dict, expect_foreign: bool = False) -> str:
     if expect_foreign:
         row = rows["kontur-fixture-a"]
         if row.get("status") != "NO_TARGET" or row.get("target") is not None:
-            return "MCP_FOREIGN_ARTIFACT_ALLOWED"
+            status = row.get("status")
+            allowed = {"PROPOSED", "NO_TARGET", "BLOCKED", "UNKNOWN_SECURITY",
+                       "UNKNOWN_METADATA", "NO_CHANGE", "CANDIDATE_CAP"}
+            public_status = status if type(status) is str and status in allowed else "OTHER"
+            has_target = "WITH_TARGET" if row.get("target") is not None else "NO_TARGET_VALUE"
+            return "MCP_FOREIGN_STATUS_" + public_status + "_" + has_target
         if row.get("noTargetDiagnosticCode") != "NO_INSTALLABLE_ARTIFACT":
             return "MCP_FOREIGN_ARTIFACT_DIAGNOSTIC_MISSING"
     else:
