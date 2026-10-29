@@ -17,6 +17,7 @@ import io
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -508,19 +509,39 @@ def breaking_demo(wheel: pathlib.Path, snapshot_dir: pathlib.Path | None = None)
             },
         }
 
+
+def verify_chalk_frozen(baseline: pathlib.Path, candidate: pathlib.Path,
+                        expected_baseline_sha256: str) -> dict:
+    """Future pilot scorer; reject changed frozen seed before touching npm."""
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_baseline_sha256):
+        return {"status": "FAIL", "reason": "MISSING_OR_BAD_BASELINE_SHA"}
+    observed = _public_source_digest(baseline)
+    if observed != expected_baseline_sha256:
+        return {"status": "FAIL", "reason": "FROZEN_INPUT_DIGEST_MISMATCH",
+                "baselineVerified": False}
+    report = verify_chalk_candidate(baseline, candidate)
+    report["baselineVerified"] = True
+    report["baselineSourceSha256"] = observed
+    report["agentClaimedOutcomeIgnored"] = True
+    report["mcpExecutionAuthority"] = "PLANNING_ONLY"
+    return report
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("mode", choices=["selftest", "verify", "breaking-demo"])
+    ap.add_argument("mode", choices=["selftest", "verify", "breaking-demo", "breaking-verify"])
     ap.add_argument("--wheel", type=pathlib.Path)
     ap.add_argument("--baseline", type=pathlib.Path)
     ap.add_argument("--candidate", type=pathlib.Path)
     ap.add_argument("--report", type=pathlib.Path, required=True)
     ap.add_argument("--snapshot-dir", type=pathlib.Path, help="write only the unsolved public baseline for future pilot")
+    ap.add_argument("--expected-baseline-sha256", help="required frozen source digest for breaking-verify")
     args = ap.parse_args()
     if args.mode in ("selftest", "breaking-demo") and not args.wheel:
         ap.error("--wheel is required for packaged stdio selftest")
-    if args.mode == "verify" and (not args.baseline or not args.candidate):
+    if args.mode in ("verify", "breaking-verify") and (not args.baseline or not args.candidate):
         ap.error("--baseline and --candidate are required for independent verification")
+    if args.mode == "breaking-verify" and not args.expected_baseline_sha256:
+        ap.error("--expected-baseline-sha256 is required for breaking-verify")
     output = args.report.resolve()
     sources = [p.resolve() for p in (args.baseline,args.candidate) if p]
     if any(output == source or source in output.parents for source in sources):
@@ -529,6 +550,8 @@ def main() -> int:
         report = (selftest(args.wheel) if args.mode == "selftest"
                   else breaking_demo(args.wheel.resolve(), args.snapshot_dir.resolve() if args.snapshot_dir else None)
                   if args.mode == "breaking-demo"
+                  else verify_chalk_frozen(args.baseline, args.candidate, args.expected_baseline_sha256)
+                  if args.mode == "breaking-verify"
                   else verify_external(args.baseline, args.candidate))
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         report = {"status": "FAIL", "reason": "PREFLIGHT_INFRASTRUCTURE_" + type(exc).__name__}
