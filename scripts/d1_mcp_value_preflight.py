@@ -81,7 +81,11 @@ async def run():
     # This is the Core-supported legacy REQUIRED movement policy. It is NOT
     # a pinned exact patch version and must not become an A/B GO on coincidence.
     dict(base,target_mode="pinned",mutable_packages=["chalk"],
-         approved_version_lines={"chalk":[5]},required_packages=["chalk"])
+         approved_version_lines={"chalk":[5]},required_packages=["chalk"]),
+    # New general V2 exact objective; deliberate user target, not latest guess.
+    dict(base,target_mode="pinned",objective="explicit-version-targets",
+         mutable_packages=["chalk"],approved_version_lines={"chalk":[5]},
+         exact_targets={"chalk":"5.3.0"})
    ]
    responses=[]
    for n,query in enumerate(requests):
@@ -89,6 +93,13 @@ async def run():
     try:
      response=decode(await session.call_tool("get_upgrade_plan",query))
      status=response.get("status") or {}
+     decision=(response.get("policy") or {}).get("decisionContract") or {}
+     explicit=(
+       query.get("objective")=="explicit-version-targets"
+       and decision.get("version")==2
+       and decision.get("objective")=="explicit-version-targets"
+       and decision.get("exactTargets")=={"chalk":"5.3.0"}
+     )
      rows={r.get("package"):r for r in response.get("dependencies",[]) if isinstance(r,dict)}
      chalk=rows.get("chalk") or {}
      companion=rows.get("is-number") or {}
@@ -158,6 +169,10 @@ async def run():
        "draftStatus":status.get("draftStatus") if status.get("draftStatus") in {"DRAFT_READY","DRAFT_PARTIAL"} else "OTHER",
        "authority":status.get("authority") if status.get("authority") in {"PLANNING_ONLY","UNKNOWN"} else "OTHER",
        "verificationStatus":status.get("verificationStatus") if status.get("verificationStatus") in {"NOT_VERIFIED","UNKNOWN"} else "OTHER",
+       "explicitObjectiveEchoed":explicit,
+       "explicitObjectiveRequested":query.get("objective")=="explicit-version-targets",
+       "scopeMutable":decision.get("mutablePackages")==["chalk"],
+       "majorLineAuthorized":decision.get("approvedVersionLines")=={"chalk":[5]},
        "chalkStatus":safe_status(chalk.get("status")),
        "chalkTarget":safe_version(chalk.get("target")),
        "chalkCurrent":safe_version(chalk.get("current")),
@@ -231,18 +246,30 @@ def evaluate(payload: dict) -> dict:
         if p.get("ok") and p.get("authority") == "PLANNING_ONLY"
         and p.get("verificationStatus") == "NOT_VERIFIED"
         and p.get("draftStatus") == "DRAFT_READY"
+        and p.get("explicitObjectiveRequested") is True
+        and p.get("explicitObjectiveEchoed") is True
+        and p.get("scopeMutable") is True
+        and p.get("majorLineAuthorized") is True
         and p.get("chalkStatus") == "PROPOSED"
         and p.get("chalkTarget") == "5.3.0"
         and p.get("companionStatus") != "PROPOSED"
         and p.get("companionTarget") in (None, "7.0.0")
     ]
-    # Core decisionContract V1 permits major version lines, but exposes no
-    # exact-version selection objective. A coincidentally matching target from
-    # latest-major selection must not count as a proven requested exact goal.
     if exact:
+        return {"gate":"GO", "productGap":None,
+                "exactVersionObjectiveSupported":True}
+    # No V1/latest incidental match can ever pass the exact user objective.
+    if any(p.get("chalkTarget")=="5.3.0" and not p.get("explicitObjectiveEchoed")
+           for p in rows):
         return {"gate":"NO_GO",
-                "productGap":"EXACT_VERSION_OBJECTIVE_NOT_SUPPORTED_BY_V1",
+                "productGap":"EXACT_VERSION_OBJECTIVE_NOT_ECHOED",
                 "incidentalTargetMatch":True}
+    if any(p.get("explicitObjectiveRequested") and p.get("errorCode")=="generator-failed"
+           for p in rows):
+        return {"gate":"NO_GO","productGap":"EXPLICIT_CORE_GENERATOR_FAILED"}
+    if any(p.get("explicitObjectiveRequested") and p.get("errorCode") not in
+           (None,"OTHER_OR_NONE") for p in rows):
+        return {"gate":"NO_GO","productGap":"EXPLICIT_REQUEST_REJECTED"}
     if any(p.get("errorCode")=="generator-failed" and p.get("coreExitCode")==3
            and "unsat" in (p.get("coreFailureMarkers") or []) for p in rows):
         return {"gate":"NO_GO",
