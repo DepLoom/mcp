@@ -19,7 +19,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from correctness_oracle import (
     VERSIONS, OracleFailure, frozen_policy, verify_candidate,
-    CHALK_BASELINE, CHALK_TARGET, chalk_static_contract, verify_chalk_candidate,
+    CHALK_BASELINE, CHALK_TARGET, chalk_static_contract, verify_chalk_candidate, read_json,
 )
 from e2e_fixture import BUILD_JS, PACKAGE_JSON, SRC_INDEX_JS, VERIFY_JS
 from e2e_pilot import canonical_fixture_files_intact
