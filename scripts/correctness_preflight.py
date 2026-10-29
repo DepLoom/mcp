@@ -33,7 +33,7 @@ sys.path.insert(0, str(HERE))
 from correctness_oracle import (
     VERSIONS, npm_bin, read_json, source_files, verify_candidate,
     CHALK_BASELINE, CHALK_TARGET, CHALK_REGISTRY, _chalk_oracle_env,
-    verify_chalk_candidate,
+    verify_chalk_candidate, OracleFailure,
 )
 from e2e_fixture import make_fixture
 from e2e_registry import Handler, PackageStore
@@ -529,7 +529,11 @@ def verify_chalk_frozen(baseline: pathlib.Path, candidate: pathlib.Path,
     """Future pilot scorer; reject changed frozen seed before touching npm."""
     if not re.fullmatch(r"[0-9a-f]{64}", expected_baseline_sha256):
         return {"status": "FAIL", "reason": "MISSING_OR_BAD_BASELINE_SHA"}
-    observed = _public_source_digest(baseline)
+    try:
+        observed = _public_source_digest(baseline)
+    except (OracleFailure, OSError, ValueError, UnicodeError):
+        return {"status": "FAIL", "reason": "INVALID_FROZEN_BASELINE",
+                "baselineVerified": False}
     if observed != expected_baseline_sha256:
         return {"status": "FAIL", "reason": "FROZEN_INPUT_DIGEST_MISMATCH",
                 "baselineVerified": False}
