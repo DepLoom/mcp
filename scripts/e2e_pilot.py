@@ -186,7 +186,7 @@ def canonical_fixture_files_intact(fixture: pathlib.Path) -> bool:
         path = fixture / relative
         if path.is_symlink() or not path.is_file():
             return False
-        if path.read_bytes() != contents.encode("utf-8"):
+        if path.read_text(encoding="utf-8") != contents:
             return False
     try:
         return json.loads((fixture / "package.json").read_text(encoding="utf-8")) == PACKAGE_JSON
