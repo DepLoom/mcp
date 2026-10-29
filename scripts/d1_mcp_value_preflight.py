@@ -23,7 +23,7 @@ import venv
 from correctness_oracle import source_files
 
 EXPECTED_SOURCE_SHA = "4adfa455d02e9f354e5b47e7b4d983f6676b620b13dc1454bda9248272d97cb6"
-EXPECTED_CORE_SHA = "fd60e7f169cb5c3d6475a5dd69ff249a0d4bc995"
+EXPECTED_CORE_SHA = "1bd101cfd9161aada69ee06a7351b10d978e382b"
 SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$")
 STATUSES = {
     "PROPOSED", "NO_TARGET", "NO_CHANGE", "POLICY_SATISFIED", "BLOCKED",
