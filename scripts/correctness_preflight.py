@@ -197,15 +197,20 @@ def packaged_stdio(wheel: pathlib.Path, directory: pathlib.Path, registry: str) 
     clean_env = {k: v for k, v in os.environ.items()
                  if k != "PYTHONPATH" and not k.startswith("DEPLOOM_")}
     clean_env["DEPLOOM_MCP_STATE_DIR"] = str(home / "state")
-    site = subprocess.check_output(
-        [str(executable), "-I", "-c", "import sysconfig;print(sysconfig.get_path('purelib'))"],
-        cwd=home, env=clean_env, text=True).strip()
-    import sysconfig
-    dependencies = sorted({sysconfig.get_path("purelib"), sysconfig.get_path("platlib")})
-    (pathlib.Path(site) / "preflight_runtime_libraries.pth").write_text(
-        "\n".join(dependencies) + "\n", encoding="utf-8")
-    subprocess.run([str(executable), "-m", "pip", "install", "--no-index", "--no-deps", str(wheel)],
-                   cwd=home, env=clean_env, check=True, capture_output=True, timeout=100)
+    # A .pth bridge to the caller's editable environment is not reliable on
+    # Windows (some resolved sys.prefix paths differ from the short temp path).
+    # Install the actual wheel with its runtime dependencies in this isolated
+    # interpreter. Nothing is imported from the source checkout.
+    import time
+    started = time.monotonic()
+    install = subprocess.run(
+        [str(executable), "-m", "pip", "install",
+         "--disable-pip-version-check", "--no-input", str(wheel)],
+        cwd=home, env=clean_env, capture_output=True, text=True, timeout=160)
+    setup_time = round(time.monotonic() - started, 3)
+    if install.returncode != 0:
+        return {"status": "FAIL", "reason": "PACKAGED_RUNTIME_INSTALL_FAILED",
+                "setupWallSeconds": setup_time}
     try:
         result = subprocess.run([str(executable), "-I", "-c", PACKAGED_STDIO_PROGRAM, registry],
                                 cwd=home, env=clean_env, capture_output=True, text=True, timeout=100)
@@ -221,7 +226,11 @@ def packaged_stdio(wheel: pathlib.Path, directory: pathlib.Path, registry: str) 
             return {"status": "FAIL", "reason": error,
                     "exitCode": result.returncode}
         parsed = json.loads(result.stdout.strip().splitlines()[-1])
-        return parsed if parsed.get("status") == "PASS" else {"status": "FAIL", "reason": "STDIO_NOT_CONFIRMED"}
+        if parsed.get("status") == "PASS":
+            parsed["setupWallSeconds"] = setup_time
+            return parsed
+        return {"status": "FAIL", "reason": "STDIO_NOT_CONFIRMED",
+                "setupWallSeconds": setup_time}
     except (OSError, subprocess.TimeoutExpired, ValueError, IndexError):
         return {"status": "FAIL", "reason": "PACKAGED_STDIO_INFRASTRUCTURE"}
 
@@ -512,6 +521,7 @@ def breaking_demo(wheel: pathlib.Path, snapshot_dir: pathlib.Path | None = None)
                 "failureCode": stdio.get("reason"),
                 "authority": stdio.get("planningAuthority"),
                 "verificationStatus": stdio.get("verificationStatus"),
+                "setupWallSeconds": stdio.get("setupWallSeconds"),
                 "coreRevisionObserved": stdio.get("coreRevision"),
                 "skillBundleSha256Observed": stdio.get("skillBundleSha256"),
             },
