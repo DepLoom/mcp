@@ -49,3 +49,18 @@ jobs:
           path: ${{ runner.temp }}/p1-correctness.json
           if-no-files-found: warn
           retention-days: 7
+
+      - name: Preserve public test harness sources for offline failure reproduction
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-public-harness-sources
+          path: |
+            scripts/e2e_fixture.py
+            scripts/e2e_registry.py
+            scripts/e2e_seed.json
+            scripts/e2e_pilot.py
+            scripts/correctness_oracle.py
+            scripts/correctness_preflight.py
+            tests/test_correctness_oracle.py
+          retention-days: 2
