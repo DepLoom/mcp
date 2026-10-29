@@ -112,10 +112,14 @@ async def run():
       return v if type(v) is str and re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+",v) else None
      responses.append({
        "ok":response.get("ok") is True,
-       "errorCode":(response.get("error") or {}).get("code")
-           if (response.get("error") or {}).get("code") in {
-            "decision-contract-unsupported","decision-contract-mismatch",
-            "invalid-args","invalid-policy","internal-error","timeout"} else "OTHER_OR_NONE",
+       # Safe typed code only: do not serialize untrusted error messages,
+       # subprocess stderr, registry URLs or environment paths.
+       "errorCode":((error_code if re.fullmatch(r"[a-z][a-z0-9_-]{0,79}",error_code)
+                      else "UNSAFE_OR_MISSING_CODE")
+                     if isinstance((error_code := ((response.get("error") or {}).get("code")
+                                                   if isinstance(response.get("error"),dict)
+                                                   else None)),str)
+                     else "OTHER_OR_NONE"),
        "draftStatus":status.get("draftStatus") if status.get("draftStatus") in {"DRAFT_READY","DRAFT_PARTIAL"} else "OTHER",
        "authority":status.get("authority") if status.get("authority") in {"PLANNING_ONLY","UNKNOWN"} else "OTHER",
        "verificationStatus":status.get("verificationStatus") if status.get("verificationStatus") in {"NOT_VERIFIED","UNKNOWN"} else "OTHER",
