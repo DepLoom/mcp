@@ -219,9 +219,16 @@ class Handler(BaseHTTPRequestHandler):
             if len(parts) == 3 and parts[1] == "-":
                 name, _, fname = parts
                 version = fname[len(name) + 1:-4]
-                data, _, _ = store.tarball(name, version)
-                self._send_bytes(data, "application/octet-stream")
-                return
+                # Never synthesize an installable tarball for a version the
+                # seed did not publish. Unknown package/version fails closed.
+                if (fname.startswith(name + "-")
+                    and any(row["version"] == version
+                            for row in store.versions.get(name, ()))):
+                    data, _, _ = store.tarball(name, version)
+                    self._send_bytes(data, "application/octet-stream")
+                    return
+            self._send_json({"error": "unpublished fixture artifact"}, 404)
+            return
         meta = store.metadata(path)
         if meta is None:
             self._send_json({"error": f"package {path} not found"}, 404)

@@ -1,0 +1,55 @@
+name: correctness-preflight (no-agent)
+on:
+  pull_request:
+    paths:
+      - 'scripts/correctness_preflight.py'
+      - 'scripts/e2e_registry.py'
+      - 'scripts/e2e_fixture.py'
+      - 'scripts/e2e_seed.json'
+      - 'tests/test_correctness_preflight.py'
+      - '.github/workflows/correctness-preflight.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-installed-wheel:
+    name: Deterministic fixture, installed MCP stdio and independent npm oracle
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install only required harness dependencies
+        run: python -m pip install -e . build
+      - name: Targeted static-oracle and local-registry negative unit tests
+        run: python -m unittest discover -s tests -p test_correctness_preflight.py -v
+      - name: Build tested source and install wheel in separate venv
+        shell: bash
+        run: |
+          python -m build --no-isolation
+          python -m venv --system-site-packages "$RUNNER_TEMP/deploom-p1-wheel"
+          "$RUNNER_TEMP/deploom-p1-wheel/bin/python" -m pip install --no-index --no-deps --ignore-installed dist/deploom_mcp-0.2.0-py3-none-any.whl
+      - name: Packaged stdio and independent install/build/test (NO agents)
+        shell: bash
+        run: |
+          python scripts/correctness_preflight.py \
+            --wheel-python "$RUNNER_TEMP/deploom-p1-wheel/bin/python" \
+            --wheel "dist/deploom_mcp-0.2.0-py3-none-any.whl" \
+            --json-out "$RUNNER_TEMP/p1-correctness-receipt.json"
+      - name: Retain only sanitized receipt (including failures)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-correctness-receipt
+          path: ${{ runner.temp }}/p1-correctness-receipt.json
+          if-no-files-found: ignore
+          retention-days: 7
