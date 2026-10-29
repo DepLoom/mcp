@@ -63,7 +63,11 @@ async def run():
          approved_version_lines={"chalk":[5]}),
     dict(base,target_mode="advisory",
          objective="latest-compatible-in-approved-lines",
-         mutable_packages=["chalk"],approved_version_lines={"chalk":[5]})
+         mutable_packages=["chalk"],approved_version_lines={"chalk":[5]}),
+    # This is the Core-supported legacy REQUIRED movement policy. It is NOT
+    # a pinned exact patch version and must not become an A/B GO on coincidence.
+    dict(base,target_mode="pinned",mutable_packages=["chalk"],
+         approved_version_lines={"chalk":[5]},required_packages=["chalk"])
    ]
    responses=[]
    for n,query in enumerate(requests):
@@ -74,6 +78,30 @@ async def run():
      rows={r.get("package"):r for r in response.get("dependencies",[]) if isinstance(r,dict)}
      chalk=rows.get("chalk") or {}
      companion=rows.get("is-number") or {}
+     regdiag=chalk.get("registryCandidateDiagnostics") or {}
+     if not isinstance(regdiag,dict):regdiag={}
+     counts=regdiag.get("rejectionCounts") or {}
+     if not isinstance(counts,dict):counts={}
+     safe_counts={k: v for k,v in counts.items()
+        if k in {"FOREIGN_TARBALL_ORIGIN","BAD_REGISTRY_PATH",
+                 "MISSING_DIST_TARBALL","HTTP_ARTIFACT_UNAVAILABLE"}
+        and type(v) is int and 0<=v<=100000}
+     safe_codes={"CANDIDATE_CAP","NO_INSTALLABLE_ARTIFACT",
+        "NO_PUBLISHED_UPGRADE_CANDIDATE",
+        "UNRESOLVED_TARGET_CONSTRAINT_OR_POLICY"}
+     code=chalk.get("noTargetDiagnosticCode")
+     if code not in safe_codes:code=None
+     reason=str(chalk.get("reason") or "")
+     # Whitelist typed symbolic categories; never propagate free-text strings.
+     reason_codes=[
+         key for key in (
+           "LATEST_CANDIDATE_UNKNOWN","USER_APPROVED_VERSION_LINE",
+           "PEER_RESOLUTION_DEFERRED","NO_INSTALLABLE_ARTIFACT",
+           "candidate list capped","policy-driven target",
+           "no installable","нет policy-driven target",
+           "runtime","engine","type declarations",
+         ) if key.lower() in reason.lower()
+     ]
      def safe_status(v):
       return v if type(v) is str and v in {
        "PROPOSED","NO_TARGET","NO_CHANGE","POLICY_SATISFIED","BLOCKED",
@@ -93,10 +121,45 @@ async def run():
        "verificationStatus":status.get("verificationStatus") if status.get("verificationStatus") in {"NOT_VERIFIED","UNKNOWN"} else "OTHER",
        "chalkStatus":safe_status(chalk.get("status")),
        "chalkTarget":safe_version(chalk.get("target")),
+       "chalkCurrent":safe_version(chalk.get("current")),
+       "noTargetDiagnosticCode":code,
+       "registryStructuralRejections":safe_counts,
+       "registryExaminedVersions":(regdiag.get("examinedVersions")
+                                    if type(regdiag.get("examinedVersions")) is int else None),
+       "registryAcceptedVersions":(regdiag.get("acceptedVersions")
+                                    if type(regdiag.get("acceptedVersions")) is int else None),
+       "reasonMarkers":reason_codes,
+       "requiredPackagesRequested":(response.get("policy") or {}).get("requestedRequiredPackages") or [],
        "companionStatus":safe_status(companion.get("status")),
        "companionTarget":safe_version(companion.get("target")),
        "toolAvailable":True,
      })
+     # An exact version can be *inspected* with an existing read-only tool,
+     # but this never recomputes solver peers, OSV or runtime compatibility.
+     blueprint=(response.get("artifacts") or {}).get("blueprint")
+     assessment={"status":"NOT_AVAILABLE"}
+     if isinstance(blueprint,str) and blueprint and response.get("ok") is True:
+      try:
+       alternative=decode(await session.call_tool("evaluate_assignment",{
+          "blueprint_path":blueprint,"assignment":{"chalk":"5.3.0"}}))
+       whitelist={"REPLAN_REQUIRED","REVIEW_REQUIRED",
+          "BLOCKED_BY_KNOWN_CONSTRAINTS","MATCHES_PUBLISHED_PLAN",
+          "STALE_BLUEPRINT"}
+       vv=alternative.get("verdict")
+       safechecks={"PINNED_TARGET_CHANGE_REQUIRES_REPLAN",
+          "ALTERNATIVE_PEER_SECURITY_POLICY_NOT_RECHECKED",
+          "IMMUTABLE_PACKAGE_CHANGED","EXCLUDED_PACKAGE_CHANGED",
+          "MAJOR_LINE_NOT_APPROVED","PUBLISHED_BLOCKERS_REQUIRE_REASSESSMENT",
+          "WORKSPACE_RECONCILIATION_REQUIRED","PARTIAL_BLUEPRINT"}
+       assessment={"status":vv if vv in whitelist else "OTHER",
+            "authority":alternative.get("authority"),
+            "compatibility":alternative.get("compatibility"),
+            "peerConstraints":alternative.get("peerConstraints"),
+            "checks":sorted({x.get("code") for x in (alternative.get("checks") or [])
+                              if isinstance(x,dict) and x.get("code") in safechecks})}
+      except Exception:
+       assessment={"status":"CALL_FAILED"}
+     responses[-1]["explicitVersionAssessment"]=assessment
     except Exception:
      responses.append({"ok":False,"errorCode":"CALL_FAILED","toolAvailable":True})
    return {"responses":responses,"toolAvailable":True,
@@ -126,8 +189,13 @@ def evaluate(payload: dict) -> dict:
         and p.get("companionStatus") != "PROPOSED"
         and p.get("companionTarget") in (None, "7.0.0")
     ]
+    # Core decisionContract V1 permits major version lines, but exposes no
+    # exact-version selection objective. A coincidentally matching target from
+    # latest-major selection must not count as a proven requested exact goal.
     if exact:
-        return {"gate":"GO", "productGap":None}
+        return {"gate":"NO_GO",
+                "productGap":"EXACT_VERSION_OBJECTIVE_NOT_SUPPORTED_BY_V1",
+                "incidentalTargetMatch":True}
     if any(p.get("chalkTarget") not in (None, "5.3.0") for p in rows):
         return {"gate":"NO_GO","productGap":"NO_EXACT_CHALK_5_3_0_TARGET"}
     if any(p.get("chalkStatus") in {"NO_CHANGE","POLICY_SATISFIED"} for p in rows):
@@ -138,7 +206,8 @@ def evaluate(payload: dict) -> dict:
         return {"gate":"NO_GO","productGap":"CHALK_CANDIDATE_SEARCH_TRUNCATED_AT_CAP_128"}
     if any(p.get("chalkStatus") in {"UNKNOWN_SECURITY","UNKNOWN_METADATA","BLOCKED"} for p in rows):
         return {"gate":"NO_GO","productGap":"UNRESOLVED_PLANNING_OR_SECURITY"}
-    return {"gate":"NO_GO","productGap":"NO_ACTIONABLE_CHALK_TARGET"}
+    return {"gate":"NO_GO","productGap":"NO_ACTIONABLE_CHALK_TARGET",
+            "exactVersionObjectiveSupported":False}
 
 
 def main() -> int:
