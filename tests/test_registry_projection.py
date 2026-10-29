@@ -206,7 +206,9 @@ class RegistryDiagnosticProjectionTests(unittest.TestCase):
         diag["rejectionSamples"] = [{"code": "FOREIGN_TARBALL_ORIGIN", "version": marker},
                                      {"code": "FOREIGN_TARBALL_ORIGIN", "version": "4.17.20-secret"}]
         self.assertEqual(project_registry_candidate(diag)["rejectionSamples"], [])
-        self.assertEqual(clean["physicalProbe"]["statusCounts"], {"planning-only": 1})
+        self.assertNotIn("physicalProbe", clean,
+                             "contradictory observed/status counters must not be published")
+        self.assertTrue(clean["projectionTruncated"])
         self.assertNotIn("configuredRegistry", compact_registry_candidate(clean, "#/dependencies/0"))
         self.assertIsNone(project_registry_aggregate({"schemaVersion": 1, "authority": diag["authority"],
                                                      "rejectionCounts": {f"https://host/{marker}": 8}}))
