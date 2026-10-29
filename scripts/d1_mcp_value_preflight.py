@@ -103,6 +103,28 @@ async def run():
      rows={r.get("package"):r for r in response.get("dependencies",[]) if isinstance(r,dict)}
      chalk=rows.get("chalk") or {}
      companion=rows.get("is-number") or {}
+     # Inspect the actual Core plan artifact, but never emit raw notes/URLs.
+     # Distinguish an unavailable exact candidate from solver/peer blocking.
+     safe_plan_reasons=set()
+     public_codes=("EXACT_TARGET_UNAVAILABLE","EXACT_TARGET_SCOPE_CONFLICT",
+       "EXACT_TARGET_NOT_AN_UPGRADE","EXPLICIT_USER_TARGET",
+       "USER_EXACT_TARGET","PROJECT_NODE_ENGINE_CONFLICT",
+       "REGISTRY_TARGET_UNAVAILABLE","PEER_RESOLUTION_DEFERRED")
+     plan_path=(response.get("artifacts") or {}).get("plan")
+     if isinstance(plan_path,str):
+      try:
+       candidate=pathlib.Path(plan_path).resolve()
+       if candidate.is_relative_to(pathlib.Path.cwd().resolve()) and candidate.is_file() and candidate.stat().st_size<16_000_000:
+        raw_plan=json.loads(candidate.read_text(encoding="utf-8"))
+        for proposal in raw_plan.get("proposals",[]):
+         for item in proposal.get("rows",[]):
+          if item.get("package")!="chalk":continue
+          for field in ("objectiveNote","conflict","reason","targetDefaultReason"):
+           text_field=str(item.get(field) or "")
+           for code in public_codes:
+            if code in text_field: safe_plan_reasons.add(code)
+      except (OSError,ValueError,TypeError,KeyError):
+       pass
      regdiag=chalk.get("registryCandidateDiagnostics") or {}
      if not isinstance(regdiag,dict):regdiag={}
      counts=regdiag.get("rejectionCounts") or {}
@@ -176,6 +198,7 @@ async def run():
        "chalkStatus":safe_status(chalk.get("status")),
        "chalkTarget":safe_version(chalk.get("target")),
        "chalkCurrent":safe_version(chalk.get("current")),
+       "corePlanReasonCodes":sorted(safe_plan_reasons),
        "noTargetDiagnosticCode":code,
        "registryStructuralRejections":safe_counts,
        "registryExaminedVersions":(regdiag.get("examinedVersions")
@@ -270,6 +293,14 @@ def evaluate(payload: dict) -> dict:
     if any(p.get("explicitObjectiveRequested") and p.get("errorCode") not in
            (None,"OTHER_OR_NONE") for p in rows):
         return {"gate":"NO_GO","productGap":"EXPLICIT_REQUEST_REJECTED"}
+    for p in rows:
+        if p.get("explicitObjectiveRequested") and p.get("chalkStatus")=="BLOCKED":
+            reasons=p.get("corePlanReasonCodes") or []
+            if "EXACT_TARGET_UNAVAILABLE" in reasons:
+                return {"gate":"NO_GO","productGap":"EXPLICIT_REGISTRY_TARGET_UNAVAILABLE",
+                        "reasonCodes":reasons}
+            return {"gate":"NO_GO","productGap":"EXPLICIT_TARGET_BLOCKED",
+                    "reasonCodes":reasons}
     if any(p.get("errorCode")=="generator-failed" and p.get("coreExitCode")==3
            and "unsat" in (p.get("coreFailureMarkers") or []) for p in rows):
         return {"gate":"NO_GO",
