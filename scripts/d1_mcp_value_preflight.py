@@ -169,6 +169,28 @@ async def run():
      planner_message=str(error_obj.get("message") or "")
      exit_match=re.search(r"planner exited with code ([0-9]{1,3})",planner_message)
      exit_code=int(exit_match.group(1)) if exit_match else None
+     # Core failure's machine envelope can be in the bounded error.detail.
+     # Never publish raw stderr, summary, rootCause, paths or URL. Only
+     # stable type/attribute diagnostics explicitly matched below.
+     core_exception={"class":None,"identifier":None,"code":None}
+     for label in ("NameError","AttributeError","TypeError","KeyError",
+                   "ValueError","IndexError","AssertionError","RuntimeError",
+                   "FileNotFoundError"):
+      if label in error_detail:
+       core_exception["class"]=label
+       break
+     ident=re.search(r"name ['\"]([A-Za-z_][A-Za-z0-9_]{0,75})['\"] is not defined",error_detail)
+     if ident:
+      core_exception["identifier"]=ident.group(1)
+     ident=re.search(r"has no attribute ['\"]([A-Za-z_][A-Za-z0-9_]{0,75})['\"]",error_detail)
+     if ident:
+      core_exception["identifier"]=ident.group(1)
+     for code_label in ("TOOL_INTERNAL_ERROR","EXACT_SOLVER_UNSAT_PROVEN",
+                        "FINAL_PROVEN_ASSIGNMENT_REGISTRY_DRIFT",
+                        "SOURCE_SNAPSHOT_INTEGRITY_FAILED"):
+      if code_label in error_detail:
+       core_exception["code"]=code_label
+       break
      # Whitelist typed symbolic categories; never propagate free-text strings.
      reason_codes=[
          key for key in (
@@ -193,6 +215,7 @@ async def run():
        # subprocess stderr, registry URLs or environment paths.
        "coreFailureMarkers":safe_failure_markers,
        "coreExitCode":exit_code,
+       "coreExceptionSanitized":core_exception,
        "errorCode":((error_code if re.fullmatch(r"[a-z][a-z0-9_-]{0,79}",error_code)
                       else "UNSAFE_OR_MISSING_CODE")
                      if isinstance((error_code := ((response.get("error") or {}).get("code")
