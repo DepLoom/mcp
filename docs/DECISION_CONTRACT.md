@@ -16,6 +16,7 @@ additive fields; existing planning-only statuses retain their meaning.
 | `mutable_packages` | `null` | `null` permits all selected declarations to move; `[]` permits none. Packages outside the set remain constraints and remain in health accounting. This is different from `exclude`. |
 | `approved_version_lines` | `null` | Map package names to allowed nonnegative integer major numbers. For the latest-compatible objective, an absent entry limits new candidates to the current major. An explicit empty array permits no new major; the current assignment remains available as a constraint. |
 | `required_packages` | `null` | Optional user-required movement, forwarded as the existing Core legacy `policies: {package: "required"}`. Each name must be mutable and not excluded. **Requires a change but does not specify an exact version.** An unspecified package remains governed by normal policy; it is not implicitly required. |
+| `exact_targets` | `null` | Map of user-authorized **exact stable versions**, e.g. `{"chalk":"5.3.0"}`. Requires `objective="explicit-version-targets"` and Core decisionContract V2. Every target must be mutable, not excluded, and within approved major lines. Planner solves against the specific version; a different version is never a successful substitute. A source `package.json` exact declaration describes the installed baseline, not an immutable target for an authorized upgrade. |
 | `draft_max_candidates` | `3` | Positive integer in `1..128` controlling the Core security-evidence candidate search. It is not the static solver's domain limit and is independent of the deadline. |
 | `previous_evidence_digest` | `null` | Optional lowercase SHA-256 from a previous response, for diagnosing unchanged published evidence. It is not a server-side cache key. |
 
@@ -38,6 +39,15 @@ an excluded package is an invalid intent. `exclude` remains an explicit
 health-scope exclusion; `mutable_packages=["name"]` keeps other packages in
 compatibility context and immutable, whereas `exclude` removes them from
 health scope.
+
+The exact objective uses an **opt-in V2 decision contract** with
+`decisionContract.exactTargets`. Existing V1 requests keep their serialized
+contract and defaults unchanged. The Core registry, peer/engine and hard
+source/permission scope remain authoritative; an accepted exact target
+continues to have `PLANNING_ONLY / NOT_VERIFIED` authority. The model must
+not claim installation, OSV verification or working JavaScript APIs from a
+planning-only blueprint. For a real Chalk 4.1.2→5.3.0 migration, source
+adaption and an independent build/test/runtime oracle are mandatory.
 
 The compact response's optional `policy.requestedRequiredPackages` records
 what MCP forwarded; it **does not independently prove an installable exact
