@@ -322,12 +322,11 @@ async def run():
      if obj.get("schemaVersion")!="DEPLOOM_FAILURE_V2":
       continue
      label=obj.get("code")
-     if label in ("TOOL_INTERNAL_ERROR","EXACT_SOLVER_UNSAT_PROVEN",
-                  "GLOBAL_EXACT_EXCLUSION_UNSAT_PROVEN"):
+     if isinstance(label,str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}",label):
       safe_failure["observedCodeTypes"].append(label)
      else:
       safe_failure["observedCodeTypes"].append("OTHER")
-     if obj.get("code") not in ("TOOL_INTERNAL_ERROR",):
+     if label == "EXACT_SOLVER_UNSAT_PROVEN":
       continue
      raw=str(obj.get("traceback") or "")
      cls=re.findall(r"(?m)^([A-Za-z][A-Za-z0-9]{0,40}(?:Error|Exception)):",raw)
@@ -339,7 +338,10 @@ async def run():
                    "peer_solver_z3.py","peer_solver_model.py","verification_proof.py"):
        frames.append({"file":fname,"line":int(lineno),"function":fun})
      safe_failure.update({"class":cls[-1] if cls else "UNKNOWN",
-                   "frames":frames[-7:],"code":"TOOL_INTERNAL_ERROR"})
+                   "frames":frames[-7:],"code":(
+                       label if isinstance(label,str)
+                       and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}",label)
+                       else "OTHER")})
    except (OSError,ValueError,TypeError):
     pass
    return {"responses":responses,"toolAvailable":True,
