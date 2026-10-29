@@ -58,15 +58,17 @@ def seeded_registry(port: int = 0):
 
 @contextlib.contextmanager
 def clean_npm_environment(root: pathlib.Path, registry: str):
-    empty = root / "empty-global.npmrc"
-    empty.write_text("", encoding="utf-8")
+    user_config = root / "empty-user.npmrc"
+    global_config = root / "empty-global.npmrc"
+    user_config.write_text("", encoding="utf-8")
+    global_config.write_text("", encoding="utf-8")
     overrides = {
         "npm_config_registry": registry, "npm_config_audit": "false",
         "npm_config_fund": "false", "npm_config_ignore_scripts": "true",
         "npm_config_fetch_retries": "0", "npm_config_update_notifier": "false",
         "npm_config_cache": str(root / "npm-cache"),
-        "npm_config_userconfig": str(empty),
-        "npm_config_globalconfig": str(empty),
+        "npm_config_userconfig": str(user_config),
+        "npm_config_globalconfig": str(global_config),
         "NO_PROXY": "127.0.0.1,localhost",
         "no_proxy": "127.0.0.1,localhost",
     }
