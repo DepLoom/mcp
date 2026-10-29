@@ -7,6 +7,7 @@ Absent diagnostics in the pinned legacy Core stay *absent*, not zero/clean.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from typing import Any, Mapping
 from urllib.parse import unquote, urlsplit
 
@@ -112,6 +113,7 @@ def project_registry_aggregate(raw: Any) -> dict[str, Any] | None:
     reasons = _counter_map(raw.get("rejectionCounts"), REJECTION_CODES)
     if (any(value is None for value in counts.values())
         or counts["rejectedVersions"] > counts["examinedVersions"]
+        or counts["noInstallableArtifactRows"] > counts["rejectedVersions"]
         or not isinstance(raw.get("rejectionCounts"), Mapping)
         or len(raw["rejectionCounts"]) != len(reasons)
         or sum(reasons.values()) != counts["rejectedVersions"]):
@@ -127,6 +129,41 @@ def project_registry_aggregate(raw: Any) -> dict[str, Any] | None:
         result["projectionTruncated"] = True
     return result
 
+
+
+def reconcile_registry_aggregate(raw: Any, source_rows: list[dict[str, Any]],
+                                 projected_rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Suppress aggregate claims contradicted by the package evidence.
+
+    Core's genuine aggregate is the exact sum of the diagnostics it publishes
+    on plan rows. A forged/malformed row must not disappear while its aggregate
+    remains a falsely reassuring count. This never modifies row status/target.
+    """
+    aggregate = project_registry_aggregate(raw)
+    if aggregate is None or len(source_rows) != len(projected_rows):
+        return None
+    totals = Counter()
+    reasons: Counter[str] = Counter()
+    for original, projected in zip(source_rows, projected_rows):
+        if ("registryCandidateDiagnostics" in original
+            and "registryCandidateDiagnostics" not in projected):
+            return None
+        if ("noTargetDiagnosticCode" in original
+            and "noTargetDiagnosticCode" not in projected):
+            return None
+        diagnostic = projected.get("registryCandidateDiagnostics")
+        if diagnostic is not None:
+            # Already projected using the strict source-backed row validator.
+            totals["examinedVersions"] += diagnostic["examined"]
+            totals["rejectedVersions"] += diagnostic["rejected"]
+            reasons.update(diagnostic["rejectionCounts"])
+        if projected.get("noTargetDiagnosticCode") == "NO_INSTALLABLE_ARTIFACT":
+            totals["noInstallableArtifactRows"] += 1
+    if (any(aggregate[key] != totals[key] for key in (
+            "examinedVersions", "rejectedVersions", "noInstallableArtifactRows"))
+        or aggregate["rejectionCounts"] != dict(reasons)):
+        return None
+    return aggregate
 
 def project_registry_candidate(raw: Any) -> dict[str, Any] | None:
     """Render a bounded whitelist; everything else stays in Core's raw plan."""
