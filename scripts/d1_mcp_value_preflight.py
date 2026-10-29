@@ -254,7 +254,39 @@ async def run():
      if not re.fullmatch(r"[A-Za-z][A-Za-z0-9]{0,50}",kind):kind="OTHER"
      responses.append({"ok":False,"errorCode":"CALL_FAILED",
                        "exceptionType":kind,"toolAvailable":True})
+   # Independent PUBLIC registry read-only control. It differentiates a
+   # planner's indexed packument view from the exact-version endpoint, never
+   # supplies candidate evidence to the planner, and is not agent authority.
+   probe={"status":"UNKNOWN"}
+   try:
+    sys.path.insert(0,str(core))
+    from dependency_live_roadmap_generator import LiveDataClient
+    c=LiveDataClient("https://registry.npmjs.org",timeout=10,batch_size=1,
+                     sleep_sec=0,use_system_proxy=True)
+    metadata=c.fetch_npm_metadata("chalk")
+    has_version=(isinstance(metadata,dict)
+       and isinstance((metadata.get("versions") or {}).get("5.3.0"),dict))
+    res=c.session.get("https://registry.npmjs.org/chalk/5.3.0",
+                      timeout=10,allow_redirects=False)
+    try:
+     answer=res.json() if res.status_code==200 else {}
+     good=(isinstance(answer,dict) and answer.get("name")=="chalk"
+           and answer.get("version")=="5.3.0")
+     url=((answer.get("dist") or {}).get("tarball") or "") if good else ""
+     probe={
+      "status":"CONFIRMED" if isinstance(metadata,dict) else "PACKUMENT_UNKNOWN",
+      "packumentHasExact":has_version if isinstance(metadata,dict) else None,
+      "packumentVersionCount":(len(metadata.get("versions") or {})
+                                  if isinstance(metadata,dict) else None),
+      "versionEndpointHttpCode":res.status_code if res.status_code in (200,404,410) else None,
+      "versionEndpointNameVersionMatch":good,
+      "versionEndpointOriginAllowed":c.registry_artifact_url_allowed(url) if good else None,
+     }
+    finally:res.close()
+   except Exception:
+    probe={"status":"UNAVAILABLE"}
    return {"responses":responses,"toolAvailable":True,
+           "publicRegistryControl":probe,
            "requiredFieldInMcpToolSchema":supports_required,
            "knownFieldsAdvertised":observed_fields,
            "inputSchemaType":(type(tool_schema).__name__
@@ -385,6 +417,7 @@ def main() -> int:
                         payload=json.loads(process.stdout.decode("utf-8").splitlines()[-1])
                         report.update(evaluate(payload))
                         report["requests"]=payload.get("responses",[])
+                        report["publicRegistryControl"]=payload.get("publicRegistryControl")
                         report["requiredFieldInMcpToolSchema"]=payload.get("requiredFieldInMcpToolSchema")
                         report["knownFieldsAdvertised"]=payload.get("knownFieldsAdvertised",[])
                         report["inputSchemaType"]=payload.get("inputSchemaType")
