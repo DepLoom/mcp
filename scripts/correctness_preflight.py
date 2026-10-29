@@ -434,6 +434,13 @@ def breaking_demo(wheel: pathlib.Path, snapshot_dir: pathlib.Path | None = None)
         baseline_result = verify_chalk_candidate(baseline, seed_copy, baseline_mode=True)
         version_only = verify_chalk_candidate(baseline, target)
         patched = verify_chalk_candidate(baseline, reference)
+        shortcut = root / "hardcoded-success"
+        copy_source(reference, shortcut)
+        (shortcut / "src" / "format.cjs").write_text(
+            "module.exports = name => 'READY Ada';\n", encoding="utf-8")
+        # This counterfeit can pass the app's Ada-only build and unit test,
+        # but must fail the external multi-input runtime oracle.
+        hardcoded = verify_chalk_candidate(baseline, shortcut)
         negative = {}
         for case in ("foreign-lock", "excluded-upgraded", "deleted-tests",
                      "forged-build-script", "fake-evidence"):
@@ -478,6 +485,13 @@ def breaking_demo(wheel: pathlib.Path, snapshot_dir: pathlib.Path | None = None)
                 version_only["checks"].get(x, {}).get("exitCode") not in (None, 0)
                 for x in ("build", "test", "runtime")),
             "referenceCodePatchPASS": patched["status"] == "PASS",
+            "hardcodedSuccessRejected": (
+                hardcoded["status"] == "FAIL"
+                and hardcoded["checks"].get("install", {}).get("exitCode") == 0
+                and hardcoded["checks"].get("build", {}).get("exitCode") == 0
+                and hardcoded["checks"].get("test", {}).get("exitCode") == 0
+                and hardcoded["checks"].get("runtime", {}).get("exitCode") not in (0, None)
+            ),
             "unsafeControlsFAIL": all(x["status"] == "FAIL" and x["npmNotInvoked"]
                                        for x in negative.values()),
             "realPackagedStdioPASS": (
@@ -493,6 +507,7 @@ def breaking_demo(wheel: pathlib.Path, snapshot_dir: pathlib.Path | None = None)
                 "baseline": baseline_result,
                 "versionOnly": version_only,
                 "referencePatch": patched,
+                "hardcodedAdapter": hardcoded,
                 "unsafe": negative,
             },
             "setupWallSeconds": setup,
@@ -596,6 +611,7 @@ def main() -> int:
             "versionOnlyInstall": "PASS" if report.get("checks", {}).get("versionOnlyInstallPASS") else "NOT_PASS",
             "versionOnlyBehavior": "FAIL_AS_EXPECTED" if report.get("checks", {}).get("versionOnlyRuntimeFAIL") else "NOT_CONFIRMED",
             "referencePatch": "PASS" if report.get("checks", {}).get("referenceCodePatchPASS") else "NOT_PASS",
+            "hardcodedAdapter": "REJECTED" if report.get("checks", {}).get("hardcodedSuccessRejected") else "NOT_CONFIRMED",
             "setupWallSeconds": report.get("setupWallSeconds"),
         })
     else:
