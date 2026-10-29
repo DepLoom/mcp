@@ -7,6 +7,7 @@ Absent diagnostics in the pinned legacy Core stay *absent*, not zero/clean.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from typing import Any, Mapping
 from urllib.parse import unquote, urlsplit
 
@@ -112,6 +113,7 @@ def project_registry_aggregate(raw: Any) -> dict[str, Any] | None:
     reasons = _counter_map(raw.get("rejectionCounts"), REJECTION_CODES)
     if (any(value is None for value in counts.values())
         or counts["rejectedVersions"] > counts["examinedVersions"]
+        or counts["noInstallableArtifactRows"] > counts["rejectedVersions"]
         or not isinstance(raw.get("rejectionCounts"), Mapping)
         or len(raw["rejectionCounts"]) != len(reasons)
         or sum(reasons.values()) != counts["rejectedVersions"]):
@@ -127,6 +129,41 @@ def project_registry_aggregate(raw: Any) -> dict[str, Any] | None:
         result["projectionTruncated"] = True
     return result
 
+
+
+def reconcile_registry_aggregate(raw: Any, source_rows: list[dict[str, Any]],
+                                 projected_rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Suppress aggregate claims contradicted by the package evidence.
+
+    Core's genuine aggregate is the exact sum of the diagnostics it publishes
+    on plan rows. A forged/malformed row must not disappear while its aggregate
+    remains a falsely reassuring count. This never modifies row status/target.
+    """
+    aggregate = project_registry_aggregate(raw)
+    if aggregate is None or len(source_rows) != len(projected_rows):
+        return None
+    totals = Counter()
+    reasons: Counter[str] = Counter()
+    for original, projected in zip(source_rows, projected_rows):
+        if ("registryCandidateDiagnostics" in original
+            and "registryCandidateDiagnostics" not in projected):
+            return None
+        if ("noTargetDiagnosticCode" in original
+            and "noTargetDiagnosticCode" not in projected):
+            return None
+        diagnostic = projected.get("registryCandidateDiagnostics")
+        if diagnostic is not None:
+            # Already projected using the strict source-backed row validator.
+            totals["examinedVersions"] += diagnostic["examined"]
+            totals["rejectedVersions"] += diagnostic["rejected"]
+            reasons.update(diagnostic["rejectionCounts"])
+        if projected.get("noTargetDiagnosticCode") == "NO_INSTALLABLE_ARTIFACT":
+            totals["noInstallableArtifactRows"] += 1
+    if (any(aggregate[key] != totals[key] for key in (
+            "examinedVersions", "rejectedVersions", "noInstallableArtifactRows"))
+        or aggregate["rejectionCounts"] != dict(reasons)):
+        return None
+    return aggregate
 
 def project_registry_candidate(raw: Any) -> dict[str, Any] | None:
     """Render a bounded whitelist; everything else stays in Core's raw plan."""
@@ -188,26 +225,50 @@ def project_registry_candidate(raw: Any) -> dict[str, Any] | None:
             if len(projected["rejectedArtifactOrigins"]) >= MAX_EXAMPLES:
                 break
     physical = raw.get("physicalProbe")
-    if isinstance(physical, Mapping):
-        p: dict[str, Any] = {}
-        n = _count(physical.get("observed"))
-        if n is not None:
-            p["observed"] = n
-        if type(physical.get("unprobed")) is bool:
-            p["unprobed"] = physical["unprobed"]
-        p["failureCounts"] = _counter_map(physical.get("failureCounts"), REJECTION_CODES)
-        p["statusCounts"] = _counter_map(physical.get("statusCounts"), _PROBE_STATUSES)
-        projected["physicalProbe"] = p
+    physical_invalid = False
+    if physical is not None:
+        if not isinstance(physical, Mapping):
+            physical_invalid = True
+        else:
+            observed = _count(physical.get("observed"))
+            unprobed = physical.get("unprobed")
+            statuses_raw = physical.get("statusCounts", {})
+            failures_raw = physical.get("failureCounts", {})
+            statuses = _counter_map(statuses_raw, _PROBE_STATUSES)
+            failures = _counter_map(failures_raw, REJECTION_CODES)
+            # A partial/forged status map cannot claim that real probes
+            # succeeded, nor may a failure count contradict actual statuses.
+            expected_failures = {
+                "HTTP_ARTIFACT_UNAVAILABLE": statuses.get("missing-artifact", 0)
+                    + statuses.get("empty-artifact", 0),
+                "FOREIGN_TARBALL_ORIGIN": statuses.get("foreign-registry-redirect", 0),
+            }
+            expected_unprobed = not any(
+                k not in {"planning-only", "current-installed"} for k in statuses
+            )
+            if (observed is None or type(unprobed) is not bool
+                or not isinstance(statuses_raw, Mapping)
+                or not isinstance(failures_raw, Mapping)
+                or sum(statuses.values()) != observed
+                or unprobed != expected_unprobed
+                or any(failures.get(code, 0) != expected for code, expected in expected_failures.items())
+                or any(code not in expected_failures for code in failures)):
+                physical_invalid = True
+            else:
+                projected["physicalProbe"] = {
+                    "observed": observed, "unprobed": unprobed,
+                    "failureCounts": failures, "statusCounts": statuses,
+                }
     # Capture clipped evidence honestly, without ever logging the discarded values.
     reason_counts = raw.get("rejectionCounts")
     physical_failure = physical.get("failureCounts") if isinstance(physical, Mapping) else None
     physical_status = physical.get("statusCounts") if isinstance(physical, Mapping) else None
-    if (raw.get("projectionTruncated") is True
+    if (raw.get("projectionTruncated") is True or physical_invalid
         or isinstance(samples, list) and len(samples) > len(examples)
         or isinstance(origins, list) and len(origins) > len(projected["rejectedArtifactOrigins"])
         or isinstance(reason_counts, dict) and len(reason_counts) != len(projected["rejectionCounts"])
-        or isinstance(physical_failure, dict) and len(physical_failure) != len(projected["physicalProbe"]["failureCounts"])
-        or isinstance(physical_status, dict) and len(physical_status) != len(projected["physicalProbe"]["statusCounts"])):
+        or isinstance(physical_failure, dict) and len(physical_failure) != len(projected.get("physicalProbe", {}).get("failureCounts", {}))
+        or isinstance(physical_status, dict) and len(physical_status) != len(projected.get("physicalProbe", {}).get("statusCounts", {}))):
         projected["projectionTruncated"] = True
     return projected
 

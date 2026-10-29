@@ -68,7 +68,11 @@ assert registry_module.is_file() and "registry_candidate_diagnostics.py" in rele
 assert hashlib.sha256(registry_module.read_bytes()).hexdigest()==release["core"]["files"]["registry_candidate_diagnostics.py"]
 sys.path.insert(0, str(core))
 import registry_candidate_diagnostics as registry_evidence
-assert registry_evidence.no_target_diagnostic_code("no-target", {"allUpgradeCandidatesRejected": True})=="NO_INSTALLABLE_ARTIFACT"
+assert registry_evidence.no_target_diagnostic_code("no-target", {"allUpgradeCandidatesRejected": True}) is None
+complete={"examined":2, "accepted":0, "rejected":2, "upgradeCandidates":1,
+          "acceptedUpgradeCandidates":0, "rejectedUpgradeCandidates":1,
+          "allUpgradeCandidatesRejected":True, "rejectionCounts":{"BAD_REGISTRY_PATH":2}}
+assert registry_evidence.no_target_diagnostic_code("no-target", complete)=="NO_INSTALLABLE_ARTIFACT"
 assert registry_evidence.safe_registry_artifact_url("https://nexus.invalid/npm", "https://nexus.invalid/npm/a.tgz")
 assert not registry_evidence.safe_registry_artifact_url("https://nexus.invalid/npm", "https://nexus.invalid/npm/../private/a.tgz")
 assert not registry_evidence.safe_registry_artifact_url("https://nexus.invalid/npm", "https://user:password@nexus.invalid/npm/a.tgz")
