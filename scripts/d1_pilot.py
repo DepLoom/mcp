@@ -340,9 +340,12 @@ def launch(args):
         raise RuntimeError("CODEX_CLI_SCHEMA_NOT_AVAILABLE")
     if not args.confirm_model_access:
         raise RuntimeError("MODEL_ACCESS_NOT_CONFIRMED_WITH_ACCOUNT")
-    rate=None
-    if all(x is not None for x in (args.input_rate,args.cached_rate,args.output_rate)):
-        rate=(args.input_rate,args.cached_rate,args.output_rate)
+    rates=(args.input_rate,args.cached_rate,args.output_rate)
+    if any(x is not None for x in rates) and not all(x is not None for x in rates):
+        raise RuntimeError("INCOMPLETE_API_PRICING")
+    if args.max_api_estimate is not None and not all(x is not None for x in rates):
+        raise RuntimeError("API_COST_STOP_REQUIRES_ALL_RATES")
+    rate=tuple(rates) if all(x is not None for x in rates) else None
     # Prepare everything BEFORE the timed task. A and B start from the same
     # exact frozen bytes; MCP wheel is setup outside the agent workspace.
     args.out.mkdir(parents=True)
