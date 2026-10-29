@@ -108,6 +108,13 @@ class IndependentOraclePolicyTests(unittest.TestCase):
                 write_json(self.candidate / "package-lock.json", lock)
                 self.assert_rejected("FOREIGN_OR_UNSAFE_LOCK_ARTIFACT")
 
+    def test_windows_newline_normalization_keeps_canonical_source_proof(self):
+        for rel in ("build.js", "verify.js", "src/index.js"):
+            path = self.baseline / rel
+            original = path.read_text(encoding="utf-8")
+            path.write_bytes(original.replace("\n", "\r\n").encode("utf-8"))
+        self.assertTrue(canonical_fixture_files_intact(self.baseline))
+
     def test_original_checkout_guard_is_no_longer_self_comparison(self):
         self.assertTrue(canonical_fixture_files_intact(self.baseline))
         altered = json.loads((self.baseline / "package.json").read_text())
