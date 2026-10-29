@@ -29,7 +29,7 @@ jobs:
         with:
           node-version: '22'
       - name: Install only required harness dependencies
-        run: python -m pip install -e . build
+        run: python -m pip install -e . build setuptools wheel
       - name: Targeted static-oracle and local-registry negative unit tests
         run: python -m unittest discover -s tests -p test_correctness_preflight.py -v
       - name: Build tested source and install wheel in separate venv
