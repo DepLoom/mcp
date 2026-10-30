@@ -514,6 +514,29 @@ def check_host_location(seed: Path, out: Path) -> None:
         raise RuntimeError("OUTPUT_PARENT_UNWRITABLE")
 
 
+def probe_public_network() -> None:
+    """Read-only native network check. Respect the operator's proxy unchanged."""
+    import urllib.error
+    import urllib.request
+    endpoints = (
+        ("NPM_REGISTRY_UNAVAILABLE", "https://registry.npmjs.org/chalk/6.0.0"),
+        ("PYPI_UNAVAILABLE", "https://pypi.org/simple/build/"),
+        ("PUBLIC_GITHUB_UNAVAILABLE", "https://api.github.com/repos/DepLoom/mcp"),
+    )
+    for code, url in endpoints:
+        try:
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "DepLoom-D1-public-readonly-preflight"})
+            with urllib.request.urlopen(req, timeout=8) as response:
+                if response.status != 200:
+                    raise RuntimeError(code)
+                response.read(1)
+        except (OSError, ValueError, urllib.error.URLError):
+            # No raw URL, credentials, private proxy settings or response
+            # bodies may enter the benchmark evidence.
+            raise RuntimeError(code) from None
+
+
 def check_ready(args) -> dict:
     check_limits(args)
     if not args.seed.is_dir():
@@ -529,6 +552,7 @@ def check_ready(args) -> dict:
     if not args.codex_auth_home:
         raise RuntimeError("CODEX_AUTH_HOME_REQUIRED")
     auth=validate_private_auth_source(args.codex_auth_home)
+    probe_public_network()
     # Does NOT read or print a credential and never calls a model. The
     # operator's real login/model entitlement remains an external attestation.
     return {"gate":gate, "native":native,
