@@ -113,6 +113,36 @@ def check_policy_receipt(data: dict, wheel_sha: str, seed_sha: str) -> dict:
         require(assessment.get("status") == expected_verdict and
                 assessment.get("compatibility") == "UNKNOWN",
                 "ASSIGNMENT_CHECK_WRONG_VERDICT")
+        # The regular installed-wheel get_upgrade_plan response MUST provide
+        # policy and exact-target status itself, without a D1-specific oracle.
+        ordinary = r.get("ordinaryPlanPolicy") or {}
+        final = ordinary.get("finalHealthPolicy") or {}
+        require(ordinary.get("requestedExactTarget") ==
+                ordinary.get("publishedTarget") == target and
+                ordinary.get("allRequestedTargetsProposed") is True and
+                ordinary.get("authority") == "PLANNING_ONLY" and
+                ordinary.get("verificationStatus") == "NOT_VERIFIED" and
+                ordinary.get("readoutHasPlanningBoundary") is True and
+                ordinary.get("perPackageLagEvidence", {}).get("availability") ==
+                    "UNAVAILABLE_IN_PUBLISHED_BLUEPRINT",
+                "ORDINARY_MCP_PLAN_POLICY_NOT_VISIBLE")
+        require(final.get("postPlanGoal") == goal and
+                final.get("postPlanLagOk") == count and
+                final.get("postPlanScopeTotal") == 2 and
+                final.get("postPlanPolicyRequired") == 2 and
+                final.get("postPlanPolicyShortfall") == 2-count and
+                final.get("appliedMinLagOkPct") == 80,
+                "ORDINARY_MCP_POLICY_DISAGREES_WITH_CORE")
+        if should_pass:
+            require(ordinary.get("totalBlockers") == 0,
+                    "COMPLIANT_PLAN_HAS_PUBLISHED_BLOCKER")
+        else:
+            require(ordinary.get("totalBlockers", 0) > 0 and any(
+                b.get("code") == "TARGET_POLICY_BLOCKED" and
+                b.get("lifecycle") == "ACTIVE_FINAL"
+                for b in ordinary.get("blockers") or []),
+                "ORDINARY_MCP_DROPPED_POLICY_BLOCKER")
+
         if not should_pass:
             require(any(b.get("code") == "TARGET_POLICY_BLOCKED" and
                         b.get("lifecycle") == "ACTIVE_FINAL"
