@@ -85,8 +85,19 @@ async def run():
     # New general V2 exact objective; deliberate user target, not latest guess.
     dict(base,target_mode="pinned",objective="explicit-version-targets",
          mutable_packages=["chalk"],approved_version_lines={"chalk":[5]},
-         exact_targets={"chalk":"5.3.0"})
+         exact_targets={"chalk":"5.3.0"}),
+    # Clearly separate PUBLIC read-only scenarios. No change to frozen P2,
+    # initial exact target, excluded packages, or effective Yellow policy.
+    dict(base,target_mode="pinned",objective="explicit-version-targets",
+         mutable_packages=["chalk"],approved_version_lines={"chalk":[5]},
+         exact_targets={"chalk":"5.6.2"}),
+    dict(base,target_mode="pinned",objective="explicit-version-targets",
+         mutable_packages=["chalk"],approved_version_lines={"chalk":[6]},
+         exact_targets={"chalk":"6.0.0"}),
    ]
+   scenario_ids=("LEGACY_PINNED","LATEST_IN_APPROVED_5","LEGACY_REQUIRED",
+       "ORIGINAL_EXACT_5_3_0","SEPARATE_MAJOR5_5_6_2",
+       "SEPARATE_CURRENT_POLICY_MIN_6_0_0")
    responses=[]
    for n,query in enumerate(requests):
     query["output_dir"]=str(pathlib.Path.cwd()/("plan-"+str(n)))
@@ -94,11 +105,12 @@ async def run():
      response=decode(await session.call_tool("get_upgrade_plan",query))
      status=response.get("status") or {}
      decision=(response.get("policy") or {}).get("decisionContract") or {}
+     expected_target=(query.get("exact_targets") or {}).get("chalk")
      explicit=(
        query.get("objective")=="explicit-version-targets"
        and decision.get("version")==2
        and decision.get("objective")=="explicit-version-targets"
-       and decision.get("exactTargets")=={"chalk":"5.3.0"}
+       and decision.get("exactTargets")=={"chalk":expected_target}
      )
      rows={r.get("package"):r for r in response.get("dependencies",[]) if isinstance(r,dict)}
      chalk=rows.get("chalk") or {}
@@ -210,6 +222,9 @@ async def run():
       import re
       return v if type(v) is str and re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+",v) else None
      responses.append({
+       "scenarioId":scenario_ids[n],
+       "expectedExactTarget":expected_target,
+       "approvedMajors":(query.get("approved_version_lines") or {}).get("chalk"),
        "ok":response.get("ok") is True,
        # Safe typed code only: do not serialize untrusted error messages,
        # subprocess stderr, registry URLs or environment paths.
@@ -248,11 +263,27 @@ async def run():
      # An exact version can be *inspected* with an existing read-only tool,
      # but this never recomputes solver peers, OSV or runtime compatibility.
      blueprint=(response.get("artifacts") or {}).get("blueprint")
+     # Source-backed latest is the actual Core-published reference, not an
+     # inferred npm value. Only two public package names leave this probe.
+     if isinstance(blueprint,str):
+      try:
+       bp_path=pathlib.Path(blueprint).resolve()
+       if bp_path.is_relative_to(pathlib.Path.cwd().resolve()) and bp_path.is_file():
+        bp=json.loads(bp_path.read_text(encoding="utf-8"))
+        rows_raw=(bp.get("dependencies") or [])
+        responses[-1]["coreReferenceVersions"]={
+          r["package"]:r["latest"] for r in rows_raw
+          if isinstance(r,dict) and r.get("package") in ("chalk","is-number")
+          and isinstance(r.get("latest"),str)
+          and re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+",r["latest"])}
+      except (OSError,TypeError,ValueError):
+       responses[-1]["coreReferenceVersions"]={}
      assessment={"status":"NOT_AVAILABLE"}
      if isinstance(blueprint,str) and blueprint and response.get("ok") is True:
       try:
        alternative=decode(await session.call_tool("evaluate_assignment",{
-          "blueprint_path":blueprint,"assignment":{"chalk":"5.3.0"}}))
+          "blueprint_path":blueprint,
+          "assignment":{"chalk":expected_target or "5.3.0"}}))
        whitelist={"REPLAN_REQUIRED","REVIEW_REQUIRED",
           "BLOCKED_BY_KNOWN_CONSTRAINTS","MATCHES_PUBLISHED_PLAN",
           "STALE_BLUEPRINT"}
@@ -314,6 +345,7 @@ async def run():
      kind=type(exc).__name__
      if not re.fullmatch(r"[A-Za-z][A-Za-z0-9]{0,50}",kind):kind="OTHER"
      responses.append({"ok":False,"errorCode":"CALL_FAILED",
+                       "scenarioId":scenario_ids[n],
                        "exceptionType":kind,"toolAvailable":True})
    # Independent PUBLIC registry read-only control. It differentiates a
    # planner's indexed packument view from the exact-version endpoint, never
@@ -346,6 +378,70 @@ async def run():
     finally:res.close()
    except Exception:
     probe={"status":"UNAVAILABLE"}
+   # Public npm capture is performed AFTER the packaged MCP calls. Digests
+   # identify the observed registry versions/time; drift vs the planner is
+   # detected, never waved away as a proven single network snapshot.
+   snapshots={}
+   try:
+    import datetime as dt
+    from dateutil.relativedelta import relativedelta
+    from dependency_live_roadmap_generator import (
+      latest_version,version_date,versions_from_current,min_by_lag,
+      current_meets_target)
+    client=LiveDataClient("https://registry.npmjs.org",timeout=12,batch_size=1,
+                          sleep_sec=0,use_system_proxy=True)
+    for package,current in (("chalk","4.1.2"),("is-number","7.0.0")):
+     captured_start=dt.datetime.now(dt.timezone.utc).isoformat()
+     meta=client.fetch_npm_metadata(package)
+     assert isinstance(meta,dict) and isinstance(meta.get("versions"),dict)
+     latest=latest_version(meta)
+     latest_dt=version_date(meta,latest)
+     assert latest_dt is not None
+     cutoff=latest_dt-relativedelta(months=12)
+     versions,_=versions_from_current(meta,current,False,0)
+     minimum=min_by_lag(meta,versions,12,latest_override=latest)
+     times=meta.get("time") or {}
+     selected=(("4.1.2","5.3.0","5.6.2","6.0.0","6.0.1")
+       if package=="chalk" else ("7.0.0",))
+     dates={v:times.get(v) for v in selected if isinstance(times.get(v),str)}
+     all_times=sorted((v,times.get(v)) for v in meta["versions"])
+     snapshot_sha=hashlib.sha256(json.dumps({
+       "package":package,"latest":latest,"times":all_times
+     },sort_keys=True,separators=(",",":")).encode()).hexdigest()
+     eligible_major5=sum(1 for v in versions if v.startswith("5.")
+          and (when:=version_date(meta,v)) is not None and when>=cutoff)
+     snapshots[package]={
+      "status":"CAPTURED","capturedStartedUtc":captured_start,
+      "capturedFinishedUtc":dt.datetime.now(dt.timezone.utc).isoformat(),
+      "registryAuthority":"https://registry.npmjs.org",
+      "metadataTimeDigestSha256":snapshot_sha,
+      "metadataVersionCount":len(meta["versions"]),
+      "latestDistTag":latest,"latestPublishedUtc":latest_dt.isoformat(),
+      "lagMonths":12,"cutoffUtc":cutoff.isoformat(),
+      "minWithinLagWindowMetadata":minimum,"selectedPublishedUtc":dates,
+      "eligibleMajor5Count":eligible_major5 if package=="chalk" else None}
+    for result in responses:
+     if not result.get("ok"):continue
+     facts=[]
+     for package in ("chalk","is-number"):
+      ref=snapshots[package]
+      if package=="chalk":
+       chosen=result.get("chalkTarget") or result.get("chalkCurrent")
+      else:
+       chosen=result.get("companionTarget") or "7.0.0"
+      boundary=ref["minWithinLagWindowMetadata"]
+      facts.append({
+       "package":package,"finalVersion":chosen,
+       "registryLatest":ref["latestDistTag"],"lagMinimum":boundary,
+       "lagOk":bool(chosen and current_meets_target(chosen,boundary)),
+       "mutable":package=="chalk","healthExcluded":False})
+     result["registryLagRows"]=facts
+     reference=result.get("coreReferenceVersions") or {}
+     result["coreRegistryReferenceMatch"]=all(
+       reference.get(package)==snapshots[package]["latestDistTag"]
+       for package in ("chalk","is-number"))
+   except Exception:
+    snapshots={"status":"UNAVAILABLE"}
    # Diagnose ONLY this isolated public fixture, never read the caller's
    # HOME, never export traceback/raw exception message/paths.
    safe_failure={"class":None,"frames":[],"code":None,
@@ -383,6 +479,7 @@ async def run():
    except (OSError,ValueError,TypeError):
     pass
    return {"responses":responses,"toolAvailable":True,
+           "registrySnapshots":snapshots,
            "publicRegistryControl":probe,
            "isolatedCoreFailure":safe_failure,
            "requiredFieldInMcpToolSchema":supports_required,
@@ -520,6 +617,7 @@ def main() -> int:
                         report.update(evaluate(payload))
                         report["requests"]=payload.get("responses",[])
                         report["publicRegistryControl"]=payload.get("publicRegistryControl")
+                        report["registrySnapshots"]=payload.get("registrySnapshots")
                         report["isolatedCoreFailure"]=payload.get("isolatedCoreFailure")
                         report["requiredFieldInMcpToolSchema"]=payload.get("requiredFieldInMcpToolSchema")
                         report["knownFieldsAdvertised"]=payload.get("knownFieldsAdvertised",[])
