@@ -87,6 +87,36 @@ evidence flags, declaration identity and next action inline.
 
 ### Exact-target assessment
 
+An opt-in V2 `explicit-version-targets` request also adds
+`summary.exactTargetPolicy` to the **ordinary installed-wheel
+`get_upgrade_plan` response**, without changing V1 or any Core semantics.
+It links `requestedExactTargets` with the Core-published
+`publishedAssignments` (current, requested, published target, row status,
+`declarationId`, `evidenceRef`). `allRequestedTargetsProposed=true` means only
+that every requested exact package has a matching `PROPOSED` row in a
+`DRAFT_READY` publication; it is **not** a new peer/registry/security proof.
+`finalHealthPolicy` quotes the same Core `postPlanGoal`, `postPlanLagOk`,
+`postPlanScopeTotal`, `postPlanPolicyRequired`, `postPlanPolicyShortfall`,
+`postPlanReserveShortfall`, and other available fields as
+`targetAssessment.aggregate`, plus the actually applied `minLagOkPct`.
+Missing Core values remain null rather than zero. `blockers` contain applicable
+published BLOCKER IDs, their original JSON pointers, scope/project and
+lifecycle; `totalBlockers` and `blockersClipped` identify limited projection.
+Project-level health failure must **not** be attributed to a particular package.
+
+The only supported per-package lag state here is
+`perPackageLagEvidence.availability="UNAVAILABLE_IN_PUBLISHED_BLUEPRINT"`:
+Core's public Blueprint exposes package `latest` but not version publication
+times or the actual lag-minimum comparison for each row. Do not invent them
+or read the D1 fixture internals from the product tool. The `readout` is
+derived solely from published rows and health assessment; it explains
+`PLANNING_ONLY/NOT_VERIFIED` and never supplies runtime verification.
+The separately investigated Chalk `6.0.0` case is **not** an automatic
+recommendation in normal MCP responses: proposing an alternative major with
+reliable user authority, peer/engine/security evidence would require a distinct
+Core-backed contract. For now, no silent target/major/scope change or
+`requiresAuthorization=false` alternative is emitted.
+
 `targetAssessment.scope="FINAL_PLANNED_ASSIGNMENT"` describes the exact chosen
 or retained versions, independently of current-version coverage. `aggregate`
 and the `projects` mapping preserve published Core `postPlan*` fields: security

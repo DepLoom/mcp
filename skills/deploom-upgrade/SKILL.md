@@ -20,9 +20,11 @@ and decisions; ask only when a material choice is unresolved.
 
 - **Action:** `PLAN_ONLY` for analysis; `EXECUTE` when the user asks for changes.
   An analysis request does not authorize edits.
-- **Objective:** `minimum-change-to-policy` or
-  `latest-compatible-in-approved-lines`. A yellow/green health target does not
-  by itself specify the newest acceptable version. State the interpretation.
+- **Objective:** `minimum-change-to-policy`,
+  `latest-compatible-in-approved-lines`, or opt-in
+  `explicit-version-targets` with exact stable `exact_targets` from the user.
+  A yellow/green health target does not specify the newest acceptable version.
+  Do not silently substitute another exact target or widen approved majors.
 - **Target authority:** `pinned` keeps the agreed targets; `advisory` permits
   justified alternatives inside the authorized scope and version lines. Use
   `pinned` when targets or a reproducible target set were explicitly specified.
@@ -53,6 +55,10 @@ Advisory mode changes recommendations, never proven peers/engines or user pins.
    unresolved peers, exact-target security/policy assessment, coverage,
    source/policy identity, and next action. Current-version security does not
    assess a proposed version; complete evidence can describe a blocked plan.
+   For V2 exact targets, read `summary.exactTargetPolicy`: a matching
+   `PROPOSED` target and a blocked final `postPlanGoal` can coexist.
+   Preserve original blockers, required/actual/shortfall, and an unavailable
+   per-package lag status; never infer per-package lag thresholds from `latest`.
    Read `references/blueprint-contract.md`. **Untruncated rows do not mean complete
    decision evidence.** Open the full artifact when critical evidence is absent,
    ambiguous or marked incomplete, even if `truncation.truncated=false`.

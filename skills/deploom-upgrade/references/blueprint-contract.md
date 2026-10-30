@@ -64,6 +64,7 @@ parallel execution safety `UNPROVEN`.
 | `dependencies` | Read `status`, target, `reason`, `evidence`, `nextAction`, `evidenceRef`, and review flags together. |
 | `decisionEvidence` | Typed `code`, `severity`, package, message, next action and artifact reference. Check `scope`/`project` on assessment-level reasons; `package=null` does not identify an offending package. `BLOCKER` is decision-critical; `REVIEW` is not automatically a hard conflict. |
 | `targetAssessment` | Read `aggregate` and `projects` for the exact chosen or retained versions: `postPlanGoal`, security coverage/counters, lag shortfalls and available policy thresholds. Check its `evidenceComplete` and `needsReview` independently. |
+| `summary.exactTargetPolicy` | Added only for Core-applied V2 `explicit-version-targets`. `requestedExactTargets`, selected `publishedAssignments` and `allRequestedTargetsProposed` reflect **only** published exact plan rows. `finalHealthPolicy` copies Core's target assessment (goal, lag-OK, scope, required, shortfall) and applied threshold; `blockers` preserve typed original evidence pointers, lifecycle and project scope. `totalBlockers` and `blockersClipped` prevent an omitted reason looking clean. The readable `readout` is not a second solver. |
 | `decisionCompleteness` | Check `projectionComplete`, `requiresArtifactRead`, `planningComplete`, `evidenceComplete`, critical evidence counts, blocker count, workspace reconciliation and next action. |
 | `workspaceCoverage` | Manifest discovery/evaluation inventory, unevaluated manifests and reconciliation requirements. `SINGLE_MANIFEST_PLANNING` plus `jointAssignment=NOT_COMPUTED` is not a joint workspace solution. |
 | `artifacts.blueprint` | Full evidence when compact fields are insufficient, ambiguous or truncated. Preserve the exact JSON reference with the decision. |
@@ -77,6 +78,18 @@ critical counts differ, target project summaries are clipped, a reason/ref is
 missing, or a contradiction cannot be resolved. `projectionComplete` does not
 prove planning or evidence completeness. Conversely, a complete compact
 response can be sufficient; do not open every artifact mechanically.
+
+For the V2 exact objective, always distinguish **exact target matches plan**
+from **final health-policy attainment**. A `PROPOSED` `chalk@5.3.0` may carry
+`TARGET_POLICY_BLOCKED` because Core's chosen final versions do not reach the
+user's lag/health threshold. Inspect `summary.exactTargetPolicy` alongside
+`targetAssessment` and `decisionEvidence`; do not treat either a matching
+target or `postPlanGoal=feasible` as `VERIFIED`. `perPackageLagEvidence`
+currently says `UNAVAILABLE_IN_PUBLISHED_BLUEPRINT`: the public Blueprint
+does not publish per-row lag-minimum timestamps/boundaries. Never manufacture
+those values using `latest` or an isolated test harness. Suggested alternatives
+are **not** inferred or authorized by this summary; changing exact targets or
+approved majors requires a separate user decision and fresh Core plan.
 
 Check target assessment even when the current version is clean and the row is
 `PROPOSED`. `TARGET_SECURITY_UNKNOWN` requires missing exact-version evidence;
