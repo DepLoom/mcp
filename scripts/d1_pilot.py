@@ -637,7 +637,9 @@ def launch(args) -> dict:
                 mcp_python=None
                 setup_t=time.monotonic()
                 if arm=="B":
-                    v=root/"mcpvenv"
+                    # MCP package and planner state are private setup data,
+                    # not shareable benchmark artifacts.
+                    v=private/"B-mcpvenv"
                     subprocess.run([sys.executable,"-m","venv",str(v)],check=True,
                                    capture_output=True,timeout=55)
                     mcp_python=v/("Scripts/python.exe" if os.name=="nt" else "bin/python")
@@ -648,7 +650,7 @@ def launch(args) -> dict:
                         raise RuntimeError("B_PACKAGED_MCP_INSTALL_FAILED")
                 setup_seconds=round(time.monotonic()-setup_t,3) if arm=="B" else 0.0
                 cmd=codex_command(shutil.which(args.codex),workspace,args.model,args.effort,
-                                  mcp_python,root/"mcp-state")
+                                  mcp_python,private/"B-mcp-state")
                 # Durable RUNNING state is written BEFORE launching Codex.
                 ledger.mark(arm,"RUNNING",startMonotonicUnknown=True)
                 try:
