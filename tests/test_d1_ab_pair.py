@@ -173,6 +173,58 @@ class LedgerTests(unittest.TestCase):
                 check_host_location(seed,root/"pair")
 
 
+class NoLeakTests(unittest.TestCase):
+    def test_seed_clone_does_not_copy_ignored_reference_or_tools(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td)
+            seed=root/"seed"
+            seed.mkdir()
+            # Only the fixed public eight files may enter the workspace.
+            for rel in (".npmrc","README.md","build.cjs","test.cjs",
+                        "src/index.cjs","src/format.cjs","package.json",
+                        "package-lock.json"):
+                p=seed/rel
+                p.parent.mkdir(parents=True,exist_ok=True)
+                p.write_text(rel,encoding="utf-8")
+            hidden=seed/"dist"
+            hidden.mkdir()
+            (hidden/"reference.cjs").write_text("synthetic reference not for agent")
+            (seed/"node_modules").mkdir()
+            (seed/"node_modules"/"oracle.txt").write_text("synthetic oracle")
+            dest=root/"agent"
+            with patch("d1_pilot.source_is_safe",return_value=True):
+                clone_seed(seed,dest,EXPECTED_SEED_SHA256)
+            self.assertFalse((dest/"dist").exists())
+            self.assertFalse((dest/"node_modules").exists())
+            self.assertFalse((dest/"reference.cjs").exists())
+            self.assertEqual(
+                sorted(str(p.relative_to(dest)).replace("\\","/")
+                       for p in dest.rglob("*") if p.is_file()),
+                sorted((".npmrc","README.md","build.cjs","test.cjs",
+                        "src/index.cjs","src/format.cjs","package.json",
+                        "package-lock.json")))
+
+    def test_auth_stays_outside_benchmark_and_user_rules_are_same(self):
+        from d1_pilot import private_home, validate_private_auth_source
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td)
+            origin=root/"auth-source";origin.mkdir()
+            (origin/"auth.json").write_text('{"test":"SYNTHETIC_NOT_REAL"}')
+            (origin/"AGENTS.md").write_text("Synthetic user restriction")
+            (origin/"rules").mkdir()
+            (origin/"rules"/"safety.rules").write_text("Synthetic tool rule")
+            desc=validate_private_auth_source(origin)
+            priv=root/"private-temp";priv.mkdir()
+            one,d1=private_home(priv,desc)
+            two,d2=private_home(priv,desc)
+            self.assertEqual(d1,d2)
+            self.assertNotEqual(one,two)
+            out=root/"benchmark-output";out.mkdir()
+            self.assertFalse(any(p.name=="auth.json" for p in out.rglob("*")))
+            self.assertEqual((one/"AGENTS.md").read_text(),"Synthetic user restriction")
+            self.assertEqual((two/"rules"/"safety.rules").read_text(),"Synthetic tool rule")
+
+
 class CheckerTests(unittest.TestCase):
     def test_separate_objective6_requires_independent_runtime_evidence(self):
         with tempfile.TemporaryDirectory() as td:
