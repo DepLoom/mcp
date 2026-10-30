@@ -6,6 +6,8 @@ on:
       - 'scripts/d1_pilot.py'
       - 'scripts/d1_mcp_value_preflight.py'
       - 'scripts/d1_yellow_policy_demo.py'
+      - 'scripts/d1_yellow_windows_demo.ps1'
+      - 'docs/D1_WINDOWS_POWERSHELL_DEMO.md'
       - 'tests/test_d1_yellow_policy_demo.py'
       - 'tests/test_d1_pilot.py'
       - 'tests/test_required_intent_bridge.py'
@@ -108,4 +110,35 @@ jobs:
             docs/D1_PILOT_HANDOFF.md
           include-hidden-files: true
           if-no-files-found: ignore
+          retention-days: 7
+
+  windows-powershell-51-demo:
+    name: Full Yellow/P2/installed-wheel stdio/real runtime (Windows PS 5.1)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Full no-agent Windows PowerShell 5.1 demo
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\d1_yellow_windows_demo.ps1 -ExpectedMcpSha '${{ github.event.pull_request.head.sha || github.sha }}' -OutputDir (Join-Path $env:RUNNER_TEMP 'deploom-d1-windows')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Public-only Windows evidence and frozen input
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: d1-yellow-windows-ps51-evidence
+          path: ${{ runner.temp }}/deploom-d1-windows/
+          include-hidden-files: true
+          if-no-files-found: warn
           retention-days: 7
