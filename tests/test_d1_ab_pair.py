@@ -266,6 +266,30 @@ class CheckerTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError,"D1_SEPARATE_CHALK6_POLICY"):
                     validate_gate(seed,wheel,p2,d1,yellow)
 
+    def test_immutable_companion_lock_integrity_rejected_before_npm(self):
+        from test_correctness_oracle import PublicChalkBreakingApiPolicyTests
+        case=PublicChalkBreakingApiPolicyTests()
+        case.setUp()
+        try:
+            from correctness_oracle import read_json
+            def save(path,value):
+                path.write_text(json.dumps(value,indent=2)+"\n",encoding="utf-8")
+            package=read_json(case.candidate/"package.json")
+            package["dependencies"]=dict(D1_AB_CHALK6_TARGET)
+            save(case.candidate/"package.json",package)
+            lock=read_json(case.candidate/"package-lock.json")
+            lock["packages"][""]["dependencies"]=dict(D1_AB_CHALK6_TARGET)
+            chalk=lock["packages"]["node_modules/chalk"]
+            chalk["version"]="6.0.0"
+            chalk["resolved"]="https://registry.npmjs.org/chalk/-/chalk-6.0.0.tgz"
+            lock["packages"]["node_modules/is-number"]["integrity"]="sha512-"+"A"*84+"=="
+            save(case.candidate/"package-lock.json",lock)
+            with self.assertRaisesRegex(OracleFailure,"IMMUTABLE_LOCK_ENTRY_CHANGED"):
+                chalk_static_contract(case.base,case.candidate,
+                                      target_dependencies=D1_AB_CHALK6_TARGET)
+        finally:
+            case.doCleanups()
+
     def test_original_p2_oracle_still_requires_chalk5(self):
         # Synthetic source/lock; no npm/network. Existing P2 target remains 5.
         from test_correctness_oracle import PublicChalkBreakingApiPolicyTests
