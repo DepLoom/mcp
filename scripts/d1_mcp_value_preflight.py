@@ -261,13 +261,28 @@ async def run():
           "ALTERNATIVE_PEER_SECURITY_POLICY_NOT_RECHECKED",
           "IMMUTABLE_PACKAGE_CHANGED","EXCLUDED_PACKAGE_CHANGED",
           "MAJOR_LINE_NOT_APPROVED","PUBLISHED_BLOCKERS_REQUIRE_REASSESSMENT",
-          "WORKSPACE_RECONCILIATION_REQUIRED","PARTIAL_BLUEPRINT"}
+          "WORKSPACE_RECONCILIATION_REQUIRED","PARTIAL_BLUEPRINT",
+          "PUBLISHED_PLAN_BLOCKER"}
+       # Sanitized SAME-blueprint blocker provenance from real packaged stdio.
+       explained=decode(await session.call_tool("explain_conflict",{
+          "blueprint_path":blueprint,"max_items":50}))
+       provenance=[]
+       for r in (explained.get("reasons") or []):
+        if not isinstance(r,dict) or r.get("severity")!="BLOCKER":continue
+        code,ref=r.get("code"),r.get("evidenceRef")
+        if not isinstance(code,str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,80}",code):continue
+        if not isinstance(ref,str) or not re.fullmatch(r"#/(?:dependencies|conflicts|unknowns|unresolved)/[0-9]+(?:/evidence)?|#/targetAssessment(?:/[A-Za-z0-9_/-]+)?",ref):continue
+        provenance.append({"code":code,"evidenceRef":ref,
+          "lifecycle":r.get("lifecycle") if r.get("lifecycle") in ("ACTIVE_FINAL","CURRENT_ROW","UNRESOLVED_LEGACY") else "OTHER",
+          "package":r.get("package") if r.get("package") in ("chalk","is-number") else None,
+          "scope":r.get("scope") if r.get("scope") in ("project","aggregate") else None})
        assessment={"status":vv if vv in whitelist else "OTHER",
             "authority":alternative.get("authority"),
             "compatibility":alternative.get("compatibility"),
             "peerConstraints":alternative.get("peerConstraints"),
             "checks":sorted({x.get("code") for x in (alternative.get("checks") or [])
-                              if isinstance(x,dict) and x.get("code") in safechecks})}
+                              if isinstance(x,dict) and x.get("code") in safechecks}),
+            "publishedBlockerProvenance":provenance}
       except Exception:
        assessment={"status":"CALL_FAILED"}
      responses[-1]["explicitVersionAssessment"]=assessment
