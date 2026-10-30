@@ -260,7 +260,8 @@ Promise.resolve().then(async()=>{
 
 
 def chalk_static_contract(baseline: pathlib.Path, candidate: pathlib.Path,
-                          *, baseline_mode: bool = False) -> dict[str, str]:
+                          *, baseline_mode: bool = False,
+                          target_dependencies: dict[str, str] | None = None) -> dict[str, str]:
     """Reject scope forgery before network, build, tests, or oracle execution."""
     before = source_files(baseline)
     after = source_files(candidate)
@@ -284,7 +285,15 @@ def chalk_static_contract(baseline: pathlib.Path, candidate: pathlib.Path,
     new_other.pop("dependencies", None)
     if old_other != new_other or old.get("dependencies") != CHALK_BASELINE:
         raise OracleFailure("BASELINE_OR_MANIFEST_SCOPE_CHANGED")
-    wanted = CHALK_BASELINE if baseline_mode else CHALK_TARGET
+    # The original P2 always retains its exact 5.3.0 default. Only an
+    # explicitly separate evaluator scenario can supply another exact target.
+    if baseline_mode and target_dependencies is not None:
+        raise OracleFailure("BASELINE_TARGET_OVERRIDE_FORBIDDEN")
+    wanted = (CHALK_BASELINE if baseline_mode else
+              CHALK_TARGET if target_dependencies is None else target_dependencies)
+    if wanted not in (CHALK_BASELINE, CHALK_TARGET,
+                      {"chalk": "6.0.0", "is-number": "7.0.0"}):
+        raise OracleFailure("UNSUPPORTED_PUBLIC_CHALK_TARGET")
     if current.get("dependencies") != wanted:
         raise OracleFailure("CHALK_TARGET_OR_EXCLUSION_VIOLATION")
     baseline_lock = read_json(baseline / "package-lock.json")
@@ -359,7 +368,8 @@ def _chalk_oracle_env(root: pathlib.Path) -> dict[str, str]:
 
 
 def verify_chalk_candidate(baseline: pathlib.Path, candidate: pathlib.Path,
-                           *, baseline_mode: bool = False) -> dict[str, Any]:
+                           *, baseline_mode: bool = False,
+                           target_dependencies: dict[str, str] | None = None) -> dict[str, Any]:
     """Independent real npm/build/test/runtime replay on a separate working copy.
 
     If version-only install succeeds but runtime/build/test fail, retain the
@@ -372,7 +382,9 @@ def verify_chalk_candidate(baseline: pathlib.Path, candidate: pathlib.Path,
         "authority": "INDEPENDENT_PUBLIC_BREAKING_API_ORACLE_NOT_MCP",
     }
     try:
-        frozen = chalk_static_contract(baseline, candidate, baseline_mode=baseline_mode)
+        frozen = chalk_static_contract(
+            baseline, candidate, baseline_mode=baseline_mode,
+            target_dependencies=target_dependencies)
         report["checks"]["frozenPolicy"] = "PASS"
         report["frozenSourceCount"] = len(frozen)
         with tempfile.TemporaryDirectory(prefix="deploom-chalk-oracle-") as td:
