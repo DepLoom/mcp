@@ -16,6 +16,7 @@ additive fields; existing planning-only statuses retain their meaning.
 | `mutable_packages` | `null` | `null` permits all selected declarations to move; `[]` permits none. Packages outside the set remain constraints and remain in health accounting. This is different from `exclude`. |
 | `approved_version_lines` | `null` | Map package names to allowed nonnegative integer major numbers. For the latest-compatible objective, an absent entry limits new candidates to the current major. An explicit empty array permits no new major; the current assignment remains available as a constraint. |
 | `required_packages` | `null` | Optional user-required movement, forwarded as the existing Core legacy `policies: {package: "required"}`. Each name must be mutable and not excluded. **Requires a change but does not specify an exact version.** An unspecified package remains governed by normal policy; it is not implicitly required. |
+| `exact_targets` | `null` | Map of user-authorized **exact stable versions**, e.g. `{"chalk":"5.3.0"}`. Requires `objective="explicit-version-targets"` and Core decisionContract V2. Every target must be mutable, not excluded, and within approved major lines. Planner solves against the specific version; a different version is never a successful substitute. A source `package.json` exact declaration describes the installed baseline, not an immutable target for an authorized upgrade. |
 | `draft_max_candidates` | `3` | Positive integer in `1..128` controlling the Core security-evidence candidate search. It is not the static solver's domain limit and is independent of the deadline. |
 | `previous_evidence_digest` | `null` | Optional lowercase SHA-256 from a previous response, for diagnosing unchanged published evidence. It is not a server-side cache key. |
 
@@ -39,16 +40,34 @@ health-scope exclusion; `mutable_packages=["name"]` keeps other packages in
 compatibility context and immutable, whereas `exclude` removes them from
 health scope.
 
+The exact objective uses an **opt-in V2 decision contract** with
+`decisionContract.exactTargets`. Existing V1 requests keep their serialized
+contract and defaults unchanged. The Core registry, peer/engine and hard
+source/permission scope remain authoritative; an accepted exact target
+continues to have `PLANNING_ONLY / NOT_VERIFIED` authority. The model must
+not claim installation, OSV verification or working JavaScript APIs from a
+planning-only blueprint. For a real Chalk 4.1.2→5.3.0 migration, source
+adaption and an independent build/test/runtime oracle are mandatory.
+
 The compact response's optional `policy.requestedRequiredPackages` records
-what MCP forwarded; it **does not independently prove an installable exact
-assignment**. The normalized V1 `decisionContract` continues to specify
-major lines, NOT exact patch versions. For an explicitly requested version
-(e.g. a breaking API release), use existing `evaluate_assignment` to inspect
-the published-plan scope, then independently verify registry, peers, security,
-install/build/tests/runtime. An alternative verdict of `REPLAN_REQUIRED` or
-`REVIEW_REQUIRED` is not permission to claim `PROPOSED` or `VERIFIED`.
-New exact-version planning would require a separately designed/validated Core
-contract and tests, not mapping an exact version onto `approved_version_lines`.
+legacy required-movement intent, **not** an exact patch-version request. V1
+`decisionContract` specifies allowed major lines; exact stable targets use
+V2 `objective="explicit-version-targets"` with `exact_targets`. Core
+constrains the **final** Z3 assignment to the admitted registry version; an
+original exact `package.json` spec is source baseline evidence, not an
+immutable rule forbidding the authorized target.
+
+An exact `PROPOSED` target can nevertheless violate the separately applied
+health policy. In the public frozen Chalk 4.1.2→5.3.0 D1, a project-scoped
+`TARGET_POLICY_BLOCKED` with `lifecycle=ACTIVE_FINAL` is published at
+`#/targetAssessment/projects/d1-frozen-chalk`. Inspecting the unchanged
+published assignment using `evaluate_assignment` therefore returns
+`BLOCKED_BY_KNOWN_CONSTRAINTS` and a `PUBLISHED_PLAN_BLOCKER` check with
+evidence provenance. This is a genuine final policy finding, not a forbidden
+baseline version or a newly executed peer/engine solver. It does not erase the
+exact-version plan, but it forbids claiming policy success. Resolve the health
+policy conflict before execution; for any changed pinned assignment replan,
+and always verify actual security/peers/install/build/tests/runtime separately.
 
 `POLICY_SATISFIED` means the existing health objective is satisfied. It does not
 mean a dependency is the freshest compatible candidate. The latest-compatible
@@ -67,6 +86,36 @@ JSON pointers into the full Blueprint. Dependency rows retain their reason,
 evidence flags, declaration identity and next action inline.
 
 ### Exact-target assessment
+
+An opt-in V2 `explicit-version-targets` request also adds
+`summary.exactTargetPolicy` to the **ordinary installed-wheel
+`get_upgrade_plan` response**, without changing V1 or any Core semantics.
+It links `requestedExactTargets` with the Core-published
+`publishedAssignments` (current, requested, published target, row status,
+`declarationId`, `evidenceRef`). `allRequestedTargetsProposed=true` means only
+that every requested exact package has a matching `PROPOSED` row in a
+`DRAFT_READY` publication; it is **not** a new peer/registry/security proof.
+`finalHealthPolicy` quotes the same Core `postPlanGoal`, `postPlanLagOk`,
+`postPlanScopeTotal`, `postPlanPolicyRequired`, `postPlanPolicyShortfall`,
+`postPlanReserveShortfall`, and other available fields as
+`targetAssessment.aggregate`, plus the actually applied `minLagOkPct`.
+Missing Core values remain null rather than zero. `blockers` contain applicable
+published BLOCKER IDs, their original JSON pointers, scope/project and
+lifecycle; `totalBlockers` and `blockersClipped` identify limited projection.
+Project-level health failure must **not** be attributed to a particular package.
+
+The only supported per-package lag state here is
+`perPackageLagEvidence.availability="UNAVAILABLE_IN_PUBLISHED_BLUEPRINT"`:
+Core's public Blueprint exposes package `latest` but not version publication
+times or the actual lag-minimum comparison for each row. Do not invent them
+or read the D1 fixture internals from the product tool. The `readout` is
+derived solely from published rows and health assessment; it explains
+`PLANNING_ONLY/NOT_VERIFIED` and never supplies runtime verification.
+The separately investigated Chalk `6.0.0` case is **not** an automatic
+recommendation in normal MCP responses: proposing an alternative major with
+reliable user authority, peer/engine/security evidence would require a distinct
+Core-backed contract. For now, no silent target/major/scope change or
+`requiresAuthorization=false` alternative is emitted.
 
 `targetAssessment.scope="FINAL_PLANNED_ASSIGNMENT"` describes the exact chosen
 or retained versions, independently of current-version coverage. `aggregate`

@@ -20,8 +20,11 @@ class PilotContractTests(unittest.TestCase):
             self.assertFalse(result["cliInvoked"])
     def test_mcp_difference_is_config_only(self):
         p=Path("seed")
-        a=codex_command("codex",p,"FAKE","medium",None,None)
-        b=codex_command("codex",p,"FAKE","medium",Path("venv/python"),Path("mcp-state"))
+        a=codex_command("codex",p,"gpt-6.1-terra","medium",None,None)
+        b=codex_command("codex",p,"gpt-6.1-terra","medium",Path("venv/python"),Path("mcp-state"))
+        self.assertNotIn("--ignore-rules",a)
+        self.assertIn("--ignore-user-config",a)
+        self.assertEqual(a[-1],b[-1])
         self.assertEqual(a[-1],b[-1])
         self.assertNotIn("mcp_servers.deploom",str(a))
         self.assertIn("mcp_servers.deploom",str(b))
@@ -29,7 +32,7 @@ class PilotContractTests(unittest.TestCase):
         core={"ok":True,"authority":"PLANNING_ONLY","verificationStatus":"NOT_VERIFIED",
               "draftStatus":"DRAFT_READY","chalkStatus":"PROPOSED","chalkTarget":"5.3.0",
               "companionStatus":"NO_CHANGE","companionTarget":None}
-        self.assertEqual("EXACT_VERSION_OBJECTIVE_NOT_SUPPORTED_BY_V1",
+        self.assertEqual("EXACT_VERSION_OBJECTIVE_NOT_ECHOED",
             evaluate({"responses":[core]})["productGap"])
         self.assertEqual("NO_EXACT_CHALK_5_3_0_TARGET",
             evaluate({"responses":[dict(core,chalkTarget="5.6.2")]})["productGap"])
@@ -54,7 +57,7 @@ class PilotContractTests(unittest.TestCase):
         verdict=evaluate({"responses":[row]})
         self.assertEqual("NO_GO",verdict["gate"])
         self.assertTrue(verdict["incidentalTargetMatch"])
-        self.assertEqual("EXACT_VERSION_OBJECTIVE_NOT_SUPPORTED_BY_V1",
+        self.assertEqual("EXACT_VERSION_OBJECTIVE_NOT_ECHOED",
                          verdict["productGap"])
 
 

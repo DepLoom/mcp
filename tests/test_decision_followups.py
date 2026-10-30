@@ -118,6 +118,53 @@ class FollowupContractTests(unittest.TestCase):
         self.assertFalse(result["installedTreeVerified"])
         self.assertEqual(0, result["decision"]["changedDeclarationsFromPublishedPlan"])
 
+
+    def _use_v2_exact_router(self):
+        # package.json declares 1.0.0 exactly: source baseline, not a pin
+        # against a permitted explicit-version upgrade to 2.0.0.
+        self.bp["dependencies"][0]["requestedSpec"] = "1.0.0"
+        self.bp["policy"]["decisionContract"] = {
+            "version": 2, "targetMode": "pinned",
+            "objective": "explicit-version-targets",
+            "mutablePackages": ["router"],
+            "approvedVersionLines": {"router": [2]},
+            "exactTargets": {"router": "2.0.0"},
+        }
+
+    def test_v2_published_exact_target_allows_source_baseline(self):
+        self._use_v2_exact_router()
+        self.publish()
+        result = self.evaluate({"router": "2.0.0"})
+        self.assertEqual("MATCHES_PUBLISHED_PLAN", result["verdict"], result)
+        self.assertEqual([], result["checks"], result)
+        self.assertEqual("UNKNOWN", result["compatibility"])
+        self.assertEqual("NOT_VERIFIED", result["verificationStatus"])
+
+    def test_v2_exact_target_retains_real_final_policy_blocker_and_provenance(self):
+        self._use_v2_exact_router()
+        for health in (self.bp["projections"], self.bp["perProject"]["fixture"]):
+            health["postPlanGoal"] = "blocked"
+            health["postPlanPolicyShortfall"] = 1
+        self.publish()
+        result = self.evaluate({"router": "2.0.0"})
+        self.assertEqual("BLOCKED_BY_KNOWN_CONSTRAINTS", result["verdict"], result)
+        blockers = [x for x in result["checks"] if x["code"] == "PUBLISHED_PLAN_BLOCKER"]
+        self.assertEqual(1, len(blockers), result)
+        self.assertEqual("TARGET_POLICY_BLOCKED", blockers[0]["evidenceCode"])
+        self.assertEqual("ACTIVE_FINAL", blockers[0]["lifecycle"])
+        self.assertEqual("project", blockers[0]["scope"])
+        self.assertEqual("fixture", blockers[0]["project"])
+        self.assertEqual("#/targetAssessment/projects/fixture", blockers[0]["evidenceRef"])
+        self.assertEqual("UNKNOWN", result["compatibility"])
+
+    def test_v2_negative_immutable_dependency_must_not_change(self):
+        self._use_v2_exact_router()
+        self.publish()
+        result = self.evaluate({"router": "2.0.0", "adapter": "1.0.1"})
+        self.assertEqual("BLOCKED_BY_KNOWN_CONSTRAINTS", result["verdict"], result)
+        self.assertIn("IMMUTABLE_PACKAGE_CHANGED",
+                      {x["code"] for x in result["checks"]})
+
     def test_advisory_same_major_candidate_requires_independent_checks(self):
         result = self.evaluate({"adapter": "1.0.7"})
         self.assertEqual("REVIEW_REQUIRED", result["verdict"], result)

@@ -241,10 +241,17 @@ def main() -> int:
                         and not any(x.get("noTargetDiagnosticCode")
                                     for x in (source_row, full_row, compact_row))
                     )
+                    provenance = full_blueprint.get("runtimeProvenance") or {}
+                    expected = (provenance.get("expectedRelease") or {}).get("core") or {}
+                    # No hardcoded historical PR head. The installed package
+                    # must attest its ACTUAL bundled Core bytes against the
+                    # exact checked-in release manifest at this effective HEAD.
                     core_release_verified = (
-                        core_pin == "49232ab510da8fa854f36d84a639f3db28ab363c"
-                        and (full_blueprint.get("runtimeProvenance") or {}).get("core", {})
-                            .get("matchesExpectedRelease") is True
+                        isinstance(core_pin, str) and len(core_pin) == 40
+                        and expected.get("revision") == core_pin
+                        and expected.get("contentSha256")
+                            == release.get("core", {}).get("contentSha256")
+                        and (provenance.get("core") or {}).get("matchesExpectedRelease") is True
                     )
                     passed = (
                         registry_projection_confirmed and core_release_verified and

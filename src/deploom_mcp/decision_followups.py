@@ -277,7 +277,8 @@ def evaluate_assignment(*, blueprint_path: str, assignment: dict[str, str],
                 if item.get("severity") == "BLOCKER":
                     checks.append({"code": "PUBLISHED_PLAN_BLOCKER", "severity": "BLOCKER",
                                    "evidenceCode": item.get("code"), "evidenceRef": item.get("evidenceRef"),
-                                   "package": item.get("package"), "scope": item.get("scope")})
+                                   "package": item.get("package"), "scope": item.get("scope"),
+                                   "project": item.get("project"), "lifecycle": item.get("lifecycle")})
                     hard = True
         elif any(x.get("severity") == "BLOCKER" for x in evidence):
             checks.append({"code": "PUBLISHED_BLOCKERS_REQUIRE_REASSESSMENT", "severity": "REVIEW",
