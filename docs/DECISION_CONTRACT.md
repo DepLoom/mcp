@@ -50,15 +50,24 @@ planning-only blueprint. For a real Chalk 4.1.2→5.3.0 migration, source
 adaption and an independent build/test/runtime oracle are mandatory.
 
 The compact response's optional `policy.requestedRequiredPackages` records
-what MCP forwarded; it **does not independently prove an installable exact
-assignment**. The normalized V1 `decisionContract` continues to specify
-major lines, NOT exact patch versions. For an explicitly requested version
-(e.g. a breaking API release), use existing `evaluate_assignment` to inspect
-the published-plan scope, then independently verify registry, peers, security,
-install/build/tests/runtime. An alternative verdict of `REPLAN_REQUIRED` or
-`REVIEW_REQUIRED` is not permission to claim `PROPOSED` or `VERIFIED`.
-New exact-version planning would require a separately designed/validated Core
-contract and tests, not mapping an exact version onto `approved_version_lines`.
+legacy required-movement intent, **not** an exact patch-version request. V1
+`decisionContract` specifies allowed major lines; exact stable targets use
+V2 `objective="explicit-version-targets"` with `exact_targets`. Core
+constrains the **final** Z3 assignment to the admitted registry version; an
+original exact `package.json` spec is source baseline evidence, not an
+immutable rule forbidding the authorized target.
+
+An exact `PROPOSED` target can nevertheless violate the separately applied
+health policy. In the public frozen Chalk 4.1.2→5.3.0 D1, a project-scoped
+`TARGET_POLICY_BLOCKED` with `lifecycle=ACTIVE_FINAL` is published at
+`#/targetAssessment/projects/d1-frozen-chalk`. Inspecting the unchanged
+published assignment using `evaluate_assignment` therefore returns
+`BLOCKED_BY_KNOWN_CONSTRAINTS` and a `PUBLISHED_PLAN_BLOCKER` check with
+evidence provenance. This is a genuine final policy finding, not a forbidden
+baseline version or a newly executed peer/engine solver. It does not erase the
+exact-version plan, but it forbids claiming policy success. Resolve the health
+policy conflict before execution; for any changed pinned assignment replan,
+and always verify actual security/peers/install/build/tests/runtime separately.
 
 `POLICY_SATISFIED` means the existing health objective is satisfied. It does not
 mean a dependency is the freshest compatible candidate. The latest-compatible

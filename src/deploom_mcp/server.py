@@ -894,7 +894,7 @@ async def get_upgrade_plan_tool(
         "Inspect an exact-version candidate assignment against a previously "
         "published full Upgrade Blueprint. Checks recorded decision authority, "
         "mutable/excluded declarations, approved major lines, source drift, "
-        "known plan blockers, and whether pinned targets require replanning. "
+        "known published blockers (including final health-policy failures even when a version is PROPOSED), and pinned replan requirements. "
         "Keys may be package names or declarationIds; unspecified rows keep the "
         "published selected/current version. This is NOT a fresh Z3 solver, "
         "peer registry check, installed-tree audit or security/policy certification. "

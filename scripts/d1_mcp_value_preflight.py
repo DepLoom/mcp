@@ -286,6 +286,29 @@ async def run():
       except Exception:
        assessment={"status":"CALL_FAILED"}
      responses[-1]["explicitVersionAssessment"]=assessment
+     # Sanitized public frozen fixture health counters; do not confuse
+     # exact-solver feasibility with final policy attainment.
+     health=(response.get("targetAssessment") or {}).get("aggregate") or {}
+     keys=("postPlanGoal","postPlanTargetLevel","postPlanPolicyShortfall",
+       "postPlanReserveShortfall","postPlanLagOk","postPlanLagOkPct",
+       "postPlanPolicyRequired","postPlanScopeTotal","postPlanSecurityUnknown",
+       "postPlanSecurityTotal","postPlanCritical","postPlanHigh",
+       "postPlanPolicyMaxCritical","postPlanPolicyMaxHigh")
+     safe_health={}
+     for key in keys:
+      value=health.get(key)
+      if key=="postPlanGoal" and value in ("feasible","blocked","unknown"):
+       safe_health[key]=value
+      elif key=="postPlanTargetLevel" and value in ("yellow","green","mixed"):
+       safe_health[key]=value
+      elif key not in ("postPlanGoal","postPlanTargetLevel") and type(value) in (int,float) and 0<=value<=1000000:
+       safe_health[key]=value
+     responses[-1]["finalTargetHealth"]=safe_health
+     applied=response.get("policy") or {}
+     lag=applied.get("minLagOkPct")
+     responses[-1]["appliedHealthPolicy"]={
+       "targetLevel":applied.get("targetLevel") if applied.get("targetLevel") in ("yellow","green","mixed") else None,
+       "minLagOkPct":lag if type(lag) in (int,float) and 0<=lag<=100 else None}
     except Exception as exc:
      # Never publish the exception text: it can contain paths or URLs.
      kind=type(exc).__name__
@@ -446,6 +469,7 @@ def main() -> int:
     parser.add_argument("--require-go",action="store_true")
     args=parser.parse_args()
     report={"gate":"NO_GO","productGap":"INFRASTRUCTURE_PRECHECK_FAILED",
+            "gateScope":"EXACT_VERSION_PLANNING_FEASIBILITY_ONLY",
             "modelCalls":0,"authority":"PLANNING_ONLY",
             "frozenExpectedSha256":EXPECTED_SOURCE_SHA}
     start=time.monotonic()
