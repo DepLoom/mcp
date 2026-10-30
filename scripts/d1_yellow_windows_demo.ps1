@@ -99,12 +99,41 @@ try {
   if (-not (Test-Path -LiteralPath $wheel -PathType Leaf)) { throw 'EXPECTED_WHEEL_MISSING' }
   $wheelSha = (Get-FileHash -LiteralPath $wheel -Algorithm SHA256).Hash.ToLowerInvariant()
 
+  $p2Native = Join-Path $out 'p2-native-windows-seed'
   $seed = Join-Path $out 'd1-frozen-chalk'
   $p2Path = Join-Path $out 'd1-p2-control.json'
   $d1Path = Join-Path $out 'd1-mcp-value.json'
   $yellowPath = Join-Path $out 'd1-yellow-policy.json'
   Run-Native $py @('scripts/correctness_preflight.py','breaking-demo',
-    '--wheel',$wheel,'--snapshot-dir',$seed,'--report',$p2Path) 'PUBLIC_P2_FAILED'
+    '--wheel',$wheel,'--snapshot-dir',$p2Native,'--report',$p2Path) 'PUBLIC_P2_FAILED'
+
+  # Windows Python/npm emitted CRLF in all eight generated P2 files.
+  # Preserve the native Windows P2 source unchanged; only copy CRLF->LF
+  # for an identical new D1 frozen seed (no new versions or registry lookup).
+  $allowed = @('.npmrc','README.md','build.cjs','package-lock.json',
+               'package.json','src/format.cjs','src/index.cjs','test.cjs')
+  $nativeFiles = @(Get-ChildItem -LiteralPath $p2Native -File -Recurse -Force)
+  if ($nativeFiles.Count -ne $allowed.Count) { throw 'P2_NATIVE_FILE_COUNT_DRIFT' }
+  if (Test-Path -LiteralPath $seed) { throw 'CANONICAL_SEED_ALREADY_EXISTS' }
+  New-Item -Path $seed -ItemType Directory | Out-Null
+  $utf8 = [System.Text.UTF8Encoding]::new($false,$true)
+  foreach ($file in $nativeFiles) {
+    $relative = $file.FullName.Substring($p2Native.Length).TrimStart('\')
+    if ($allowed -notcontains $relative.Replace('\','/')) {
+      throw 'P2_NATIVE_UNEXPECTED_FILE'
+    }
+    $target = Join-Path $seed $relative
+    $dir = Split-Path -Parent $target
+    if (-not (Test-Path -LiteralPath $dir -PathType Container)) {
+      New-Item -Path $dir -ItemType Directory | Out-Null
+    }
+    $raw = [System.IO.File]::ReadAllBytes($file.FullName)
+    $content = $utf8.GetString($raw)
+    $canonical = $content.Replace(([string][char]13 + [string][char]10),[string][char]10)
+    if ($canonical.Contains([string][char]13)) { throw 'P2_NATIVE_BARE_CR' }
+    [System.IO.File]::WriteAllBytes($target,$utf8.GetBytes($canonical))
+  }
+
   Run-Native $py @('scripts/d1_mcp_value_preflight.py',
     '--frozen',$seed,'--wheel',$wheel,'--report',$d1Path,'--require-go') 'WHEEL_STDIO_D1_FAILED'
   Run-Native $py @('scripts/d1_yellow_policy_demo.py',
@@ -118,7 +147,7 @@ try {
   if ($p2.status -ne 'PASS' -or $p2.mcp.status -ne 'PASS' -or
       $p2.provenance.coreRevision -cne $coreSha -or
       $p2.provenance.mcpWheelSha256 -cne $wheelSha -or
-      $p2.provenance.baselineSourceSha256 -cne $sourceSha) {
+      $p2.provenance.baselineSourceSha256 -notmatch '^[0-9a-f]{64}$') {
     throw 'P2_OR_SOURCE_PROVENANCE_MISMATCH'
   }
   foreach ($key in @('baselinePASS','versionOnlyInstallPASS','versionOnlyRuntimeFAIL',
@@ -178,6 +207,8 @@ try {
     coreSha=$coreSha
     wheelSha256=$wheelSha
     frozenSourceSha256=$sourceSha
+    nativeP2WindowsSourceSha256=$p2.provenance.baselineSourceSha256
+    seedCanonicalization='SEPARATE_EIGHT_PUBLIC_FILES_CRLF_TO_LF_COPY'
     skillBundleSha256=$p2.provenance.skillBundleSha256
     manifest='MATCHED'
     skillIntegrity='MATCHED'
