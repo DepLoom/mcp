@@ -318,6 +318,12 @@ def chalk_static_contract(baseline: pathlib.Path, candidate: pathlib.Path,
         entry = packages.get("node_modules/" + name)
         if not isinstance(entry, dict) or entry.get("version") != version:
             raise OracleFailure("CHALK_LOCK_PACKAGE_VERSION")
+    if not baseline_mode and target_dependencies is not None:
+        # Exact separate Chalk6 task keeps the entire companion lock identity,
+        # not merely its printed 7.0.0 version. P2 default is unchanged.
+        kept = "node_modules/is-number"
+        if packages.get(kept) != (baseline_lock.get("packages") or {}).get(kept):
+            raise OracleFailure("IMMUTABLE_LOCK_ENTRY_CHANGED")
     # Reject credential/query/path aliases even if npm itself would accept them.
     for key, entry in packages.items():
         if key == "":
