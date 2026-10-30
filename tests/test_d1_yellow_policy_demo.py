@@ -83,6 +83,11 @@ class YellowPolicyNegativeTests(unittest.TestCase):
         self.assertEqual(
             ["blocked","blocked","feasible"],
             [x["finalPolicyGoal"] for x in report["scenarios"]])
+        self.assertFalse(report["scenarios"][0]["requiresAuthorization"])
+        self.assertTrue(report["scenarios"][1]["requiresAuthorization"])
+        self.assertTrue(report["scenarios"][2]["requiresAuthorization"])
+        self.assertEqual("SEPARATE_PUBLIC_EXPERIMENT_NOT_ORIGINAL_USER_TARGET",
+                         report["scenarios"][2]["authorizationScope"])
 
     def test_immutable_is_number_cannot_disappear_from_denominator(self):
         data=synthetic_receipt()

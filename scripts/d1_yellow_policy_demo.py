@@ -151,7 +151,12 @@ def check_policy_receipt(data: dict, wheel_sha: str, seed_sha: str) -> dict:
         observed.append({"id": sid, "exactTarget": target, "approvedMajors": approved,
             "finalPolicyGoal": goal, "lagOk": count, "scopeTotal": 2,
             "assignment": expected_verdict, "chalkLagOk": should_pass,
-            "isNumberLagOk": True, "claim": "PLANNING_ONLY_NOT_VERIFIED"})
+            "isNumberLagOk": True,
+            "requiresAuthorization": sid != "ORIGINAL_EXACT_5_3_0",
+            "authorizationScope": (
+                "SEPARATE_PUBLIC_EXPERIMENT_NOT_ORIGINAL_USER_TARGET"
+                if sid != "ORIGINAL_EXACT_5_3_0" else "ORIGINAL_USER_AUTHORIZED_EXACT"),
+            "claim": "PLANNING_ONLY_NOT_VERIFIED"})
     return {"registrySnapshots": snapshots, "scenarios": observed,
             "sourceSha256": seed_sha, "wheelSha256": wheel_sha,
             "coreRevision": EXPECTED_CORE_SHA}
