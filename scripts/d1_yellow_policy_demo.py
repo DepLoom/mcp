@@ -238,6 +238,18 @@ def runtime_oracle(frozen: Path) -> dict:
             result["checks"][label]=_command(argv,verified,env)
             require(result["checks"][label], "INDEPENDENT_"+label.upper()+"_FAILED")
         require(source_files(verified) == frozen_verified, "INDEPENDENT_TEST_MUTATED_SOURCE")
+        # Real positive regression for the NEW A/B scorer, on the SAME
+        # disposable evaluator-authored candidate. It reruns P2's independent
+        # static/lock provenance and clean npm/build/test/multi-input runtime.
+        # Neither the scorer nor this reference source enters the agent seed.
+        from d1_chalk6_scorer import verify_chalk6_frozen
+        scored=verify_chalk6_frozen(frozen,candidate,EXPECTED_SOURCE_SHA)
+        result["chalk6BenchmarkScorer"]={
+            "status":scored.get("status"),"reason":scored.get("reason"),
+            "authority":"INDEPENDENT_EVALUATOR_NOT_AGENT_CLAIM",
+            "target":"6.0.0","isNumberImmutable":"7.0.0"}
+        require(scored.get("status")=="PASS",
+                "CHALK6_BENCHMARK_SCORER_POSITIVE_FAILED")
         result["installed"]={"chalk":"6.0.0","is-number":"7.0.0"}
         result["status"]="PASS"
     return result
