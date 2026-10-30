@@ -42,6 +42,20 @@ def synthetic_receipt():
                 "compatibility":"UNKNOWN",
                 "publishedBlockerProvenance": [] if ok else [
                     {"code":"TARGET_POLICY_BLOCKED","lifecycle":"ACTIVE_FINAL"}]},
+            "ordinaryPlanPolicy": {
+                "requestedExactTarget":target,"publishedTarget":target,
+                "allRequestedTargetsProposed":True,
+                "authority":"PLANNING_ONLY","verificationStatus":"NOT_VERIFIED",
+                "readoutHasPlanningBoundary":True,
+                "perPackageLagEvidence":{
+                    "availability":"UNAVAILABLE_IN_PUBLISHED_BLUEPRINT"},
+                "totalBlockers":0 if ok else 1,
+                "blockers":[] if ok else [
+                    {"code":"TARGET_POLICY_BLOCKED","lifecycle":"ACTIVE_FINAL"}],
+                "finalHealthPolicy":{
+                    "postPlanGoal":goal,"postPlanLagOk":lag,
+                    "postPlanScopeTotal":2,"postPlanPolicyRequired":2,
+                    "postPlanPolicyShortfall":2-lag,"appliedMinLagOkPct":80}},
         })
     return {
         "modelCalls": 0, "coreRevision": EXPECTED_CORE_SHA,
