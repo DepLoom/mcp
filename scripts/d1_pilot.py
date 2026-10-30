@@ -137,7 +137,9 @@ class UsageCollector:
                 all(x is not None for x in v) else None)
             for k, v in self.values.items()
         }
-        require_usage = all(values[k] is not None for k in ("input_tokens","output_tokens"))
+        require_usage = all(
+            type(values[k]) is int and values[k] > 0
+            for k in ("input_tokens","output_tokens"))
         valid = (not self.failed and self.malformed == 0 and self.turns == 1
                  and len(self.thread_ids) == 1 and len(self.items) <= self.max_tools
                  and require_usage
