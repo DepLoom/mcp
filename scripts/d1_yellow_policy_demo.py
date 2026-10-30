@@ -195,8 +195,8 @@ def runtime_oracle(frozen: Path) -> dict:
         commands=(
             ("cleanInstall", npm+["ci","--ignore-scripts","--no-audit","--no-fund",
                                   "--registry",REGISTRY]),
-            ("build",npm+["run","build"]),
-            ("test",npm+["test"]),
+            ("build",npm+["run","build","--ignore-scripts=false"]),
+            ("test",npm+["test","--ignore-scripts=false"]),
             ("runtimeMultiInput",["node","-e",CHALK_RUNTIME_ORACLE]),
         )
         for label,argv in commands:

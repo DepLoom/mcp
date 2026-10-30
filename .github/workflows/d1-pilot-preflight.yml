@@ -5,6 +5,8 @@ on:
     paths:
       - 'scripts/d1_pilot.py'
       - 'scripts/d1_mcp_value_preflight.py'
+      - 'scripts/d1_yellow_policy_demo.py'
+      - 'tests/test_d1_yellow_policy_demo.py'
       - 'tests/test_d1_pilot.py'
       - 'tests/test_required_intent_bridge.py'
       - 'src/deploom_mcp/server.py'
@@ -60,6 +62,15 @@ jobs:
           --wheel dist/deploom_mcp-0.2.0-py3-none-any.whl
           --report "${{ runner.temp }}/d1-mcp-value.json"
           --require-go
+      - name: Yellow per-row policy regression (offline, no model)
+        run: python -m unittest discover -s tests -p test_d1_yellow_policy_demo.py -v
+      - name: Separate Yellow-compliant Chalk 6 runtime oracle (NOT original P2)
+        run: >-
+          python scripts/d1_yellow_policy_demo.py
+          --frozen "${{ runner.temp }}/d1-frozen-chalk"
+          --wheel dist/deploom_mcp-0.2.0-py3-none-any.whl
+          --receipt "${{ runner.temp }}/d1-mcp-value.json"
+          --report "${{ runner.temp }}/d1-yellow-policy.json"
       - name: CLI native event parsing and explicitly fake dry run
         run: |
           python -m unittest discover -s tests -p test_d1_pilot.py -v
@@ -86,10 +97,12 @@ jobs:
           path: |
             ${{ runner.temp }}/d1-p2-control.json
             ${{ runner.temp }}/d1-mcp-value.json
+            ${{ runner.temp }}/d1-yellow-policy.json
             ${{ runner.temp }}/d1-fake/
             ${{ runner.temp }}/d1-frozen-chalk/
             scripts/d1_pilot.py
             scripts/d1_mcp_value_preflight.py
+            scripts/d1_yellow_policy_demo.py
             release-manifest.json
             docs/DECISION_CONTRACT.md
             docs/D1_PILOT_HANDOFF.md
