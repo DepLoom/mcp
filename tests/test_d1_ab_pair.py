@@ -169,6 +169,12 @@ class LedgerTests(unittest.TestCase):
             stored=json.loads((target/"session-ledger.json").read_text())
             self.assertEqual(stored["sessions"]["A"]["state"],"RUNNING")
             self.assertIsNone(stored["sessions"]["A"]["nativeThreadId"])
+            x.record_native_thread("A","synthetic-thread-actual")
+            stored=json.loads((target/"session-ledger.json").read_text())
+            self.assertEqual(stored["sessions"]["A"]["nativeThreadId"],
+                             "synthetic-thread-actual")
+            with self.assertRaisesRegex(RuntimeError,"NATIVE_THREAD_ID_CONFLICT"):
+                x.record_native_thread("A","synthetic-thread-changed")
             with self.assertRaisesRegex(RuntimeError,"RUN_LEDGER_EXISTS_NO_RETRY"):
                 Ledger(target,MODEL,EFFORT,EXPECTED_SEED_SHA256)
             with self.assertRaisesRegex(RuntimeError,"UNSAFE_LEDGER_STATE_TRANSITION"):
