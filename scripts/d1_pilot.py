@@ -226,7 +226,14 @@ def clone_seed(seed: Path, dst: Path, expected: str) -> None:
     if expected != EXPECTED_SEED_SHA256 or not source_is_safe(seed):
         raise RuntimeError("FROZEN_SEED_NOT_VERIFIED")
     # No evaluator, reference solution, agent skills or hidden config copied.
-    shutil.copytree(seed, dst)
+    dst.mkdir(parents=True, exist_ok=False)
+    for relative in sorted(FROZEN_FILENAMES):
+        src = seed / relative
+        if not src.is_file() or src.is_symlink():
+            raise RuntimeError("UNSAFE_FROZEN_SEED_FILE")
+        target = dst / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, target)
     if not source_is_safe(dst):
         raise RuntimeError("CLONED_SEED_NOT_IDENTICAL")
 
