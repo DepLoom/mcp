@@ -346,6 +346,14 @@ class Ledger:
             "UNKNOWN" if state == "UNKNOWN" else self.doc["runState"])
         self.write()
 
+    def record_native_thread(self, arm: str, native_id: str):
+        item=self.doc["sessions"][arm]
+        if (item["state"]!="RUNNING" or item["nativeThreadId"] not in (None,native_id)
+            or not isinstance(native_id,str)):
+            raise RuntimeError("NATIVE_THREAD_ID_CONFLICT_OR_UNSAFE_STATE")
+        item["nativeThreadId"]=native_id
+        self.write()
+
     def finish(self, status: str):
         if status not in ("COMPLETE","UNKNOWN","ABORTED"):
             raise RuntimeError("UNSAFE_FINAL_LEDGER_STATUS")
@@ -354,7 +362,8 @@ class Ledger:
 
 
 def execute(argv: list[str], cwd: Path, env: dict, wall_limit: int, tools_limit: int,
-            max_input: int, max_output: int, rate=None, max_api_estimate=None) -> dict:
+            max_input: int, max_output: int, rate=None, max_api_estimate=None,
+            on_native_thread=None) -> dict:
     if rate is not None or max_api_estimate is not None:
         raise RuntimeError("NATIVE_BILLING_UNAVAILABLE_NO_API_ESTIMATES")
     start = time.monotonic()
@@ -389,6 +398,10 @@ def execute(argv: list[str], cwd: Path, env: dict, wall_limit: int, tools_limit:
                 if not isinstance(event,dict) or not collector.ingest(event):
                     stop("UNSAFE_NATIVE_EVENT_OR_TOOL_BUDGET")
                     break
+                if event.get("type")=="thread.started" and on_native_thread is not None:
+                    native=collector.result()["nativeThreadId"]
+                    if native is not None:
+                        on_native_thread(native)
                 tokens=collector.result()["nativeUsage"]
                 if ((tokens["input_tokens"] is not None and tokens["input_tokens"]>max_input)
                     or (tokens["output_tokens"] is not None and tokens["output_tokens"]>max_output)):
@@ -640,7 +653,8 @@ def launch(args) -> dict:
                 ledger.mark(arm,"RUNNING",startMonotonicUnknown=True)
                 try:
                     metrics=execute(cmd,workspace,env,args.wall,args.tools,
-                                    args.input_cap,args.output_cap)
+                                    args.input_cap,args.output_cap,
+                                    on_native_thread=lambda tid: ledger.record_native_thread(arm,tid))
                 except BaseException:
                     ledger.mark(arm,"UNKNOWN",reason="PROCESS_OUTCOME_UNCERTAIN")
                     raise
