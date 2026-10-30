@@ -6,6 +6,7 @@ on:
       - 'scripts/d1_pilot.py'
       - 'scripts/d1_chalk6_scorer.py'
       - 'scripts/d1_owned_process.py'
+      - 'scripts/correctness_oracle.py'
       - 'tests/test_d1_ab_pair.py'
       - 'scripts/d1_mcp_value_preflight.py'
       - 'scripts/d1_yellow_policy_demo.py'
