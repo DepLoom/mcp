@@ -134,6 +134,16 @@ class NativeEventTests(unittest.TestCase):
             self.assertIn(flag,a)
         self.assertEqual(a.count("--disable"),3)
 
+    def test_public_registry_403_is_no_go_without_proxy_changes(self):
+        import urllib.error
+        from d1_pilot import probe_public_network
+        with patch("urllib.request.urlopen",
+                   side_effect=urllib.error.HTTPError(
+                       "https://registry.npmjs.org/chalk/6.0.0",
+                       403, "Forbidden", {}, None)):
+            with self.assertRaisesRegex(RuntimeError,"NPM_REGISTRY_UNAVAILABLE"):
+                probe_public_network()
+
     def test_wrong_model_and_overlarge_budgets_rejected(self):
         from types import SimpleNamespace
         base=dict(wall=600,tools=40,input_cap=20000,output_cap=4000,
