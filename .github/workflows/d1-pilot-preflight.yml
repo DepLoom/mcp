@@ -138,7 +138,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: d1-yellow-windows-ps51-evidence
-          path: ${{ runner.temp }}/deploom-d1-windows/
+          path: |
+            ${{ runner.temp }}/deploom-d1-windows/d1-p2-control.json
+            ${{ runner.temp }}/deploom-d1-windows/d1-mcp-value.json
+            ${{ runner.temp }}/deploom-d1-windows/d1-yellow-policy.json
+            ${{ runner.temp }}/deploom-d1-windows/d1-windows-demo-summary.json
+            ${{ runner.temp }}/deploom-d1-windows/d1-frozen-chalk/
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 7
