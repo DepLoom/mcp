@@ -78,7 +78,9 @@ try {
   Run-Native $BootstrapPython @('-m','venv',$venv) 'VENV_CREATE_FAILED'
   $py = Join-Path $venv 'Scripts\python.exe'
   if (-not (Test-Path -LiteralPath $py -PathType Leaf)) { throw 'VENV_PYTHON_MISSING' }
-  $ver = @(& $py -c 'import sys;print("%s.%s" % sys.version_info[:2])')
+  # PowerShell 5.1/Win32 strips embedded double quotes in python -c.
+  # Use a quote-free expression so the observed interpreter version is stable.
+  $ver = @(& $py -c 'import sys;print(sys.version_info.major,sys.version_info.minor,sep=chr(46))')
   Check-Exit 'PYTHON_VERSION'
   if ($ver.Count -ne 1 -or $ver[0].Trim() -cne '3.12') { throw 'REQUIRES_PYTHON_3_12' }
   $node = @(& node --version)
