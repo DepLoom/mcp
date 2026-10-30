@@ -191,7 +191,8 @@ class CheckerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             seed,wheel,(p2,d1,yellow)=make_preflight_fixture(Path(td))
             data=json.loads(d1.read_text())
-            data["requests"][5]["chalkTarget"]="5.3.0" # forged alternate
+            next(r for r in data["requests"] if r["scenarioId"] ==
+                 "SEPARATE_CURRENT_POLICY_MIN_6_0_0")["chalkTarget"]="5.3.0"
             d1.write_text(json.dumps(data))
             with patch("d1_pilot.source_is_safe",return_value=True):
                 with self.assertRaisesRegex(RuntimeError,"D1_SEPARATE_CHALK6_POLICY"):
