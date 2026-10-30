@@ -140,6 +140,13 @@ class OwnedProcess:
                 self.proc.wait(timeout=3)
             except subprocess.TimeoutExpired:
                 raise OwnedProcessError("OWNED_PROCESS_TREE_NOT_STOPPED")
+        if os.name != "nt":
+            # The root might exit on SIGTERM while a descendant ignores it.
+            # Kill ONLY the dedicated process group even after root exit.
+            try:
+                os.killpg(self.proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
     def close(self):
         if self.closed:
