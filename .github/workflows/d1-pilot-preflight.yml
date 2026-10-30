@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - 'scripts/d1_pilot.py'
+      - 'scripts/d1_chalk6_scorer.py'
+      - 'scripts/d1_owned_process.py'
+      - 'tests/test_d1_ab_pair.py'
       - 'scripts/d1_mcp_value_preflight.py'
       - 'scripts/d1_yellow_policy_demo.py'
       - 'scripts/d1_yellow_windows_demo.ps1'
@@ -76,6 +79,7 @@ jobs:
       - name: CLI native event parsing and explicitly fake dry run
         run: |
           python -m unittest discover -s tests -p test_d1_pilot.py -v
+          python -m unittest discover -s tests -p test_d1_ab_pair.py -v
           python -m unittest discover -s tests -p test_required_intent_bridge.py -v
           python scripts/d1_pilot.py dry-run --out "${{ runner.temp }}/d1-fake"
           python scripts/d1_pilot.py doctor
@@ -132,6 +136,13 @@ jobs:
         shell: powershell
         run: |
           & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\d1_yellow_windows_demo.ps1 -ExpectedMcpSha '${{ github.event.pull_request.head.sha || github.sha }}' -OutputDir (Join-Path $env:RUNNER_TEMP 'deploom-d1-windows')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: No-model A/B ledger, objective and owned-descendant regressions (Windows)
+        shell: powershell
+        run: |
+          python -m unittest discover -s tests -p test_d1_pilot.py -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m unittest discover -s tests -p test_d1_ab_pair.py -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Public-only Windows evidence and frozen input
         if: always()
