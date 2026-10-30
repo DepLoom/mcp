@@ -340,6 +340,51 @@ async def run():
      responses[-1]["appliedHealthPolicy"]={
        "targetLevel":applied.get("targetLevel") if applied.get("targetLevel") in ("yellow","green","mixed") else None,
        "minLagOkPct":lag if type(lag) in (int,float) and 0<=lag<=100 else None}
+     # Product evidence: this object comes from the ORDINARY packaged MCP
+     # get_upgrade_plan response, not a D1-only policy reimplementation.
+     if query.get("objective")=="explicit-version-targets" and response.get("ok") is True:
+      ordinary=(response.get("summary") or {}).get("exactTargetPolicy")
+      if not isinstance(ordinary,dict):
+       raise AssertionError("ORDINARY_EXACT_POLICY_SUMMARY_MISSING")
+      final=(ordinary.get("finalHealthPolicy") or {})
+      planned=(ordinary.get("publishedAssignments") or [])
+      if (ordinary.get("requestedExactTargets")!={"chalk":expected_target}
+          or ordinary.get("allRequestedTargetsProposed") is not True
+          or not any(a.get("package")=="chalk" and
+                a.get("publishedTarget")==expected_target and
+                a.get("rowStatus")=="PROPOSED" and
+                a.get("matchesExactTarget") is True for a in planned)
+          or ordinary.get("perPackageLagEvidence",{}).get("availability")
+             !="UNAVAILABLE_IN_PUBLISHED_BLUEPRINT"
+          or final.get("postPlanGoal")!=health.get("postPlanGoal")
+          or final.get("postPlanLagOk")!=health.get("postPlanLagOk")
+          or final.get("postPlanPolicyRequired")!=health.get("postPlanPolicyRequired")
+          or final.get("postPlanPolicyShortfall")!=health.get("postPlanPolicyShortfall")
+          or ordinary.get("totalBlockers")!=len(ordinary.get("blockers") or [])):
+       raise AssertionError("ORDINARY_EXACT_POLICY_SUMMARY_MISMATCH")
+      ordinary_blockers=[]
+      for b in ordinary.get("blockers") or []:
+       if b.get("code") not in ("TARGET_POLICY_BLOCKED","PEER_CONSTRAINT","PLANNER_BLOCKER"):
+        continue
+       ordinary_blockers.append({
+         k:b.get(k) for k in ("code","scope","package","lifecycle","evidenceRef")
+         if k in b})
+      responses[-1]["ordinaryPlanPolicy"]={
+       "requestedExactTarget":expected_target,
+       "publishedTarget":expected_target,
+       "allRequestedTargetsProposed":True,
+       "authority":status.get("authority"),
+       "verificationStatus":status.get("verificationStatus"),
+       "finalHealthPolicy":{k:final.get(k) for k in
+          ("postPlanGoal","postPlanLagOk","postPlanScopeTotal",
+           "postPlanPolicyRequired","postPlanPolicyShortfall","appliedMinLagOkPct")},
+       "blockers":ordinary_blockers,
+       "totalBlockers":ordinary.get("totalBlockers"),
+       "perPackageLagEvidence":ordinary.get("perPackageLagEvidence"),
+       "readoutHasPlanningBoundary":("PLANNING_ONLY / NOT_VERIFIED"
+                                    in (ordinary.get("readout") or "")),
+      }
+
     except Exception as exc:
      # Never publish the exception text: it can contain paths or URLs.
      kind=type(exc).__name__
