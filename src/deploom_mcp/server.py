@@ -376,6 +376,101 @@ def _result_from_planning(result, requested: Optional[BlueprintPolicy] = None) -
     return response
 
 
+def _exact_target_policy_summary(
+    blueprint: Dict[str, Any], status: Dict[str, Any],
+    assessment: Dict[str, Any], critical_evidence: List[Dict[str, Any]],
+    *, max_inline_rows: int, max_inline_evidence: int,
+) -> Optional[Dict[str, Any]]:
+    """Link the EXISTING exact target and final health facts, never re-solve.
+
+    This is a compact presentation of Core's published plan/targetAssessment,
+    not a new policy, compatibility decision, or alternative recommendation.
+    Row-specific lag minima/timestamps are NOT in the public Blueprint.
+    """
+    policy = blueprint.get("policy") or {}
+    contract = policy.get("decisionContract") or {}
+    if (contract.get("version") != 2
+            or contract.get("objective") != "explicit-version-targets"
+            or not isinstance(contract.get("exactTargets"), dict)
+            or not contract["exactTargets"]):
+        return None
+    requested = contract["exactTargets"]
+    selected = [r for r in (blueprint.get("dependencies") or [])
+                if isinstance(r, dict) and r.get("package") in requested]
+    matching = {
+        package for package in requested
+        if any(r.get("package") == package for r in selected)
+        and all(r.get("target") == requested[package] and r.get("status") == "PROPOSED"
+                for r in selected if r.get("package") == package)
+    }
+    visible_rows = [{
+        "package": r.get("package"), "declarationId": r.get("declarationId"),
+        "current": r.get("current"), "requestedExactTarget": requested[r["package"]],
+        "publishedTarget": r.get("target"), "rowStatus": r.get("status"),
+        "matchesExactTarget": (r.get("target") == requested[r["package"]]
+                               and r.get("status") == "PROPOSED"),
+        "evidenceRef": f"#/dependencies/{i}",
+    } for i, r in enumerate(blueprint.get("dependencies") or [])
+        if isinstance(r, dict) and r.get("package") in requested][:max_inline_rows]
+
+    # Core's policy goal is authoritative. Never equate exact proposal
+    # with final target health (nor a clean health goal with runtime verification).
+    aggregate = assessment.get("aggregate") or {}
+    facts = ("postPlanGoal", "postPlanTargetLevel", "postPlanLagOk",
+             "postPlanScopeTotal", "postPlanLagOkPct", "postPlanPolicyRequired",
+             "postPlanPolicyShortfall", "postPlanReserveRequired",
+             "postPlanReserveShortfall", "postPlanSecurityUnknown")
+    final_health = {key: aggregate.get(key) for key in facts}
+    relevant = [e for e in critical_evidence
+                if e.get("severity") == "BLOCKER"
+                and e.get("lifecycle") in ("ACTIVE_FINAL", "CURRENT_ROW")]
+    provenance = [{
+        key: e.get(key) for key in ("code", "severity", "scope", "project",
+                                   "package", "lifecycle", "evidenceRef")
+    } for e in relevant[:max_inline_evidence]]
+    complete_match = (
+        status.get("draftStatus") == "DRAFT_READY"
+        and len(matching) == len(requested)
+    )
+    goal = final_health["postPlanGoal"]
+    scope = final_health["postPlanScopeTotal"]
+    actual = final_health["postPlanLagOk"]
+    required = final_health["postPlanPolicyRequired"]
+    shortfall = final_health["postPlanPolicyShortfall"]
+    def show(value: Any) -> str:
+        return str(value) if type(value) in (int, float) else "unknown"
+    readable = (
+        ("Exact target(s) are PROPOSED in the published plan; "
+         if complete_match else
+         "Requested exact target(s) are not all PROPOSED in a complete plan; ")
+        + f"final {policy.get('targetLevel') or 'unknown'} health policy: "
+        + f"{goal if goal in ('feasible', 'blocked', 'unknown') else 'unknown'}; "
+        + f"lag-OK {show(actual)}/{show(scope)}, required {show(required)}, "
+        + f"shortfall {show(shortfall)}. "
+        + "PLANNING_ONLY / NOT_VERIFIED; peer/runtime compatibility is not proven. "
+        + "Per-package lag thresholds are unavailable from the published Blueprint."
+    )
+    return {
+        "requestedExactTargets": dict(sorted(requested.items())),
+        "allRequestedTargetsProposed": complete_match,
+        "matchedRequestedPackageCount": len(matching),
+        "requestedPackageCount": len(requested),
+        "publishedAssignments": visible_rows,
+        "totalPublishedAssignments": len(selected),
+        "assignmentsClipped": len(visible_rows) != len(selected),
+        "finalHealthPolicy": {
+            **final_health,
+            "appliedMinLagOkPct": policy.get("minLagOkPct"),
+            "evidenceRef": "#/targetAssessment/aggregate",
+            "evidenceComplete": assessment.get("evidenceComplete") is True,
+        },
+        "blockers": provenance, "totalBlockers": len(relevant),
+        "blockersClipped": len(provenance) != len(relevant),
+        "perPackageLagEvidence": {"availability": "UNAVAILABLE_IN_PUBLISHED_BLUEPRINT"},
+        "readout": readable,
+    }
+
+
 def _compact_payload(
     blueprint: Dict[str, Any],
     *,
@@ -527,6 +622,10 @@ def _compact_payload(
                    "FETCH_TARGET_SECURITY_EVIDENCE" if any(e["code"] == "TARGET_SECURITY_UNKNOWN" for e in target_evidence) else
                    "INSPECT_TARGET_ASSESSMENT" if target_evidence else
                    "REVIEW_WITHIN_EXISTING_AUTHORITY" if critical_evidence else "VERIFY_PROPOSED_ASSIGNMENT")
+    exact_policy = _exact_target_policy_summary(
+        blueprint, status, assessment, critical_evidence,
+        max_inline_rows=max_inline_rows, max_inline_evidence=max_inline_evidence,
+    )
     payload = {
         "ok": True,
         "protocol": KIND,
@@ -572,6 +671,7 @@ def _compact_payload(
             "proposed": summary.get("proposed"),
             "needsReview": sum(bool(row.get("needsReview")) for row in all_rows),
             "statusCounts": summary.get("statusCounts") or {},
+            **({"exactTargetPolicy": exact_policy} if exact_policy is not None else {}),
         },
         "recommendationGroups": groups,
         "dependencies": dependencies,
@@ -829,7 +929,10 @@ def get_upgrade_plan(
         "asks the existing Core to move those packages, but does not pin an "
         "exact version. objective='explicit-version-targets' with exact_targets "
         "provides exact stable semver assignments through Core's real peer/engine "
-        "solver; unknown security/runtime remains NOT_VERIFIED. draft_max_candidates "
+        "solver; the response summary.exactTargetPolicy distinguishes the exact "
+        "PROPOSED version from final postPlanGoal and policy shortfall, with "
+        "original blocker evidence and unavailable per-package lag proof. "
+        "Unknown security/runtime remains NOT_VERIFIED. draft_max_candidates "
         "widens candidate evidence independently of the deadline. Review critical "
         "evidence and workspaceCoverage before acting within existing user authority."
     ),
