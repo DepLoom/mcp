@@ -77,6 +77,14 @@ class NativeEventTests(unittest.TestCase):
         x=UsageCollector()
         self.assertFalse(x.ingest({"type":"thread.started","thread_id":123}))
 
+    def test_zero_usage_is_not_sufficient_evidence(self):
+        c=UsageCollector()
+        c.ingest({"type":"thread.started","thread_id":"synthetic-thread-000"})
+        c.ingest({"type":"turn.completed",
+                  "usage":{"input_tokens":0,"output_tokens":0}})
+        self.assertFalse(c.result()["usageComplete"])
+        self.assertFalse(c.result()["eventSchemaSafe"])
+
     def test_tools_41st_item_fails_at_soft_cap_boundary(self):
         c=UsageCollector(max_tools=40)
         for i in range(40):
