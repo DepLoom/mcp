@@ -15,6 +15,7 @@ import sysconfig
 import tempfile
 import venv
 from pathlib import Path
+from runtime_guard import verify_runtime
 
 
 def main() -> int:
@@ -45,6 +46,7 @@ def main() -> int:
         (Path(site) / "smoke_runtime_dependencies.pth").write_text("\n".join(dependency_paths) + "\n", encoding="utf-8")
         subprocess.run([str(python), "-m", "pip", "install", "--no-deps", "--no-index", "--ignore-installed", str(wheel)],
                        cwd=root, env=env, check=True)
+        verify_runtime(python, wheel, Path(site), cwd=root, env=env)
         # No fake Core override: the real bundled generator must import and run
         # its CLI in a directory that has no source checkout or Git metadata.
         code = '''

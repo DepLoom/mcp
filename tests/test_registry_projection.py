@@ -245,7 +245,7 @@ class RegistryDiagnosticProjectionTests(unittest.TestCase):
         bp["summary"]["statusCounts"] = {"NO_TARGET": 300}
         compact = compact_blueprint(bp, max_response_bytes=6500)
         self.assertLessEqual(compact["truncation"]["bytes"], 6500)
-        self.assertEqual(compact["truncation"]["bytes"], len(json.dumps(compact, ensure_ascii=False, indent=2).encode()))
+        self.assertEqual(compact["truncation"]["bytes"], len(json.dumps(compact, ensure_ascii=False, separators=(",", ":")).encode()))
         self.assertEqual(compact["summary"]["statusCounts"], {"NO_TARGET": 300})
         self.assertEqual(compact["registryDiagnostics"]["noInstallableArtifactRows"], 1)
         self.assertTrue(compact["truncation"]["truncated"])

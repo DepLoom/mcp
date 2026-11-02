@@ -155,7 +155,7 @@ class TargetAssessmentTests(unittest.TestCase):
         self.assertFalse(clipped["decisionCompleteness"]["projectionComplete"])
         self.assertTrue(clipped["decisionCompleteness"]["evidenceComplete"])
         self.assertIn("targetAssessment", clipped["truncation"]["limitsHit"])
-        self.assertEqual(clipped["truncation"]["bytes"], len(json.dumps(clipped, ensure_ascii=False, indent=2).encode()))
+        self.assertEqual(clipped["truncation"]["bytes"], len(json.dumps(clipped, ensure_ascii=False, separators=(",", ":")).encode()))
 
     def test_security_changes_invalidate_digest_even_if_target_and_goal_stay_the_same(self):
         first = blueprint()
