@@ -177,9 +177,11 @@ class WorkspaceInventoryTests(unittest.TestCase):
             def __enter__(self): return iter([Entry()])
             def __exit__(self, *args): pass
         def guarded(folder):
-            return Scan() if Path(folder) == self.root else real_scandir(folder)
-        with patch('deploom_mcp.workspace_inventory.os.scandir', side_effect=guarded):
-            self.fails('UNSAFE_INPUT')
+            selected=(os.fstat(folder).st_ino==self.root.stat().st_ino) if isinstance(folder,int) else Path(folder)==self.root
+            return Scan() if selected else real_scandir(folder)
+        with patch('deploom_mcp.workspace_inventory.os.scandir', side_effect=guarded) as scan:
+            with patch.object(os,'supports_fd',os.supports_fd | {scan}):
+                self.fails('UNSAFE_INPUT')
 
 
     def test_proposal_holds_other_owners_and_same_name_other_sections(self):

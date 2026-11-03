@@ -1,7 +1,7 @@
 {
   "blueprintSchemaVersion": 2,
   "core": {
-    "contentSha256": "8cbd48479e787ab45d24fa5d03b3d27ccca9d7675207625a5499b7ea5604daa7",
+    "contentSha256": "c6e2df99cc11af93886e2a905b800f3ef42dcd508d3d3983de0a890c40616d9f",
     "files": {
       "VERSION": "2698c63efcc74d9adc7a29889fc4ecc7fadfb58c4588db3f117f9d87cfaaff40",
       "analyze_verification_telemetry.py": "1ee235ef0b9cf275fe34c22cf16cb4049e88fb19953096ddaecbb73d7a700e6f",
@@ -57,7 +57,7 @@
       "document_locales/ru.json": "138961b2f15433700cf2d99a35a05faba8c69c797d50c2353852d3e38eae5385",
       "draft_decision_contract.py": "45df524a91107f25711a5183dcace378251661ac5bdfe198b6bb5b82e945f692",
       "draft_input_identity.py": "c97d065dc75f99d3d19d7d04cad1dce58e4a4d5b06b8488bc0eff645e228c5f1",
-      "draft_npm_preflight.py": "4a77406f7c6dc38a4a3274eed11498f674c36cc330c7665bad9bad796d5c4710",
+      "draft_npm_preflight.py": "deeee9a503047c816dd78bdde63647f5f70ae86f0dcd09ae0f215366f0025280",
       "draft_publication_guard.py": "72fffc4460bb7ef387006f641c82ba4372ae7aa66abf0ed745ecc45b573ecbe6",
       "frontend_source_policy.py": "3f4976857ffba83462518b23b4c09f8bd03a3037f5d1421a067632e56c158f5a",
       "git_hook_policy.py": "8c03535c58151cf98d14088a8775636d496cbb02dda9c6bad432c51511a98710",
@@ -90,7 +90,7 @@
       "lockfile_preflight.py": "b13ee58c00905c27223062e872f0c3219239b76249a19b3ea6c15e1fd1238924",
       "manual_dependency_audit.py": "2c7b393466c3b2b1e030fbacbb28b52697b7b21eddcb09c80c15e93eee8e3340",
       "materialization_retention.py": "9e4c37f073de700ef4a0d0fe2a5225a3b71b7e3e814c1fd48ab59189af5f6abf",
-      "materialized_workspace_verifier.py": "319f5e4593cbbf2d77c9cfbae21b7111b118c14f22573ddfac33a645e715dd8a",
+      "materialized_workspace_verifier.py": "c49ceefe010435d322c70d64d0b72021dd2802a2dfc169b33f655c7479e49ac4",
       "migration_documents.py": "8f20583f19aa3bb09454ae3047866f301a50c4b7ab2f3fa8e8d64c0fdda25a19",
       "migration_research.py": "f95a8c7de05a867374f20582838ce7313504c8717b3d36ebf3bdebfd30b8c4d9",
       "migration_validation.py": "aa8cc3395c242a4d4f0f94affe5901fb36f0af7793fb829e696c97258294175b",
@@ -149,7 +149,7 @@
       "yarn_berry.py": "bd769e797823ff99129983f8295a52b5aac1f01f9be2c2a8eac9ffeaf20903d2"
     },
     "repository": "https://github.com/DepLoom/core",
-    "revision": "0e04b411fd1cd75753f596e832ab2a74a12342a0",
+    "revision": "069818560ea78001576fbccfe2ebf995a2052bc6",
     "version": "1.0.0-preview.20"
   },
   "mcpVersion": "0.2.1",

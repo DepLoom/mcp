@@ -5,6 +5,7 @@ import test_goal_tool_cache as fixture
 from deploom_mcp.goal_tap_nyc_execution import receipt_matches
 from deploom_mcp.goal_execution_environment import environment_matches
 
+@unittest.skipUnless(os.name=='nt','Native held-input and output profiles require Windows handles')
 class ToolCacheHistoryTests(unittest.TestCase):
  def test_registry_revision_does_not_rewrite_historical_execution_env(self):
   f=fixture.ToolCacheCoreTests();f.setUp();self.addCleanup(f.doCleanups);c=f.case

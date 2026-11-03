@@ -50,10 +50,12 @@ def observe_goal_source(project: Path, policy_digest: str, *, exact_goal: dict |
     sys.path.insert(0, str(core))
     from source_snapshot import source_snapshot_fingerprint
     before = source_snapshot_fingerprint(project)
-    node = shutil.which("node")
-    if not node:
+    from draft_npm_preflight import _npm_command
+    try:
+        node, npm_entry = _npm_command()
+        npm = Path(npm_entry)
+    except OSError:
         raise GoalContractError("TOOLCHAIN_UNAVAILABLE")
-    npm = Path(node).parent / "node_modules" / "npm" / "bin" / "npm-cli.js"
     versions = []
     for command in ([node, "--version"], [node, str(npm), "--version"]):
         result = run_process(command, cwd=str(project), env=dict(os.environ), timeout=10)

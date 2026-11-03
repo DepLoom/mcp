@@ -31,6 +31,7 @@ def add_fixture_policy(case):
  return value
 
 
+@unittest.skipUnless(os.name=='nt','Native held-input and output profiles require Windows handles')
 class ToolCacheCoreTests(unittest.TestCase):
  def setUp(self):
   self.case=fixture.TapRealCoreTests();self.case.setUp();self.addCleanup(self.case.doCleanups)

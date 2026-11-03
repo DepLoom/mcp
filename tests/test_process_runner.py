@@ -118,6 +118,11 @@ def _pid_alive(pid: int, witness=None) -> bool:
         return witness.any_alive()
     try:
         os.kill(pid, 0)
+        # A Linux zombie has exited; kill(pid, 0) only sees its unreaped PID.
+        stat_path=Path(f"/proc/{pid}/stat")
+        if stat_path.exists():
+            fields=stat_path.read_text().rsplit(")",1)[-1].split()
+            if fields and fields[0]=="Z":return False
         return True
     except ProcessLookupError:
         return False

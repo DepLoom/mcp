@@ -94,7 +94,7 @@ class AppServerBudgetTests(unittest.TestCase):
 
     def test_relative_environment_paths_never_land_inside_workspace(self):
         from d1_pilot import isolated_env,codex_command
-        with tempfile.TemporaryDirectory() as d:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as d:
             root=Path(d)/'arm';root.mkdir()
             # Deliberately supply a relative input as the CLI accepts it.
             import os

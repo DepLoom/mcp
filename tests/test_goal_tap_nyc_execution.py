@@ -13,6 +13,7 @@ from deploom_mcp.goal_tap_nyc_input import KIND
 from project_execution_environment import project_environment_observation,project_environment_fingerprint,V2
 from verification_process_supervisor import run_supervised
 
+@unittest.skipUnless(os.name=='nt','Native held-input and output profiles require Windows handles')
 class TapExecutionTests(unittest.TestCase):
  def setUp(self):
   self.real=fixtures.TapRealCoreTests();self.real.setUp();self.addCleanup(self.real.doCleanups);self.f=self.real.f

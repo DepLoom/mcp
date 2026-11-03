@@ -14,7 +14,8 @@ class FixtureCacheIdentityTests(unittest.TestCase):
         self.integrity='sha512-'+base64.b64encode(hashlib.sha512(data.getvalue()).digest()).decode()
 
     def invoke(self,integrity,version):
-        node=Path(shutil.which('node'));npm=node.parent/'node_modules/npm/bin/npm-cli.js'
+        from draft_npm_preflight import _npm_command
+        node,npm=_npm_command()
         return subprocess.run([str(node),str(Path(__file__).with_name('npm_fixture_cache.cjs')),str(npm),str(self.archive),str(self.cache),integrity,'https://example.invalid/fixture-runtime-2.0.0.tgz','fixture-runtime',version],capture_output=True,timeout=20)
 
     def test_corrupt_sri_cannot_seed_a_verified_cache(self):

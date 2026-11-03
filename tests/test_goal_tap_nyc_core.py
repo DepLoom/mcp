@@ -14,6 +14,7 @@ from source_snapshot import source_snapshot_fingerprint
 from resolved_dependency_state import compile_npm_dependency_obligations
 from project_execution_environment import V2
 
+@unittest.skipUnless(os.name=='nt','Native held-input and output profiles require Windows handles')
 class TapRealCoreTests(unittest.TestCase):
  def setUp(self):
   self.f=fixtures.TapInputTests();self.f.setUp();self.addCleanup(self.f.doCleanups);self.f.deadline=time.time()+60

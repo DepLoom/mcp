@@ -1,9 +1,10 @@
 import unittest,copy
+from pathlib import Path
 from deploom_mcp.goal_check_bindings import validate_normative_admission
 from deploom_mcp.goal_contract import GoalContractError
 class PlatformProfileShapeTests(unittest.TestCase):
  def setUp(self):
-  self.profile={'admission':{'schemaVersion':1,'scope':'ISOLATED_NPM_V3_CANDIDATE','allowedChangeScopeDigest':'a'*64,'optionalAbsenceRules':{'schemaVersion':1,'kind':'NPM_V3_SRI_PLATFORM_ABSENCE_V1','host':{'platform':'win32','arch':'x64','nodeSha256':'b'*64},'artifacts':[{'instance':'node_modules/foreign','archivePath':'C:/owned/foreign.tgz'}]}},'checkBindings':[]}
+  self.profile={'admission':{'schemaVersion':1,'scope':'ISOLATED_NPM_V3_CANDIDATE','allowedChangeScopeDigest':'a'*64,'optionalAbsenceRules':{'schemaVersion':1,'kind':'NPM_V3_SRI_PLATFORM_ABSENCE_V1','host':{'platform':'win32','arch':'x64','nodeSha256':'b'*64},'artifacts':[{'instance':'node_modules/foreign','archivePath':str(Path('owned/foreign.tgz').absolute())}]}},'checkBindings':[]}
  def test_only_explicit_v3_typed_host_rules_are_admitted(self):
   self.assertIsNotNone(validate_normative_admission(self.profile,[]))
   for bad in [{},[{'incompatible':True}],True]:

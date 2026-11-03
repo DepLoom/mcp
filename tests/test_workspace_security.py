@@ -13,7 +13,7 @@ from deploom_mcp.workspace_tools import observe_workspace_inventory_v1
 class FileHandleIdentityTests(unittest.TestCase):
     def test_opened_handle_must_match_checked_file_before_read(self):
         with tempfile.TemporaryDirectory() as temp:
-            root=Path(temp);requested=root/'requested.json';foreign=root/'foreign.json'
+            root=Path(temp).resolve();requested=root/'requested.json';foreign=root/'foreign.json'
             requested.write_text('{"name":"expected"}');foreign.write_text('{"name":"foreign"}')
             original=Path.open
             with patch('deploom_mcp.workspace_inventory.open_bound_file', lambda path,parent: original(foreign,'rb')):

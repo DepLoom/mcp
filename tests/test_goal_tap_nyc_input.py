@@ -8,6 +8,7 @@ sys.path.insert(0,str(resolve_core_dir()))
 from verification_process_supervisor import run_supervised
 from project_execution_environment import project_execution_environment,project_environment_fingerprint,V2
 
+@unittest.skipUnless(os.name=='nt','Native held-input and output profiles require Windows handles')
 class TapInputTests(unittest.TestCase):
  def setUp(self):
   self.t=tempfile.TemporaryDirectory();self.addCleanup(self.t.cleanup);self.root=Path(self.t.name);self.project=self.root/'project';self.project.mkdir();self.source=b'coverage: true'+bytes([10])+b'coverage-map: coverage-map.js'+bytes([10])+b'reporter: terse'+bytes([10])+b'files: [test/**/*.test.js]'+bytes([10]);(self.project/'.taprc.yaml').write_bytes(self.source);(self.project/'index.js').write_text('module.exports=1')

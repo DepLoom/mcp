@@ -25,7 +25,8 @@ class FrozenRealOwnerTests(unittest.TestCase):
    payload=data.getvalue();path=cls.root/('fixture-'+version+'.tgz');path.write_bytes(payload)
    return path,{'version':version,'resolved':'https://example.invalid/fixture-runtime-'+version+'.tgz','integrity':'sha512-'+base64.b64encode(hashlib.sha512(payload).digest()).decode()}
   old_tar,old_record=artifact('1.0.0');new_tar,new_record=artifact('2.0.0')
-  node=Path(shutil.which('node'));npm=node.parent/'node_modules/npm/bin/npm-cli.js'
+  from draft_npm_preflight import _npm_command
+  node,npm=_npm_command()
   helper=Path(__file__).with_name('npm_fixture_cache.cjs')
   prepared=subprocess.run([str(node),str(helper),str(npm),str(new_tar),str(cache),new_record['integrity'],new_record['resolved'],'fixture-runtime','2.0.0'],check=True,capture_output=True,timeout=20)
   cache_proof=json.loads(prepared.stdout)
