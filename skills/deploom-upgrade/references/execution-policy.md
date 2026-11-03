@@ -48,6 +48,53 @@ not new permission rules by themselves.
   constraints are not bypassed by fallback. Independent decisions may continue
   only when their own graph and authorization are established.
 
+## Security patches outside a parent's declared range
+
+A vulnerable transitive dependency can be a candidate for a narrowly scoped
+`overrides`/`resolutions` substitution when an upstream update is unavailable or
+more disruptive. Treat it as a compatibility hypothesis, not a proven safe fix.
+Do not infer permission from a Yellow/Green target alone: use existing delegated
+authority for transitive range exceptions or obtain a concrete decision first.
+Never use this procedure to bypass peer/engine constraints. User-frozen
+requirements remain fixed unless the user explicitly revises them. Package-manager
+override success does not establish compatibility or upstream support.
+
+1. Identify the actual vulnerable instance, every affected consumer and its
+   declared range, not just the root package name. Retain the original failing
+   state. Select the smallest suitable non-vulnerable stable patch in the same
+   major from the configured registry; check all relevant advisories and mark
+   missing evidence UNKNOWN. A larger version or `fixAvailable` is not proof.
+   Prefer an in-range repair when it satisfies the same task with less risk.
+2. Compare integrity-bound published package contents, exports, engines and
+   dependencies. Inspect the APIs actually used by consumers and their reachable
+   implementation, loading/code generation and protocol boundaries. Static
+   similarity or an apparently unchanged function cannot prove runtime
+   equivalence: dynamic uses and changed transitives remain uncertainty.
+3. Before applying, record the exact consumer/instance scope, old and selected
+   versions, the declared constraint being superseded, authority, patch evidence,
+   expected security behavior changes, tests and rollback identity. Keep this
+   authorized exception separate from an assignment satisfying the original
+   constraints; never claim an unchanged Core verdict. Prefer a consumer-scoped
+   override; do not replace unaffected instances or silently widen the exception.
+4. Test the actual consumers and loaded package paths/versions in isolation.
+   Compare baseline and candidate behavior on representative normal, error and
+   boundary inputs, including serialization/wire behavior when relevant. Add
+   security regression cases where practical. A security fix may intentionally
+   reject previously accepted malicious input; explain that difference rather
+   than requiring byte-for-byte behavior for every input. Import/constructor
+   smoke and static analysis alone do not establish the required behavior.
+5. Use the project's package manager to author the lock and run a strict clean
+   install plus physical-tree/peer/engine validation. Re-run checks affected by
+   the changed dependency closure and the final security/policy audit on those
+   exact inputs. Retain limitations and failures. If required evidence is
+   missing or behavior regresses, do not accept the substitution: preserve the
+   previous verified checkpoint and report the bounded next decision.
+
+Report `proposed`, `tested`, and `accepted within tested scope` separately.
+Even a successful local substitution is not an upstream compatibility guarantee
+or proof of complete production acceptance. Keep the exception visible in the
+migration report, with removal conditions such as a verified upstream repair.
+
 ## Apply and repair
 
 1. Retain baseline identities and the selected decision set before editing.

@@ -5,7 +5,7 @@ description: Plan and execute JavaScript and TypeScript dependency upgrades with
 
 # deploom-upgrade
 
-**Contract version: 2.0.2.** Canonical file hashes are in `contract.json`.
+**Contract version: 2.0.3.** Canonical file hashes are in `contract.json`.
 
 Use `get_upgrade_plan` for health/policy planning evidence. For an explicitly
 agreed functional-maintenance or finite coupled goal, use `get_goal_plan` and
@@ -153,7 +153,8 @@ repairs distinct from the original result.
   coverage, pinned/advisory semantics and targeted recovery.
 - `references/preflight.md` — baseline, scope, authority and checkout selection.
 - `references/execution-policy.md` — decision records, alternatives, application
-  and bounded compatibility repair.
+  and bounded compatibility repair. Load its security-patch range-exception
+  procedure before proposing an out-of-range transitive override/resolution.
 - `references/verification-policy.md` — final-state install evidence, targeted
   runtime checks, warning attribution and honest statuses.
 - `references/evidence-report.md` — minimal acceptance record and JSON format.

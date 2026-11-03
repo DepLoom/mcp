@@ -1,19 +1,19 @@
 {
   "schemaVersion": 1,
   "name": "deploom-upgrade",
-  "contractVersion": "2.0.2",
+  "contractVersion": "2.0.3",
   "files": {
-    "SKILL.md": "557b25ade48a0573e785abc763e14e14f16e2f0cf9c25b7bbf5adc079a0e372e",
+    "SKILL.md": "0dc9943155674175a0fbb09896f2d43f7872d8ac2b26c0506a625eb750948073",
     "examples/blocked-upgrade.md": "b921b3ffd59d054ca69bddb7bc317450cc9c40d836cb1d44f5de86c9b974bfe4",
     "examples/plan-only.md": "ccfaad2b5e5f00678ff019e5988bb32e95ac2b82b6050a8786ab87295ca6883b",
     "examples/yellow-exclude-react.md": "379ccdd540513232fc5a2f396b2d9d3ee9cb4a420d7d27912ecd10c95b0da16b",
     "references/blueprint-contract.md": "e0ae36222226d6c8b01ceb5441167b175acafb61c2c7eda9e51ad8426f6b5d9b",
     "references/evidence-report.md": "9d4404725330d7891a845102104675fb3acf9d634b60a2ac2d9004e399d2bcbc",
-    "references/execution-policy.md": "764abce1036c01510031b6d39ee9b6febb2e5219ba92c718ef5c4d3843eac29e",
+    "references/execution-policy.md": "240bcc5086b6abe204776830a4d8f7bd33ed629b111759f439aebaaa364d08a5",
     "references/goal-and-migration-evidence.md": "1d455f9875fc51d01744d3363d47a0021a39f3227d075dd32f7df35f72b01b5e",
     "references/preflight.md": "6bf05b0297312b45c5b0154fc89487fbbadf46f38719034a597d24320eaa806a",
     "references/verification-policy.md": "57d6d0dbb3d52816badfa582d416fb3504c4c1c2e78ef80eed64aaa57642318c",
     "scripts/validate_evidence.py": "7e8fc003473b7e5d94a20a29d06bcba14844c699b787baf67c26305402a0bf3b"
   },
-  "bundleSha256": "2404ad28066773382958d3b9873b4d5737a0c251d7828ef248cb4faf9eb06a45"
+  "bundleSha256": "5d9d3010d040104ff1dabd8cf072feaf8137be53c368e1cc1c9050e9fbaed96c"
 }
