@@ -1,5 +1,7 @@
 # Headless distribution
 
+[Русский](DISTRIBUTION.ru.md)
+
 The source checkout pins the Python Core at `upstream/deploom`. A built wheel
 contains that Core, the Blueprint schema, the canonical Skill bundle and its
 installer. No Desktop installation, Electron runtime, sibling checkout or Git
@@ -41,7 +43,7 @@ Skill drift fails the build until the manifest is refreshed deliberately.
 ## Install and run a locally built wheel
 
 ```bash
-python -m pip install dist/deploom_mcp-0.2.1-py3-none-any.whl
+python -m pip install dist/deploom_mcp-0.2.2-py3-none-any.whl
 deploom-mcp
 deploom-install-skill --client codex --scope user --verify
 ```
@@ -57,7 +59,7 @@ package and its resources have passed distribution checks.
 python -m unittest discover -s tests -v
 python scripts/smoke_stdio.py
 python -m build --no-isolation
-python scripts/smoke_wheel.py dist/deploom_mcp-0.2.1-py3-none-any.whl
+python scripts/smoke_wheel.py dist/deploom_mcp-0.2.2-py3-none-any.whl
 ```
 
 `smoke_wheel.py` creates a temporary environment outside the checkout. It reuses

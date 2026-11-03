@@ -1,5 +1,10 @@
 # DepLoom MCP
 
+[Русский](README.ru.md) · [User guide](USERGUIDE.md) · [Documentation](docs/INDEX.md)
+
+New users: start with the [release-wheel quick start](USERGUIDE.md), including
+local stdio, Skill installation, OpenCode V2 and [colleague trials](docs/SHARING_WITH_COLLEAGUES.md).
+
 Release maintainers: see the [component release instructions](docs/RELEASING.md).
 
 Headless upgrade-planning boundary and MCP server for the DepLoom ecosystem.
@@ -151,9 +156,12 @@ package checks. No Desktop installation is required.
 # .venv/bin/python -m deploom_mcp             # Linux/macOS
 ```
 
-The default MCP server exposes **three tools**: `get_upgrade_plan`,
-`evaluate_assignment` and `explain_conflict`. The opt-in
-`python -m deploom_mcp.audit_server` adds `audit_dependencies` as a fourth.
+The default 0.2.2 server exposes **nine tools**: `get_upgrade_plan`,
+`evaluate_assignment`, `explain_conflict`, `get_goal_plan`, `apply_goal_candidate`,
+`verify_goal_candidate`, `get_goal_checkpoint`, `get_goal_report` and
+`observe_workspace_inventory_v1`. The optional `python -m deploom_mcp.audit_server`
+adds `audit_dependencies` as a tenth. See the
+[execution support matrix](docs/GOAL_EXECUTION_SUPPORT.md) for authority limits.
 
 ### Decision follow-up tools
 
@@ -171,8 +179,6 @@ independent peer solver. `explain_conflict` retrieves typed original
 blockers/reviews with evidence pointers, project scope and next actions.
 
 [Complete decision follow-up contract](docs/DECISION_FOLLOWUPS.md).
-
-### `get_upgrade_plan` (contract)
 
 ### `get_upgrade_plan` (contract)
 

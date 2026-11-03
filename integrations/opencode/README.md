@@ -1,5 +1,11 @@
 # deploom-upgrade · OpenCode integration
 
+[Русский](README.ru.md) · [Simplest release-wheel setup](../../USERGUIDE.md)
+
+For OpenCode V2, register servers under `mcp.servers` with `disabled`,
+not the old `mcp.<name>` / `enabled` shape.
+[Official V2 configuration](https://opencode.ai/v2/docs/mcp-servers).
+
 How to use the **same canonical skill** (`skills/deploom-upgrade`) inside
 OpenCode. This file covers installation and configuration **only** — the
 workflow, safety gates and reports are defined once in the canonical `SKILL.md`
@@ -52,16 +58,13 @@ DepLoom MCP is a local stdio server; register it under `mcp` in the project's
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "deploom": {
-      "type": "local",
-      "command": [
-        "C:/path/to/mcp/.venv/Scripts/python.exe",
-        "-m", "deploom_mcp"
-      ],
-      "environment": {
-        "DEPLOOM_MCP_STATE_DIR": "C:/Users/<you>/.deploom-mcp"
-      },
-      "enabled": true
+    "servers": {
+      "deploom": {
+        "type": "local",
+        "command": ["C:/path/to/venv/Scripts/python.exe", "-m", "deploom_mcp"],
+        "environment": {"DEPLOOM_MCP_STATE_DIR": "C:/path/to/deploom-state"},
+        "disabled": false
+      }
     }
   }
 }
@@ -69,8 +72,9 @@ DepLoom MCP is a local stdio server; register it under `mcp` in the project's
 
 - `type: "local"` is required; `command` is an **array** of strings.
 - `DEPLOOM_MCP_STATE_DIR` keeps run artifacts outside the analysed project.
-- After saving, restart OpenCode. The single tool `get_upgrade_plan` then
-  appears in the agent's tool list.
+- After saving, restart OpenCode. Confirm `deploom` is connected in `/mcps`,
+  load `deploom-upgrade`, and verify the actual tool list. The standard 0.2.2
+  entrypoint has nine tools; see the [user guide](../../USERGUIDE.md).
 - The repository never edits your global config; the block above is meant to be
   copied into your own config.
 
@@ -107,5 +111,5 @@ all.
 
 - It will not create commits/PRs or merge — it stops at the evidence report and
   shows the diff.
-- It will not add second MCP tools or invent a resolver — exactly one tool
-  (`get_upgrade_plan`) is used.
+- It does not invent a resolver or execution permission. Planning, follow-up
+  tools and explicit-goal execution retain their own authority and support limits.
