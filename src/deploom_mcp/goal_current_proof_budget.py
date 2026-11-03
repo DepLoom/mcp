@@ -90,6 +90,7 @@ class CurrentProofBudget:
             duration = min(duration, original_deadline_utc - wall_clock())
         # Clamp at construction as well as on every check: rolling wall time
         # back later must not revive time from the original UTC deadline.
+        self._initial_duration = duration
         self._cutoff = monotonic() + duration
         self._utc_ceiling = original_deadline_utc
         self.remaining()
@@ -97,7 +98,9 @@ class CurrentProofBudget:
     def remaining(self):
         if self._cancelled.is_set():
             raise GoalContractError('CURRENT_PROOF_CANCELLED')
-        remaining = self._cutoff - self._monotonic()
+        # Float addition/subtraction may otherwise exceed the original allowance
+        # by one ULP (for example 300.1 - 0.1). Never enlarge a host limit.
+        remaining = min(self._initial_duration, self._cutoff - self._monotonic())
         if self._utc_ceiling is not None:
             remaining = min(remaining, self._utc_ceiling - self._wall_clock())
         if not _finite_number(remaining) or remaining <= 0:

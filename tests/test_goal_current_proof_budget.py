@@ -55,6 +55,16 @@ class SpecTests(unittest.TestCase):
 
 
 class DeadlineTests(unittest.TestCase):
+    def test_float_rounding_never_exceeds_original_registered_allowance(self):
+        c = Clock(); c.mono = .1
+        b = CurrentProofBudget(CurrentProofSpec(max_seconds=300, schema_version=2),
+                               monotonic=lambda: c.mono, wall_clock=lambda: c.wall)
+        self.assertEqual(b.remaining(), 300)
+        c.advance(1)
+        self.assertLessEqual(b.remaining(), 299)
+        c.advance(299)
+        with self.assertRaises(GoalContractError): b.remaining()
+
     def test_one_budget_consumed_across_phases_without_roundup(self):
         c = Clock(); b = c.budget()
         c.advance(8); self.assertEqual(b.remaining(), 12)
