@@ -1,4 +1,4 @@
-"""Entry point for `python -m deploom_mcp`: run the MCP stdio server."""
+"""Entry point for `python -m deploom_mcp`: run the MCP server."""
 from __future__ import annotations
 
 from deploom_mcp.server import main

@@ -1,0 +1,12 @@
+.git
+**/.git
+**/.venv
+**/__pycache__
+**/*.pyc
+**/node_modules
+**/.dependency-roadmap
+**/.dependency-update-history
+**/.env
+**/.env.*
+**/dist
+**/build

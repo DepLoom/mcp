@@ -5,7 +5,7 @@
 ## Choose your setup
 
 - **Self-hosted MCP (stdio):** each developer runs MCP locally; the coding client starts it.
-- **Networked MCP (remote HTTP):** a shared endpoint. Not a supported packaged deployment in 0.2.2; see below.
+- **Networked MCP (remote HTTP):** see [HTTP deployment](docs/HTTP_DEPLOYMENT.md) and the security limits below.
 
 The wheel includes the pinned headless Core and canonical Skill. No DepLoom Desktop, Electron, Git clone or separate Core install is required.
 
@@ -140,9 +140,7 @@ For workspaces, `SINGLE_MANIFEST_PLANNING`, `PARTIAL` or `jointAssignment=NOT_CO
 
 ## Networked MCP (remote HTTP)
 
-A shared endpoint is a different deployment. **The released 0.2.2 entrypoint runs `server.run(transport="stdio")`. It has no supported HTTP startup flag or packaged authenticated multi-user server profile.**
-
-A stdio-to-HTTP gateway or SDK launcher would be an additional deployment requiring separate validation. A shared host needs authenticated transport, project-path/permission boundaries, isolated state/evidence and concurrency controls. Paths refer to the **server's** filesystem, not a colleague's laptop. Exposing planning remotely without a path boundary can expose host files.
+The HTTP transport and container setup are described in [HTTP deployment](docs/HTTP_DEPLOYMENT.md). A shared host still needs authenticated transport, project-path/permission boundaries, isolated state/evidence and concurrency controls. Paths refer to the **server's** filesystem, not a colleague's laptop. Exposing planning remotely without a path boundary can expose host files.
 
 For today's trials distribute the [local installation kit](docs/SHARING_WITH_COLLEAGUES.md). An HTTP server serving wheel files is **file distribution, not Networked MCP**.
 

@@ -1062,7 +1062,32 @@ register_workspace_tools(server, _result)
 
 
 def main() -> int:
-    server.run(transport="stdio")
+    import argparse
+
+    parser = argparse.ArgumentParser(description="DepLoom MCP server")
+    parser.add_argument("--transport", choices=("stdio", "streamable-http"), default="stdio")
+    parser.add_argument("--host", default="127.0.0.1", help="HTTP listen address")
+    parser.add_argument("--port", type=int, default=8000, help="HTTP listen port")
+    parser.add_argument("--allowed-host", action="append", default=[], help="Allowed HTTP Host header; repeat as needed")
+    parser.add_argument("--allowed-origin", action="append", default=[], help="Allowed HTTP Origin header; repeat as needed")
+    args = parser.parse_args()
+    if not 1 <= args.port <= 65535:
+        parser.error("--port must be between 1 and 65535")
+    if args.transport == "stdio":
+        if args.allowed_host or args.allowed_origin:
+            parser.error("HTTP security options require --transport streamable-http")
+        server.run(transport="stdio")
+    else:
+        if args.allowed_origin and not args.allowed_host:
+            parser.error("--allowed-origin requires at least one --allowed-host")
+        from mcp.server.transport_security import TransportSecuritySettings
+        security = TransportSecuritySettings(
+            allowed_hosts=args.allowed_host or ["127.0.0.1:*", "localhost:*", "[::1]:*"],
+            allowed_origins=args.allowed_origin if args.allowed_host else [
+                "http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"
+            ],
+        )
+        server.run(transport="streamable-http", host=args.host, port=args.port, transport_security=security)
     return 0
 
 

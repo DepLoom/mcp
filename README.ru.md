@@ -18,8 +18,7 @@ DepLoom Desktop и Electron не нужны. Core поддерживается �
 контракт скилла — **2.0.2**. Для коллег есть [установочный комплект](docs/SHARING_WITH_COLLEAGUES.ru.md).
 
 **Self-hosted MCP (stdio)** поддерживается локально.
-**Networked MCP (remote HTTP)** пока не имеет готового поддерживаемого профиля
-запуска в релизе; [подробнее](USERGUIDE.ru.md#networked-mcp-remote-http).
+**Networked MCP (remote HTTP)**: см. [настройку HTTP и контейнера](docs/HTTP_DEPLOYMENT.md).
 
 ## Что делает продукт
 

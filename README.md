@@ -5,6 +5,8 @@
 New users: start with the [release-wheel quick start](USERGUIDE.md), including
 local stdio, Skill installation, OpenCode V2 and [colleague trials](docs/SHARING_WITH_COLLEAGUES.md).
 
+For HTTP and containers, see [HTTP deployment](docs/HTTP_DEPLOYMENT.md).
+
 Release maintainers: see the [component release instructions](docs/RELEASING.md).
 
 Headless upgrade-planning boundary and MCP server for the DepLoom ecosystem.
