@@ -128,7 +128,7 @@ class DecisionEvidenceTests(unittest.TestCase):
         bp = blueprint(conflict=True)
         bp["decisionEvidence"][0]["message"] = "constraint evidence " * 10000
         result = compact_blueprint(bp, max_response_bytes=5200)
-        wire_size = len(json.dumps(result, indent=2, ensure_ascii=False).encode("utf-8"))
+        wire_size = len(json.dumps(result, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
         self.assertLessEqual(wire_size, 5200)
         self.assertEqual(result["truncation"]["bytes"], wire_size)
         self.assertTrue(result["decisionCompleteness"]["requiresArtifactRead"])

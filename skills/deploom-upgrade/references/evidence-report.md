@@ -33,7 +33,7 @@ Use this **plan-only skeleton** and fill actual identities when they are known:
   "completion": "COMPLETED",
   "outcome": "PLAN_READY",
   "authorities": [{"id": "task", "reference": "user request to propose updates"}],
-  "loadedSkill": {"contractVersion": "2.0.0", "sha256": null, "status": "UNKNOWN"},
+  "loadedSkill": {"contractVersion": "2.0.1", "sha256": null, "status": "UNKNOWN"},
   "blueprintRunId": null,
   "finalInputs": {"manifests": null, "lockfile": null, "environment": null, "source": null},
   "acceptance": {"install": ["clean-install"], "checks": ["typecheck", "build", "tests"], "runtime": [], "policy": ["installed-policy"]},

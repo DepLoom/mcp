@@ -19,7 +19,9 @@ from typing import Any, Dict, Mapping, Optional
 from deploom_mcp.target_assessment import target_assessment, target_decision_evidence
 
 TARGET_MODES = ("pinned", "advisory")
-OBJECTIVES = ("minimum-change-to-policy", "latest-compatible-in-approved-lines")
+OBJECTIVES = ("minimum-change-to-policy", "latest-compatible-in-approved-lines",
+              "explicit-version-targets")
+_EXACT_SEMVER = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 MAX_DRAFT_CANDIDATES = 128
 MAX_SCOPE_PACKAGES = 1024
 
@@ -58,14 +60,39 @@ def normalize_decision_contract(intent: Optional[Mapping[str, Any]]) -> Dict[str
         if len(majors) > 128 or any(isinstance(x, bool) or not isinstance(x, int) or x < 0 for x in majors):
             raise ValueError("approvedVersionLines majors must be non-negative integers (at most 128 per package)")
         normalized_lines[name.strip()] = sorted(set(majors))
+    raw_exact=value.get("exactTargets",{})
+    if not isinstance(raw_exact,dict) or len(raw_exact)>256:
+        raise ValueError("exactTargets must be an object of at most 256 packages")
+    if objective != "explicit-version-targets" and raw_exact:
+        raise ValueError("exactTargets require explicit-version-targets")
+    if objective == "explicit-version-targets" and not raw_exact:
+        raise ValueError("explicit-version-targets requires exactTargets")
+    exact: Dict[str,str]={}
+    for name,target in raw_exact.items():
+        if (not isinstance(name,str) or not name.strip()
+            or not isinstance(target,str) or not _EXACT_SEMVER.fullmatch(target)):
+            raise ValueError("exactTargets must contain exact stable semver only")
+        name=name.strip()
+        if mutable is not None and name not in mutable:
+            raise ValueError("exact target cannot change immutable package")
+        if name in normalized_lines and int(target.split(".",1)[0]) not in normalized_lines[name]:
+            raise ValueError("exact target must respect approvedVersionLines")
+        exact[name]=target
     policies = value.get("policies") or {}
     if mutable is not None and isinstance(policies, dict):
         outside = [name for name, action in policies.items() if action == "required" and name not in mutable]
         if outside:
             raise ValueError("required packages must be included in mutablePackages: " + ", ".join(sorted(outside)))
+    if isinstance(policies,dict) and any(
+        policies.get(name) == "keep-current" for name in exact
+    ):
+        raise ValueError("exact target conflicts with keep-current")
     return {
-        "version": 1, "targetMode": mode, "objective": objective,
+        "version": 2 if objective == "explicit-version-targets" else 1,
+        "targetMode": mode, "objective": objective,
         "mutablePackages": mutable, "approvedVersionLines": dict(sorted(normalized_lines.items())),
+        **({"exactTargets":dict(sorted(exact.items()))}
+           if objective == "explicit-version-targets" else {}),
     }
 
 

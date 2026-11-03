@@ -11,10 +11,17 @@ the schema and the canonical Skill. Desktop and Electron are not required.
 **What MCP does** — produce a structured dependency proposal with explicit
 objective, target authority, scope coverage, reasons and unresolved evidence.
 
-**What MCP does NOT do** — Autopilot, background migration jobs, agent
-dispatch, repair loops, REST, dashboards, GitLab/Renovate integration, or any
-form of verification/execution. The plan is `PLANNING_ONLY` and never claims
-compatibility as proven.
+**Planning authority** — `get_upgrade_plan` stays `PLANNING_ONLY` and does not
+prove installation or runtime compatibility. The separate explicit-goal route
+supports host-authorized isolated verification, final apply, current checkpoints
+and replay for declared standalone npm profiles. Imported plans or agent prose
+do not grant execution permission. See
+[`docs/GOAL_EXECUTION_SUPPORT.md`](docs/GOAL_EXECUTION_SUPPORT.md) for the exact
+support matrix and evidence limits; workspace inventory is read-only and does
+not authorize workspace execution.
+
+**Outside this package** — Autopilot, background agent dispatch, general repair
+loops, dashboards and GitLab/Renovate integration.
 
 ## Architecture
 
@@ -46,7 +53,10 @@ The boundary contract is detailed in
 [`docs/STAGE_01_UPGRADE_BLUEPRINT.md`](docs/STAGE_01_UPGRADE_BLUEPRINT.md);
 the MCP server in [`docs/STAGE_02_MCP_SERVER.md`](docs/STAGE_02_MCP_SERVER.md);
 the universal agent skill in [`docs/STAGE_03_UNIVERSAL_SKILL.md`](docs/STAGE_03_UNIVERSAL_SKILL.md).
+Release changes and support limits are in [`docs/RELEASE_0_2_1.md`](docs/RELEASE_0_2_1.md).
 The exact-target evidence contract is in [`docs/DECISION_CONTRACT.md`](docs/DECISION_CONTRACT.md);
+the opt-in finite-goal contract is in [`docs/COUPLED_GOAL_BRIDGE.md`](docs/COUPLED_GOAL_BRIDGE.md);
+optional official migration references are in [`docs/OFFICIAL_MIGRATION_EVIDENCE.md`](docs/OFFICIAL_MIGRATION_EVIDENCE.md);
 experiment preparation and agent handoff are in [`docs/EXPERIMENT_HANDOFF.md`](docs/EXPERIMENT_HANDOFF.md).
 
 ## Repository layout

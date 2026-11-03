@@ -5,9 +5,12 @@ description: Plan and execute JavaScript and TypeScript dependency upgrades with
 
 # deploom-upgrade
 
-**Contract version: 2.0.0.** Canonical file hashes are in `contract.json`.
+**Contract version: 2.0.2.** Canonical file hashes are in `contract.json`.
 
-Use `get_upgrade_plan` for planning evidence. Use the coding client's tools for
+Use `get_upgrade_plan` for health/policy planning evidence. For an explicitly
+agreed functional-maintenance or finite coupled goal, use `get_goal_plan` and
+load `references/goal-and-migration-evidence.md`. Never replace a Yellow/Green
+requirement with REPORT_ONLY to fit that route. Use the coding client's tools for
 authorized edits and verification. A blueprint is `PLANNING_ONLY` and
 `NOT_VERIFIED`; its targets are proposals, not proof of installation, runtime
 compatibility, or policy attainment. An agent-selected alternative never becomes
@@ -20,9 +23,11 @@ and decisions; ask only when a material choice is unresolved.
 
 - **Action:** `PLAN_ONLY` for analysis; `EXECUTE` when the user asks for changes.
   An analysis request does not authorize edits.
-- **Objective:** `minimum-change-to-policy` or
-  `latest-compatible-in-approved-lines`. A yellow/green health target does not
-  by itself specify the newest acceptable version. State the interpretation.
+- **Objective:** `minimum-change-to-policy`,
+  `latest-compatible-in-approved-lines`, or opt-in
+  `explicit-version-targets` with exact stable `exact_targets` from the user.
+  A yellow/green health target does not specify the newest acceptable version.
+  Do not silently substitute another exact target or widen approved majors.
 - **Target authority:** `pinned` keeps the agreed targets; `advisory` permits
   justified alternatives inside the authorized scope and version lines. Use
   `pinned` when targets or a reproducible target set were explicitly specified.
@@ -48,11 +53,17 @@ Advisory mode changes recommendations, never proven peers/engines or user pins.
    Reuse an isolated worktree already supplied by the user. Load
    `references/preflight.md` for details. Missing MCP is an infrastructure
    limitation; do not fabricate a DepLoom plan.
-2. **Plan.** Send the objective, `target_mode`, scope and registry explicitly.
+2. **Plan.** Select the route above. For `get_upgrade_plan`, send the objective,
+   `target_mode`, scope and registry explicitly. The following blueprint-specific
+   fields apply to that route; interpret goal responses using the goal reference.
    Inspect critical evidence before questions or edits: conflicts, unknowns,
    unresolved peers, exact-target security/policy assessment, coverage,
    source/policy identity, and next action. Current-version security does not
    assess a proposed version; complete evidence can describe a blocked plan.
+   For V2 exact targets, read `summary.exactTargetPolicy`: a matching
+   `PROPOSED` target and a blocked final `postPlanGoal` can coexist.
+   Preserve original blockers, required/actual/shortfall, and an unavailable
+   per-package lag status; never infer per-package lag thresholds from `latest`.
    Read `references/blueprint-contract.md`. **Untruncated rows do not mean complete
    decision evidence.** Open the full artifact when critical evidence is absent,
    ambiguous or marked incomplete, even if `truncation.truncated=false`.
@@ -86,6 +97,17 @@ Advisory mode changes recommendations, never proven peers/engines or user pins.
    Separate session completion, installation, project checks, runtime and policy;
    preserve failed attempts. The helper checks consistency, not execution truth.
    Do not commit, push, publish or remove the working copy without authorization.
+
+## Optional official migration evidence
+
+Ordinary planning omits `migration_evidence_request`. Load
+`references/goal-and-migration-evidence.md` only when the task needs the explicit
+goal route or official migration references. Add evidence only for an existing
+authorized need, a supported observed exact transition and sufficient deadline.
+A small update does not establish safety, but it does not itself justify another
+lookup either. Reuse adequate fresh pinned references; avoid repeating a plan
+just to obtain the same material. References and syntax observations grant no
+repair, verification or execution authority.
 
 ## Recovery rules
 
@@ -125,6 +147,8 @@ repairs distinct from the original result.
 
 ## References
 
+- `references/goal-and-migration-evidence.md` — explicit goal route, conditional
+  official references, syntax-only limits and separate loaded-content evidence.
 - `references/blueprint-contract.md` — requests, compact completeness, workspace
   coverage, pinned/advisory semantics and targeted recovery.
 - `references/preflight.md` — baseline, scope, authority and checkout selection.

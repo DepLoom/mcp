@@ -176,6 +176,24 @@ def _deduce_worktree(lines: list[str]) -> pathlib.Path | None:
     return None
 
 
+def canonical_fixture_files_intact(fixture: pathlib.Path) -> bool:
+    """Immutable fixture oracle: prevent a successful agent from rewriting its tests."""
+    from e2e_fixture import BUILD_JS, SRC_INDEX_JS, VERIFY_JS, PACKAGE_JSON
+    for relative, contents in (
+        ("build.js", BUILD_JS), ("verify.js", VERIFY_JS),
+        ("src/index.js", SRC_INDEX_JS),
+    ):
+        path = fixture / relative
+        if path.is_symlink() or not path.is_file():
+            return False
+        if path.read_text(encoding="utf-8") != contents:
+            return False
+    try:
+        return json.loads((fixture / "package.json").read_text(encoding="utf-8")) == PACKAGE_JSON
+    except (OSError, ValueError, UnicodeError):
+        return False
+
+
 def verify_e2e(fixture: pathlib.Path, out: pathlib.Path, plan: dict) -> int:
     checks: list[tuple[str, bool, str]] = []
     deps = rows_from_plan(plan)
@@ -185,8 +203,13 @@ def verify_e2e(fixture: pathlib.Path, out: pathlib.Path, plan: dict) -> int:
     checks.append(("worktree created outside project", tree is not None, str(tree)))
 
     fixture_manifest = json.loads((fixture / "package.json").read_text(encoding="utf-8"))["dependencies"]
-    unchanged = {name: fixture_manifest.get(name) for name in list(proposed) + list(excluded)}
-    checks.append(("original checkout deps untouched", unchanged == fixture_manifest, str(fixture_manifest)))
+    from e2e_fixture import PACKAGE_JSON
+    checks.append(("original checkout deps untouched",
+                   fixture_manifest == PACKAGE_JSON["dependencies"],
+                   "canonical synthetic baseline comparison, not self-comparison"))
+    checks.append(("original fixture source/build/test untouched",
+                   canonical_fixture_files_intact(fixture),
+                   "canonical public fixture bytes compared independently"))
 
     proc = run(["git", "-C", str(fixture), "status", "--porcelain"], capture=True)
     dirty = [l for l in proc.stdout.splitlines() if l.strip()

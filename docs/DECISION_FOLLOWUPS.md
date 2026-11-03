@@ -43,9 +43,16 @@ Checks include:
 - approved major lines (including the current-major default for the
   latest-compatible-in-approved-lines objective);
 - pinned replan requirement versus advisory alternative;
-- known blockers of the *unchanged published assignment*;
+- known blockers of the *unchanged published assignment*, including
+  final-target policy violations even when the exact version is PROPOSED;
 - input-file drift based on Core's recorded byte hashes;
 - partial planning and workspace reconciliation requirements.
+
+For an unchanged assignment, \`PUBLISHED_PLAN_BLOCKER\` carries
+\`evidenceCode\`, \`evidenceRef\`, lifecycle and project/scope provenance.
+An \`ACTIVE_FINAL\` \`TARGET_POLICY_BLOCKED\` is a real published policy
+failure, not the old source spec made immutable. \`PROPOSED\` signifies a
+planner target, not health-policy success or a verified migration.
 
 Results:
 - \`MATCHES_PUBLISHED_PLAN\`: no divergence detected from the published

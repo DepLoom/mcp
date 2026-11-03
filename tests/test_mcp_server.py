@@ -19,6 +19,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from collections.abc import Mapping
 from pathlib import Path
@@ -27,6 +28,8 @@ from typing import Optional
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+from process_witness import TreeWitness  # noqa: E402
 
 from mcp import ClientSession, StdioServerParameters, stdio_client  # noqa: E402
 from mcp.shared.exceptions import MCPError  # noqa: E402
@@ -40,6 +43,7 @@ from deploom_mcp.server import (  # noqa: E402
     KIND,
     MIN_DEADLINE_SECONDS,
     TOOL_NAME,
+    _result,
     _result_from_planning,
     compact_blueprint,
     get_upgrade_plan,
@@ -546,7 +550,7 @@ class CompactProtocolTests(unittest.TestCase):
 
     @staticmethod
     def _serialized(payload: Dict[str, Any]) -> int:
-        return len(json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
+        return len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
 
     def test_reported_bytes_equals_actual_serialized_size(self) -> None:
         compact = compact_blueprint(self._huge_blueprint())
@@ -612,7 +616,7 @@ class CompactProtocolTests(unittest.TestCase):
 
     def test_payload_reserializes_stably(self) -> None:
         compact = compact_blueprint(self._huge_blueprint(rows=5000))
-        text = json.dumps(compact, ensure_ascii=False, indent=2).encode("utf-8")
+        text = _result(compact).content[0].text.encode("utf-8")
         reparsed = json.loads(text.decode("utf-8"))
         self.assertEqual(compact, reparsed)
         self.assertEqual(len(text), compact["truncation"]["bytes"])
@@ -707,6 +711,7 @@ class AppliedPolicyProtocolTests(unittest.TestCase):
 class MCPStdioRoundTripTests(unittest.IsolatedAsyncioTestCase):
     """Boot the real server over stdio via the official MCP client SDK."""
 
+    @contextlib.asynccontextmanager
     async def _session(self, state_dir: Path, extra_env: Optional[Mapping[str, str]] = None):
         params = StdioServerParameters(
             command=sys.executable,
@@ -719,16 +724,42 @@ class MCPStdioRoundTripTests(unittest.IsolatedAsyncioTestCase):
                 await session.initialize()
                 yield session
 
+    async def test_session_body_exception_closes_in_owning_task(self) -> None:
+        # Exercise the real SDK scopes: a failing body must not be finalized in
+        # another task or cancel the next operation in this test.
+        class BodyFailure(Exception):
+            pass
+
+        def leaves(exc):
+            if isinstance(exc, BaseExceptionGroup):
+                return [leaf for nested in exc.exceptions for leaf in leaves(nested)]
+            return [exc]
+
+        with tempfile.TemporaryDirectory(prefix="ub-mcp-body-failure-") as state:
+            try:
+                async with self._session(Path(state)) as session:
+                    await session.list_tools()
+                    raise BodyFailure("controlled body exception")
+            except BaseException as exc:
+                observed = leaves(exc)
+                self.assertTrue(observed)
+                self.assertTrue(all(isinstance(leaf, BodyFailure) for leaf in observed), repr(exc))
+            else:
+                self.fail("body exception was swallowed")
+            await asyncio.sleep(0)
+            async with self._session(Path(state)) as next_session:
+                self.assertTrue((await next_session.list_tools()).tools)
+
     async def test_list_tools_exposes_get_upgrade_plan(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ub-mcp-state-") as state:
-            async for session in self._session(Path(state)):
+            async with self._session(Path(state)) as session:
                 tools = await session.list_tools()
                 names = [t.name for t in tools.tools]
         self.assertIn(TOOL_NAME, names)
 
     async def test_invalid_goal_returns_machine_readable_error(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ub-mcp-state-") as state:
-            async for session in self._session(Path(state)):
+            async with self._session(Path(state)) as session:
                 result = await session.call_tool(
                     TOOL_NAME, {"project_path": "C:/nope", "target_level": "purple"}
                 )
@@ -739,7 +770,7 @@ class MCPStdioRoundTripTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_missing_project_returns_project_not_found(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ub-mcp-state-") as state:
-            async for session in self._session(Path(state)):
+            async with self._session(Path(state)) as session:
                 result = await session.call_tool(
                     TOOL_NAME, {"project_path": "C:/definitely/not/here"}
                 )
@@ -770,7 +801,7 @@ class MCPStdioRoundTripTests(unittest.IsolatedAsyncioTestCase):
 
             before = {p.name: p.read_bytes() for p in proj.iterdir()}
             state = root / "state"
-            async for session in self._session(state):
+            async with self._session(state) as session:
                 result = await session.call_tool(TOOL_NAME, {
                     "project_path": str(proj), "target_level": "yellow",
                     "min_lag_ok_pct": 80, "deadline_seconds": 90.0,
@@ -792,7 +823,7 @@ class MCPStdioRoundTripTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_deadline_is_clamped_on_the_wire(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ub-mcp-state-") as state:
-            async for session in self._session(Path(state)):
+            async with self._session(Path(state)) as session:
                 result = await session.call_tool(TOOL_NAME, {
                     "project_path": "C:/nope", "deadline_seconds": 0.5,
                 })
@@ -809,7 +840,7 @@ class MCPStdioRoundTripTests(unittest.IsolatedAsyncioTestCase):
             before = _tree_snapshot(root)
 
             state = proj / "state"  # managed state NESTED inside the analysed project
-            async for session in self._session(state):
+            async with self._session(state) as session:
                 result = await session.call_tool(TOOL_NAME, {"project_path": str(proj)})
             after = _tree_snapshot(root)
 
@@ -835,6 +866,9 @@ class MCPStdioRoundTripTests(unittest.IsolatedAsyncioTestCase):
                 encoding="utf-8",
             )
             marker = root / "marker.txt"
+            witness = TreeWitness(marker) if os.name == "nt" else None
+            if witness is not None:
+                self.addCleanup(witness.close)
             mode_file = root / "mode.txt"
             mode_file.write_text("slow", encoding="utf-8")
             env = {
@@ -843,7 +877,7 @@ class MCPStdioRoundTripTests(unittest.IsolatedAsyncioTestCase):
                 "SLOW_CORE_MODE_FILE": str(mode_file),
             }
             state = root / "state"
-            async for session in self._session(state, extra_env=env):
+            async with self._session(state, extra_env=env) as session:
                 # The SDK sends `notifications/cancelled` when a request hits its
                 # own read-timeout deadline (courtesy-cancel abandon path). Fire
                 # it well after the planner is provably alive but far before the
@@ -864,6 +898,12 @@ class MCPStdioRoundTripTests(unittest.IsolatedAsyncioTestCase):
                         await call
                     self.fail("planner never started (heartbeat marker never appeared)")
 
+                if witness is not None:
+                    ready_deadline=time.monotonic()+5
+                    while witness.bound_at is None and witness.error is None and time.monotonic()<ready_deadline:
+                        await asyncio.sleep(.005)
+                    witness.require_bound()
+
                 # The abandoned request raises MCPError with the SDK's timeout
                 # code client-side, while the server cancels the handler and the
                 # async process runner kills the whole planner child tree.
@@ -882,6 +922,9 @@ class MCPStdioRoundTripTests(unittest.IsolatedAsyncioTestCase):
                     count_after_cancel, count_later,
                     "planner kept running after cancellation (heartbeat marker still growing)",
                 )
+
+                if witness is not None:
+                    self.assertFalse(witness.any_alive(), "bound planner or child survived cancellation")
 
                 # Same server session must still serve a fresh, successful call.
                 mode_file.write_text("ok", encoding="utf-8")

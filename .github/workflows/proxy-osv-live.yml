@@ -5,6 +5,11 @@ on:
       - 'src/deploom_mcp/**'
       - 'scripts/smoke_live_proxy_osv.py'
       - 'tests/test_system_proxy.py'
+      # Repinning the embedded Core changes the executable planner even if
+      # no MCP Python source changes. Always run the real OSV smoke for it.
+      - 'upstream/deploom'
+      - 'release-manifest.json'
+      - 'contracts/upgrade-blueprint.schema.json'
       - '.github/workflows/proxy-osv-live.yml'
   workflow_dispatch:
 permissions:

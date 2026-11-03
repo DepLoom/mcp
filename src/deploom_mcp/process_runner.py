@@ -240,6 +240,14 @@ def _close_async_process(proc) -> None:
         pass
 
 
+async def _wait_killed_process(proc):
+    """A kill request is not proof of termination; bound the follow-up wait."""
+    try:
+        return await asyncio.wait_for(proc.wait(), timeout=10.0)
+    except asyncio.TimeoutError as exc:
+        raise RuntimeError("PROCESS_TREE_STOP_UNCONFIRMED") from exc
+
+
 async def run_process_async(
     argv: List[str],
     *,
@@ -278,15 +286,21 @@ async def run_process_async(
     except asyncio.TimeoutError:
         timed_out = True
         kill_process_tree(proc)
-        returncode = await proc.wait()
+        try:
+            returncode = await _wait_killed_process(proc)
+        except BaseException:
+            await _stop_readers(readers)
+            _close_async_process(proc)
+            raise
     except BaseException:
         kill_process_tree(proc)
         try:
-            await proc.wait()
+            await _wait_killed_process(proc)
         except (OSError, ProcessLookupError):  # pragma: no cover
             pass
-        await _stop_readers(readers)
-        _close_async_process(proc)
+        finally:
+            await _stop_readers(readers)
+            _close_async_process(proc)
         raise
     await _stop_readers(readers)
     _close_async_process(proc)

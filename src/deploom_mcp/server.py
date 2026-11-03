@@ -66,6 +66,12 @@ from deploom_mcp.decisions import (
 from deploom_mcp.target_assessment import target_assessment, target_decision_evidence
 from deploom_mcp.proxy_settings import ProxySettingError, resolve_system_proxy
 from deploom_mcp.decision_followups import evaluate_assignment, explain_conflict
+from deploom_mcp.registry_projection import (
+    compact_registry_candidate, project_no_target_code, project_registry_aggregate,
+)
+
+from deploom_mcp.goal_tools import register_goal_tools
+from deploom_mcp.workspace_tools import register_workspace_tools
 
 SERVER_NAME = "deploom-mcp"
 TOOL_NAME = "get_upgrade_plan"
@@ -145,6 +151,8 @@ def _build_request(
     objective: str = OBJECTIVES[0],
     mutable_packages: Optional[List[str]] = None,
     approved_version_lines: Optional[Dict[str, List[int]]] = None,
+    required_packages: Optional[List[str]] = None,
+    exact_targets: Optional[Dict[str, str]] = None,
     draft_max_candidates: int = 3,
     previous_evidence_digest: Optional[str] = None,
     use_system_proxy: Optional[bool] = None,
@@ -161,9 +169,28 @@ def _build_request(
         contract = normalize_decision_contract({
             "targetMode": target_mode, "objective": objective,
             "mutablePackages": mutable_packages, "approvedVersionLines": approved_version_lines,
+            "exactTargets": exact_targets or {},
         })
     except ValueError as exc:
         return _error("invalid-intent", str(exc)), None
+    # Existing pinned Core supports the legacy 'required' policy in its
+    # baseline intent. This means "must move", NOT "exact requested version".
+    # Keep it separate from decisionContract V1 major-line bounds: embedding
+    # it in approvedVersionLines would silently change its meaning.
+    required: list[str] = []
+    if required_packages is not None:
+        if (not isinstance(required_packages, list)
+            or len(required_packages) > 1024
+            or any(not isinstance(x, str) or not x.strip()
+                   for x in required_packages)):
+            return _error("invalid-intent", "required_packages must be an array of at most 1024 non-empty names"), None
+        required = sorted(set(x.strip() for x in required_packages))
+        if (contract["mutablePackages"] is not None
+                and any(x not in contract["mutablePackages"] for x in required)):
+            return _error("invalid-intent", "required_packages must be inside mutable_packages"), None
+    if exact_targets:
+        if required_packages and any(name in exact_targets for name in required_packages):
+            return _error("invalid-intent", "exact target must not also be a separate required movement"), None
     if isinstance(draft_max_candidates, bool) or not isinstance(draft_max_candidates, int) or not (1 <= draft_max_candidates <= MAX_DRAFT_CANDIDATES):
         return _error("invalid-candidate-cap", f"draft_max_candidates must be an integer in [1, {MAX_DRAFT_CANDIDATES}]"), None
     if previous_evidence_digest is not None and (not isinstance(previous_evidence_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", previous_evidence_digest)):
@@ -212,6 +239,15 @@ def _build_request(
             name = item.strip()
             if name not in exclusions:
                 exclusions.append(name)
+
+    if any(name in exclusions for name in required):
+        return _error("invalid-intent", "required_packages cannot also be excluded"), None
+    if any(name in exclusions for name in (contract.get("exactTargets") or {})):
+        return _error("invalid-intent", "exact_targets cannot also be excluded"), None
+    if required:
+        # The Core input is a trusted, normalized user-requested intent. Core
+        # still owns candidate selection, compatibility and solver status.
+        contract = {**contract, "policies": {name: "required" for name in required}}
 
     # Resolve (but do NOT create) the managed state location. Every write the
     # boundary performs -- run artifacts, registry metadata cache, exclusive
@@ -343,6 +379,101 @@ def _result_from_planning(result, requested: Optional[BlueprintPolicy] = None) -
     return response
 
 
+def _exact_target_policy_summary(
+    blueprint: Dict[str, Any], status: Dict[str, Any],
+    assessment: Dict[str, Any], critical_evidence: List[Dict[str, Any]],
+    *, max_inline_rows: int, max_inline_evidence: int,
+) -> Optional[Dict[str, Any]]:
+    """Link the EXISTING exact target and final health facts, never re-solve.
+
+    This is a compact presentation of Core's published plan/targetAssessment,
+    not a new policy, compatibility decision, or alternative recommendation.
+    Row-specific lag minima/timestamps are NOT in the public Blueprint.
+    """
+    policy = blueprint.get("policy") or {}
+    contract = policy.get("decisionContract") or {}
+    if (contract.get("version") != 2
+            or contract.get("objective") != "explicit-version-targets"
+            or not isinstance(contract.get("exactTargets"), dict)
+            or not contract["exactTargets"]):
+        return None
+    requested = contract["exactTargets"]
+    selected = [r for r in (blueprint.get("dependencies") or [])
+                if isinstance(r, dict) and r.get("package") in requested]
+    matching = {
+        package for package in requested
+        if any(r.get("package") == package for r in selected)
+        and all(r.get("target") == requested[package] and r.get("status") == "PROPOSED"
+                for r in selected if r.get("package") == package)
+    }
+    visible_rows = [{
+        "package": r.get("package"), "declarationId": r.get("declarationId"),
+        "current": r.get("current"), "requestedExactTarget": requested[r["package"]],
+        "publishedTarget": r.get("target"), "rowStatus": r.get("status"),
+        "matchesExactTarget": (r.get("target") == requested[r["package"]]
+                               and r.get("status") == "PROPOSED"),
+        "evidenceRef": f"#/dependencies/{i}",
+    } for i, r in enumerate(blueprint.get("dependencies") or [])
+        if isinstance(r, dict) and r.get("package") in requested][:max_inline_rows]
+
+    # Core's policy goal is authoritative. Never equate exact proposal
+    # with final target health (nor a clean health goal with runtime verification).
+    aggregate = assessment.get("aggregate") or {}
+    facts = ("postPlanGoal", "postPlanTargetLevel", "postPlanLagOk",
+             "postPlanScopeTotal", "postPlanLagOkPct", "postPlanPolicyRequired",
+             "postPlanPolicyShortfall", "postPlanReserveRequired",
+             "postPlanReserveShortfall", "postPlanSecurityUnknown")
+    final_health = {key: aggregate.get(key) for key in facts}
+    relevant = [e for e in critical_evidence
+                if e.get("severity") == "BLOCKER"
+                and e.get("lifecycle") in ("ACTIVE_FINAL", "CURRENT_ROW")]
+    provenance = [{
+        key: e.get(key) for key in ("code", "severity", "scope", "project",
+                                   "package", "lifecycle", "evidenceRef")
+    } for e in relevant[:max_inline_evidence]]
+    complete_match = (
+        status.get("draftStatus") == "DRAFT_READY"
+        and len(matching) == len(requested)
+    )
+    goal = final_health["postPlanGoal"]
+    scope = final_health["postPlanScopeTotal"]
+    actual = final_health["postPlanLagOk"]
+    required = final_health["postPlanPolicyRequired"]
+    shortfall = final_health["postPlanPolicyShortfall"]
+    def show(value: Any) -> str:
+        return str(value) if type(value) in (int, float) else "unknown"
+    readable = (
+        ("Exact target(s) are PROPOSED in the published plan; "
+         if complete_match else
+         "Requested exact target(s) are not all PROPOSED in a complete plan; ")
+        + f"final {policy.get('targetLevel') or 'unknown'} health policy: "
+        + f"{goal if goal in ('feasible', 'blocked', 'unknown') else 'unknown'}; "
+        + f"lag-OK {show(actual)}/{show(scope)}, required {show(required)}, "
+        + f"shortfall {show(shortfall)}. "
+        + "PLANNING_ONLY / NOT_VERIFIED; peer/runtime compatibility is not proven. "
+        + "Per-package lag thresholds are unavailable from the published Blueprint."
+    )
+    return {
+        "requestedExactTargets": dict(sorted(requested.items())),
+        "allRequestedTargetsProposed": complete_match,
+        "matchedRequestedPackageCount": len(matching),
+        "requestedPackageCount": len(requested),
+        "publishedAssignments": visible_rows,
+        "totalPublishedAssignments": len(selected),
+        "assignmentsClipped": len(visible_rows) != len(selected),
+        "finalHealthPolicy": {
+            **final_health,
+            "appliedMinLagOkPct": policy.get("minLagOkPct"),
+            "evidenceRef": "#/targetAssessment/aggregate",
+            "evidenceComplete": assessment.get("evidenceComplete") is True,
+        },
+        "blockers": provenance, "totalBlockers": len(relevant),
+        "blockersClipped": len(provenance) != len(relevant),
+        "perPackageLagEvidence": {"availability": "UNAVAILABLE_IN_PUBLISHED_BLUEPRINT"},
+        "readout": readable,
+    }
+
+
 def _compact_payload(
     blueprint: Dict[str, Any],
     *,
@@ -405,7 +536,7 @@ def _compact_payload(
         key=lambda e: (0 if e.get("severity") == "BLOCKER" else 1,
                        str(e.get("package") or ""), str(e.get("evidenceRef") or ""), str(e.get("code") or "")),
     )
-    details_clipped = False
+    details_clipped = bool((blueprint.get("registryDiagnostics") or {}).get("projectionTruncated"))
 
     def detail(value):
         nonlocal details_clipped
@@ -445,6 +576,19 @@ def _compact_payload(
             "nextAction": row.get("nextAction") or "READ_PLANNER_EVIDENCE",
             "evidenceRef": f"#/dependencies/{len(dependencies)}",
         })
+        code = project_no_target_code(
+            row.get("noTargetDiagnosticCode"), str(row.get("status") or "").lower().replace("_", "-"),
+            row.get("registryCandidateDiagnostics"),
+        )
+        if code is not None:
+            dependencies[-1]["noTargetDiagnosticCode"] = code
+        diagnostic = compact_registry_candidate(
+            row.get("registryCandidateDiagnostics"),
+            f"#/dependencies/{len(dependencies) - 1}/registryCandidateDiagnostics",
+        )
+        if diagnostic is not None:
+            dependencies[-1]["registryCandidateDiagnostics"] = diagnostic
+            details_clipped = details_clipped or bool(diagnostic.get("projectionTruncated"))
 
     draft_status = status.get("draftStatus")
     is_partial = draft_status == "DRAFT_PARTIAL"
@@ -481,6 +625,10 @@ def _compact_payload(
                    "FETCH_TARGET_SECURITY_EVIDENCE" if any(e["code"] == "TARGET_SECURITY_UNKNOWN" for e in target_evidence) else
                    "INSPECT_TARGET_ASSESSMENT" if target_evidence else
                    "REVIEW_WITHIN_EXISTING_AUTHORITY" if critical_evidence else "VERIFY_PROPOSED_ASSIGNMENT")
+    exact_policy = _exact_target_policy_summary(
+        blueprint, status, assessment, critical_evidence,
+        max_inline_rows=max_inline_rows, max_inline_evidence=max_inline_evidence,
+    )
     payload = {
         "ok": True,
         "protocol": KIND,
@@ -515,15 +663,25 @@ def _compact_payload(
             "exclusions": list(policy.get("exclusions") or []),
             "policyHash": policy.get("policyHash"),
             **{k: policy[k] for k in ("decisionContract", "coreContractSupport") if k in policy},
+            # Requested legacy Core intent, not solver-proven version authority.
+            **({"requestedRequiredPackages": sorted(
+                k for k, v in ((policy.get("intent") or {}).get("policies") or {}).items()
+                if v == "required"
+            )} if ((policy.get("intent") or {}).get("policies") or {}) else {}),
         },
         "summary": {
             "totalDependencies": summary.get("totalDependencies"),
             "proposed": summary.get("proposed"),
             "needsReview": sum(bool(row.get("needsReview")) for row in all_rows),
             "statusCounts": summary.get("statusCounts") or {},
+            **({"exactTargetPolicy": exact_policy} if exact_policy is not None else {}),
         },
         "recommendationGroups": groups,
         "dependencies": dependencies,
+        # Tiny typed aggregate, independently bounded even for very large
+        # plans. Never expose registry URL identities in compact responses.
+        **({"registryDiagnostics": project_registry_aggregate(blueprint["registryDiagnostics"])}
+           if project_registry_aggregate(blueprint.get("registryDiagnostics")) is not None else {}),
         "decisionEvidence": visible_evidence,
         "targetAssessment": compact_assessment,
         "decisionCompleteness": {
@@ -571,9 +729,13 @@ def _compact_payload(
     return payload, metrics
 
 
+def _wire_json(payload: Dict[str, Any]) -> str:
+    """Lossless agent-facing JSON; artifacts remain human-readable."""
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
 def _serialized_bytes(payload: Dict[str, Any]) -> int:
-    # Measure the exact wire form the server emits (indent=2, ensure_ascii=False).
-    return len(json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
+    return len(_wire_json(payload).encode("utf-8"))
 
 
 def _finalize_byte_count(payload: Dict[str, Any]) -> int:
@@ -609,7 +771,7 @@ def compact_blueprint(
     the ``truncation`` block -- must fit ``max_response_bytes``: when it does
     not, the display caps are reduced deterministically (packages -> groups ->
     rows) until it does, and ``truncation.bytes`` always equals the exact size
-    of the final JSON payload (``ensure_ascii=False, indent=2``), never a
+    of the final JSON payload (``ensure_ascii=False, separators=(",", ":")``), never a
     pre-truncation estimate.
 
     The cap applies to the serialized **payload** (the text in the tool result
@@ -722,6 +884,8 @@ def get_upgrade_plan(
     objective: str = OBJECTIVES[0],
     mutable_packages: Optional[List[str]] = None,
     approved_version_lines: Optional[Dict[str, List[int]]] = None,
+    required_packages: Optional[List[str]] = None,
+    exact_targets: Optional[Dict[str, str]] = None,
     draft_max_candidates: int = 3,
     previous_evidence_digest: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -743,6 +907,8 @@ def get_upgrade_plan(
         objective=objective,
         mutable_packages=mutable_packages,
         approved_version_lines=approved_version_lines,
+        required_packages=required_packages,
+        exact_targets=exact_targets,
         draft_max_candidates=draft_max_candidates,
         previous_evidence_digest=previous_evidence_digest,
     )
@@ -757,18 +923,19 @@ def get_upgrade_plan(
     name=TOOL_NAME,
     title="Upgrade plan",
     description=(
-        "Produce a planning-only dependency upgrade plan for a Node project. "
-        "Runs the pinned DepLoom planning core as an isolated subprocess and "
-        "returns a compact Upgrade Blueprint protocol. Never writes to the project; "
-        "output and metadata caching happen in a managed directory outside the "
-        "project. exclude lists package names removed from planning scope BEFORE "
-        "planning (not filtered afterwards). Honesty: authority is always "
-        "PLANNING_ONLY; a PROPOSED verdict means 'can be proposed', NOT 'already "
-        "updated'. target_mode selects pinned targets or advisory suggestions; "
-        "neither relaxes compatibility constraints. mutable_packages limits changes "
-        "while retaining the other packages as constraints. draft_max_candidates "
-        "widens candidate evidence independently of the deadline. Review critical "
-        "evidence and workspaceCoverage before acting within existing user authority."
+        "Plan Node upgrades using pinned Core; never edits the project. Output, state "
+        "and metadata cache remain outside it. PLANNING_ONLY/NOT_VERIFIED: PROPOSED "
+        "is not installed or runtime-verified. target_mode=pinned|advisory changes "
+        "recommendations, never peer/engine guards. Set objective, mutable_packages, "
+        "approved_version_lines and registry explicitly. Exclusions apply before "
+        "planning; other packages remain constraints. required_packages means move, "
+        "not exact. For exact stable assignments use objective=explicit-version-targets "
+        "with exact_targets; summary.exactTargetPolicy separates feasibility from "
+        "final health, shortfall and original blockers; per-row lag proof may be "
+        "unavailable. Inspect decisionCompleteness, decisionEvidence and workspaceCoverage; "
+        "read artifacts for missing critical evidence. Unknown security/runtime stays "
+        "NOT_VERIFIED. draft_max_candidates bounds search, deadline_seconds bounds time. "
+        "Act only within existing authority."
     ),
 )
 async def get_upgrade_plan_tool(
@@ -786,6 +953,8 @@ async def get_upgrade_plan_tool(
     objective: str = OBJECTIVES[0],
     mutable_packages: Optional[List[str]] = None,
     approved_version_lines: Optional[Dict[str, List[int]]] = None,
+    required_packages: Optional[List[str]] = None,
+    exact_targets: Optional[Dict[str, str]] = None,
     draft_max_candidates: int = 3,
     previous_evidence_digest: Optional[str] = None,
     ctx: Context = None,  # type: ignore[assignment]  # injected by MCPServer
@@ -805,6 +974,8 @@ async def get_upgrade_plan_tool(
         objective=objective,
         mutable_packages=mutable_packages,
         approved_version_lines=approved_version_lines,
+        required_packages=required_packages,
+        exact_targets=exact_targets,
         draft_max_candidates=draft_max_candidates,
         previous_evidence_digest=previous_evidence_digest,
     )
@@ -827,7 +998,7 @@ async def get_upgrade_plan_tool(
         "Inspect an exact-version candidate assignment against a previously "
         "published full Upgrade Blueprint. Checks recorded decision authority, "
         "mutable/excluded declarations, approved major lines, source drift, "
-        "known plan blockers, and whether pinned targets require replanning. "
+        "known published blockers (including final health-policy failures even when a version is PROPOSED), and pinned replan requirements. "
         "Keys may be package names or declarationIds; unspecified rows keep the "
         "published selected/current version. This is NOT a fresh Z3 solver, "
         "peer registry check, installed-tree audit or security/policy certification. "
@@ -880,10 +1051,14 @@ async def explain_conflict_tool(
 def _result(payload: Dict[str, Any]) -> CallToolResult:
     is_error = not bool(payload.get("ok"))
     return CallToolResult(
-        content=[TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))],
+        content=[TextContent(type="text", text=_wire_json(payload))],
         isError=is_error,
         structuredContent=payload,
     )
+
+
+register_goal_tools(server, _result)
+register_workspace_tools(server, _result)
 
 
 def main() -> int:
