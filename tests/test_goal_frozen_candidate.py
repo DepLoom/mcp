@@ -13,6 +13,7 @@ from deploom_mcp.goal_execution_registry import OPERATION,FROZEN_ROUTE,load_host
 from deploom_mcp.goal_delta_trial import propose_exact_delta,APPLY_OPERATION
 from deploom_mcp.goal_verifier_bridge import execute_registered_private_candidate,scoped_profile_requirements_complete
 
+@unittest.skipUnless(os.name=='nt','Native guaranteed-tree candidate execution is Windows-only')
 class FrozenRealOwnerTests(unittest.TestCase):
  @classmethod
  def setUpClass(cls):
