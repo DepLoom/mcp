@@ -1,5 +1,7 @@
 # DepLoom MCP
 
+Release maintainers: see the [component release instructions](docs/RELEASING.md).
+
 Headless upgrade-planning boundary and MCP server for the DepLoom ecosystem.
 
 DepLoom MCP exposes the Python planning Core through `get_upgrade_plan`,

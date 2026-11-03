@@ -12,6 +12,12 @@ on:
       - "docs/P1_CORRECTNESS_BENCH_PREFLIGHT.md"
       - "docs/P2_CHALK_BREAKING_API_DEMO.md"
       - ".github/workflows/correctness-preflight.yml"
+  workflow_call:
+    inputs:
+      release_ref:
+        required: false
+        type: string
+        default: ''
   workflow_dispatch:
 
 permissions:
@@ -24,6 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.release_ref || github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
       - uses: actions/setup-python@v5
         with:
@@ -36,11 +43,14 @@ jobs:
       - name: Targeted fail-closed oracle unit regression
         run: python -m unittest discover -s tests -p test_correctness_oracle.py -v
       - name: Build wheel for actual packaged stdio
-        run: python -m build --no-isolation
+        id: wheel
+        run: |
+          python -m build --no-isolation
+          python scripts/component_release.py --wheel-output
       - name: Run isolated npm install/build/test oracle and packaged MCP stdio
         run: |
           python scripts/correctness_preflight.py selftest \
-            --wheel dist/deploom_mcp-0.2.1-py3-none-any.whl \
+            --wheel ${{ steps.wheel.outputs.wheel }} \
             --report "${{ runner.temp }}/p1-correctness.json"
       - name: Archive synthetic outcomes only (no raw logs or registry URLs)
         if: always()
@@ -77,6 +87,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.release_ref || github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
       - uses: actions/setup-python@v5
         with:
@@ -89,11 +100,14 @@ jobs:
       - name: Focused independent-oracle negative regressions
         run: python -m unittest discover -s tests -p test_correctness_oracle.py -v
       - name: Build actual pinned Core/MCP wheel
-        run: python -m build --no-isolation
+        id: wheel
+        run: |
+          python -m build --no-isolation
+          python scripts/component_release.py --wheel-output
       - name: Real Chalk breaking API demo (NO agent or migrations)
         run: >-
           python scripts/correctness_preflight.py breaking-demo
-          --wheel dist/deploom_mcp-0.2.1-py3-none-any.whl
+          --wheel ${{ steps.wheel.outputs.wheel }}
           --report "${{ runner.temp }}/p2-chalk-receipt.json"
           --snapshot-dir "${{ runner.temp }}/p2-chalk-frozen-baseline"
       - name: Archive public baseline + sanitized receipt only
