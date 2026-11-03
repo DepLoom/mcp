@@ -97,7 +97,7 @@ try {
   $dist = Join-Path $out 'dist'
   New-Item -Path $dist -ItemType Directory | Out-Null
   Run-Native $py @('-m','build','--no-isolation','--outdir',$dist) 'WHEEL_BUILD_FAILED'
-  $wheel = Join-Path $dist 'deploom_mcp-0.2.0-py3-none-any.whl'
+  $wheel = Join-Path $dist ('deploom_mcp-{0}-py3-none-any.whl' -f $releaseManifest.mcpVersion)
   if (-not (Test-Path -LiteralPath $wheel -PathType Leaf)) { throw 'EXPECTED_WHEEL_MISSING' }
   $wheelSha = (Get-FileHash -LiteralPath $wheel -Algorithm SHA256).Hash.ToLowerInvariant()
 

@@ -40,7 +40,7 @@ jobs:
       - name: Run isolated npm install/build/test oracle and packaged MCP stdio
         run: |
           python scripts/correctness_preflight.py selftest \
-            --wheel dist/deploom_mcp-0.2.0-py3-none-any.whl \
+            --wheel dist/deploom_mcp-0.2.1-py3-none-any.whl \
             --report "${{ runner.temp }}/p1-correctness.json"
       - name: Archive synthetic outcomes only (no raw logs or registry URLs)
         if: always()
@@ -93,7 +93,7 @@ jobs:
       - name: Real Chalk breaking API demo (NO agent or migrations)
         run: >-
           python scripts/correctness_preflight.py breaking-demo
-          --wheel dist/deploom_mcp-0.2.0-py3-none-any.whl
+          --wheel dist/deploom_mcp-0.2.1-py3-none-any.whl
           --report "${{ runner.temp }}/p2-chalk-receipt.json"
           --snapshot-dir "${{ runner.temp }}/p2-chalk-frozen-baseline"
       - name: Archive public baseline + sanitized receipt only
