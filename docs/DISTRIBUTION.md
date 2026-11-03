@@ -14,7 +14,7 @@ evaluating an agent session.
 
 ## Build from the pinned source checkout
 
-Use Python 3.12–3.14 and initialize the submodule. Install the package runtime
+Use Python 3.12–3.13 and initialize the submodule. Install the package runtime
 dependencies and the `build`, `setuptools` and `wheel` build tools in a dedicated
 environment. After changing the Core pin or canonical resources:
 
@@ -41,7 +41,7 @@ Skill drift fails the build until the manifest is refreshed deliberately.
 ## Install and run a locally built wheel
 
 ```bash
-python -m pip install dist/deploom_mcp-0.2.0-py3-none-any.whl
+python -m pip install dist/deploom_mcp-0.2.1-py3-none-any.whl
 deploom-mcp
 deploom-install-skill --client codex --scope user --verify
 ```
@@ -57,7 +57,7 @@ package and its resources have passed distribution checks.
 python -m unittest discover -s tests -v
 python scripts/smoke_stdio.py
 python -m build --no-isolation
-python scripts/smoke_wheel.py dist/deploom_mcp-0.2.0-py3-none-any.whl
+python scripts/smoke_wheel.py dist/deploom_mcp-0.2.1-py3-none-any.whl
 ```
 
 `smoke_wheel.py` creates a temporary environment outside the checkout. It reuses
