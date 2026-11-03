@@ -29,6 +29,8 @@ environment variables (never by the project):
 from __future__ import annotations
 
 import os
+import json
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -61,6 +63,15 @@ def _write(path: Path, text: str) -> None:
 def slow_mode() -> int:
     marker_path = Path(MARKER) if MARKER else None
     pid = os.getpid()
+    # Optional test-owned handshake adds one real descendant. Existing heartbeat
+    # bytes and cadence remain unchanged; no handshake means original behavior.
+    if marker_path is not None and marker_path.with_suffix(".nonce").is_file():
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
+        data = {"parent": pid, "child": child.pid,
+                "nonce": marker_path.with_suffix(".nonce").read_text(encoding="ascii")}
+        pending = marker_path.with_suffix(".tree.tmp")
+        pending.write_text(json.dumps(data), encoding="ascii")
+        os.replace(pending, marker_path.with_suffix(".tree.json"))
     n = 0
     while True:
         n += 1

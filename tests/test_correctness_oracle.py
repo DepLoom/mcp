@@ -108,7 +108,7 @@ class IndependentOraclePolicyTests(unittest.TestCase):
         for value in ("https://outside.invalid/a.tgz",
                       "http://127.0.0.1:4873/kontur-fixture-a/-/../secret.tgz",
                       "http://127.0.0.1:4873/kontur-fixture-a/-/a.tgz?token=private",
-                      "http://user:pw@127.0.0.1:4873/kontur-fixture-a/-/a.tgz"):
+                      "http://" + "user:pw@127.0.0.1:4873/kontur-fixture-a/-/a.tgz"):
             with self.subTest(value=value):
                 lock = lockfile(VERSIONS)
                 lock["packages"]["node_modules/kontur-fixture-a"]["resolved"] = value

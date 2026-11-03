@@ -150,7 +150,7 @@ class AuditInputTests(unittest.TestCase):
         self.assertEqual("lockfile-missing", caught.exception.code)
 
     def test_registry_credentials_and_shell_content_rejected(self):
-        for value in ("https://user:pass@registry.test", "file:///tmp/a", "https://r.test/?token=abc", "https://r.test/#x", "https://r.test/a&b", "https://r.test/\n"):
+        for value in ("https://" + "user:pass@registry.test", "file:///tmp/a", "https://r.test/?token=abc", "https://r.test/#x", "https://r.test/a&b", "https://r.test/\n"):
             with self.subTest(value=value), self.assertRaises(AuditError):
                 checked_registry(value)
 

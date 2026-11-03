@@ -26,18 +26,19 @@ import time
 import uuid
 from typing import Any
 
-from correctness_oracle import source_files
+from correctness_oracle import CHALK_REGISTRY, source_files
 from d1_chalk6_scorer import (
     EXPECTED_SEED_SHA256, FROZEN_FILENAMES, D1_AB_CHALK6_TARGET,
     source_sha, verify_chalk6_frozen,
 )
 from d1_owned_process import OwnedProcess
+from d1_appserver import execute_appserver, budget_feasible
 from d1_yellow_policy_demo import check_policy_receipt, DemoFailure
 
 CLI_VERSION = "0.165.0"
 MODEL = "gpt-6.1-terra"
 EFFORT = "medium"
-MAX_INPUT, MAX_OUTPUT, MAX_TOOLS, MAX_WALL = 20000, 4000, 40, 600
+MAX_INPUT, MAX_OUTPUT, MAX_TOOLS, MAX_WALL = 300000, 8000, 40, 600
 NATIVE_USAGE = ("input_tokens","cached_input_tokens","output_tokens",
                 "reasoning_output_tokens")
 TOOL_ITEMS = {"command_execution","mcp_tool_call","web_search","file_change"}
@@ -54,7 +55,7 @@ source, README, scripts, lock provenance, test behavior and .npmrc are frozen.
 Do not create extra files, delete tests, bypass checks, change scope or
 read another task's outputs. Preserve READY <name> for arbitrary input names.
 Source migration docs: https://github.com/chalk/chalk/releases/tag/v6.0.0
-Use public npm package metadata. Run build/test and real behavior checks.
+Use the package metadata from the registry frozen in .npmrc. Run build/test and real behavior checks.
 DepLoom MCP, if available, is read-only planning. A PROPOSED target and
 feasible health policy are NOT runtime verification; you must apply and test.
 Do not access secrets/private repositories or call external agents. Report
@@ -174,6 +175,7 @@ def price_usd(tokens: dict, rate: tuple[float, float, float] | None) -> float | 
 
 def codex_command(codex: str, workspace: Path, model: str, effort: str,
                   mcp_python: Path | None, mcp_state: Path | None) -> list[str]:
+    workspace=workspace.resolve()
     if model != MODEL or effort != EFFORT:
         raise RuntimeError("EXACT_MODEL_EFFORT_MISMATCH")
     cmd = [codex, "exec", "--ignore-user-config", "--strict-config",
@@ -194,7 +196,8 @@ def codex_command(codex: str, workspace: Path, model: str, effort: str,
             "{command=" + quote_toml(str(mcp_python)) +
             ',args=["-I","-m","deploom_mcp"],env={DEPLOOM_MCP_STATE_DIR=' +
             quote_toml(str(mcp_state)) +
-            "},enabled=true,required=true,startup_timeout_sec=20,tool_timeout_sec=65}"
+            '},enabled=true,required=true,startup_timeout_sec=20,tool_timeout_sec=65,'
+            'tools={get_upgrade_plan={approval_mode="approve",output_token_limit=16000}}}'
         )])
     cmd.append(DEFAULT_PROMPT)
     return cmd
@@ -284,6 +287,8 @@ def private_home(root: Path, source: dict) -> tuple[Path, dict]:
 
 
 def isolated_env(root: Path, codex_home: Path) -> dict:
+    root=root.resolve()
+    codex_home=codex_home.resolve()
     forbidden = {"OPENAI_API_KEY","CODEX_API_KEY","GITHUB_TOKEN","GH_TOKEN",
                  "NPM_TOKEN","NODE_AUTH_TOKEN","AWS_SECRET_ACCESS_KEY",
                  "AZURE_OPENAI_API_KEY","PYTHONPATH","PYTHONHOME",
@@ -346,6 +351,12 @@ class Ledger:
         self.doc["sessions"][arm].update(state=state, **fields)
         self.doc["runState"] = "ACTIVE" if state == "RUNNING" else (
             "UNKNOWN" if state == "UNKNOWN" else self.doc["runState"])
+        self.write()
+
+    def record_usage(self, arm: str, usage: dict):
+        if self.doc["sessions"][arm]["state"] != "RUNNING":
+            raise RuntimeError("USAGE_OUTSIDE_RUNNING_SESSION")
+        self.doc["sessions"][arm]["nativeUsage"] = dict(usage)
         self.write()
 
     def record_native_thread(self, arm: str, native_id: str):
@@ -483,7 +494,7 @@ def validate_gate(seed: Path, wheel: Path, p2: Path, d1: Path, yellow: Path) -> 
             "lockGeneration","cleanInstall","build","test","runtimeMultiInput"))):
         raise RuntimeError("CHALK6_INDEPENDENT_RUNTIME_PREFLIGHT_NOT_PROVEN")
     return {
-        "scenario":"SEPARATE_PUBLIC_CHALK6_EXACT_YELLOW",
+        "scenario": ("SEPARATE_NEXUS_CHALK6_EXACT_YELLOW" if CHALK_REGISTRY != "https://registry.npmjs.org/" else "SEPARATE_PUBLIC_CHALK6_EXACT_YELLOW"),
         "originalP2": {"exactTarget":"5.3.0","policyStatus":"BLOCKED_1_OF_2",
                        "referenceRuntime":"EVALUATOR_ONLY"},
         "chosenTask":{"exactTargets":{"chalk":"6.0.0"},
@@ -520,8 +531,12 @@ def check_host_location(seed: Path, out: Path) -> None:
     # Fail closed on inherited project instructions and MCP config without
     # silently stripping them. Choose a neutral OS temp dir for both arms.
     for p in [o.parent, *o.parent.parents]:
-        if any((p/name).exists() for name in (
-            "AGENTS.md","AGENTS.override.md",".codex/config.toml")):
+        if any((p/name).exists() for name in ("AGENTS.md", "AGENTS.override.md")):
+            raise RuntimeError("APPLICABLE_PARENT_PROJECT_RULES_NOT_CAPTURED")
+        # The user's global config is explicitly disabled for both arms by
+        # --ignore-user-config; its rules are copied and validated separately.
+        # Any project/ancestor config remains a hard stop.
+        if (p / ".codex/config.toml").exists() and p.resolve() != Path.home().resolve():
             raise RuntimeError("APPLICABLE_PARENT_PROJECT_RULES_NOT_CAPTURED")
     if not o.parent.exists():
         raise RuntimeError("OUTPUT_PARENT_MISSING")
@@ -534,7 +549,7 @@ def probe_public_network() -> None:
     import urllib.error
     import urllib.request
     endpoints = (
-        ("NPM_REGISTRY_UNAVAILABLE", "https://registry.npmjs.org/chalk/6.0.0"),
+        ("NPM_REGISTRY_UNAVAILABLE", CHALK_REGISTRY + "chalk/6.0.0"),
         ("PYPI_UNAVAILABLE", "https://pypi.org/simple/build/"),
         ("PUBLIC_GITHUB_UNAVAILABLE", "https://api.github.com/repos/DepLoom/mcp"),
     )
@@ -554,6 +569,8 @@ def probe_public_network() -> None:
 
 def check_ready(args) -> dict:
     check_limits(args)
+    if getattr(args,"transport","exec") == "app-server" and not budget_feasible(args.input_cap,args.output_cap):
+        raise RuntimeError("INITIAL_CONTEXT_EXCEEDS_EARLY_STOP_HEADROOM")
     if not args.seed.is_dir():
         raise RuntimeError("CHALK_SEED_MISSING")
     check_host_location(args.seed,args.out)
@@ -612,6 +629,8 @@ def score_candidate(baseline:Path,workspace:Path,sha:str) -> dict:
 
 
 def launch(args) -> dict:
+    args.out=args.out.resolve()
+    args.seed=args.seed.resolve()
     if not args.approve_one_paid_pair or not args.confirm_model_access or not args.confirm_network_access:
         raise RuntimeError("EXPLICIT_LOCAL_PAIR_MODEL_NETWORK_ATTESTATION_REQUIRED")
     if args.manual_a is None or args.manual_b is None or min(args.manual_a,args.manual_b)<0:
@@ -656,15 +675,26 @@ def launch(args) -> dict:
                 # Durable RUNNING state is written BEFORE launching Codex.
                 ledger.mark(arm,"RUNNING",startMonotonicUnknown=True)
                 try:
-                    metrics=execute(cmd,workspace,env,args.wall,args.tools,
-                                    args.input_cap,args.output_cap,
-                                    on_native_thread=lambda tid: ledger.record_native_thread(arm,tid))
+                    if getattr(args,"transport","exec") == "app-server":
+                        metrics=execute_appserver(cmd,workspace,env,args.wall,args.tools,
+                            args.input_cap,args.output_cap,
+                            on_native_thread=lambda tid: ledger.record_native_thread(arm,tid),
+                            on_usage=lambda u: ledger.record_usage(arm,u))
+                    else:
+                        metrics=execute(cmd,workspace,env,args.wall,args.tools,
+                            args.input_cap,args.output_cap,
+                            on_native_thread=lambda tid: ledger.record_native_thread(arm,tid))
                 except BaseException:
                     ledger.mark(arm,"UNKNOWN",reason="PROCESS_OUTCOME_UNCERTAIN")
                     raise
                 if not metrics["exitSuccess"]:
                     ledger.mark(arm,"UNKNOWN",nativeThreadId=metrics.get("nativeThreadId"),
-                                reason=metrics.get("stopReason") or "CLI_OR_USAGE_INCOMPLETE")
+                                reason=metrics.get("stopReason") or "CLI_OR_USAGE_INCOMPLETE",
+                                nativeUsage=metrics.get("nativeUsage"),
+                                toolCalls=metrics.get("toolCalls"),
+                                wallSeconds=metrics.get("wallSeconds"),
+                                tokenOvershoot=metrics.get("tokenOvershoot"),
+                                cliExitCode=metrics.get("cliExitCode"))
                     raise RuntimeError("A_OR_B_SESSION_UNSAFE_NO_AUTO_RETRY")
                 correctness=score_candidate(args.seed,workspace,EXPECTED_SEED_SHA256)
                 if correctness.get("status") not in ("PASS","FAIL") or correctness.get("reason","") == "INVALID_FROZEN_BASELINE":
@@ -673,7 +703,7 @@ def launch(args) -> dict:
                     raise RuntimeError("INDEPENDENT_ORACLE_OUTCOME_UNSAFE")
                 # An ordinary incorrect agent result is a valid observed
                 # failure; a broken oracle or installation is not.
-                if correctness.get("reason","").startswith((
+                if (correctness.get("reason") or "").startswith((
                     "CHALK_ORACLE_INFRASTRUCTURE_","CHALK_CLEAN_INSTALL_FAILED")):
                     ledger.mark(arm,"UNKNOWN",nativeThreadId=metrics["nativeThreadId"],
                                 reason="INDEPENDENT_ORACLE_INFRASTRUCTURE")
@@ -746,6 +776,7 @@ def build_parser():
         op.add_argument("--codex-auth-home",type=Path)
         op.add_argument("--model",default=MODEL)
         op.add_argument("--effort",default=EFFORT)
+        op.add_argument("--transport",choices=("exec","app-server"),default="exec")
         op.add_argument("--wall",type=int,default=MAX_WALL)
         op.add_argument("--tools",type=int,default=MAX_TOOLS)
         op.add_argument("--input-cap",type=int,default=MAX_INPUT)

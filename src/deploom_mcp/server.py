@@ -70,6 +70,9 @@ from deploom_mcp.registry_projection import (
     compact_registry_candidate, project_no_target_code, project_registry_aggregate,
 )
 
+from deploom_mcp.goal_tools import register_goal_tools
+from deploom_mcp.workspace_tools import register_workspace_tools
+
 SERVER_NAME = "deploom-mcp"
 TOOL_NAME = "get_upgrade_plan"
 KIND = "upgrade-blueprint"
@@ -726,9 +729,13 @@ def _compact_payload(
     return payload, metrics
 
 
+def _wire_json(payload: Dict[str, Any]) -> str:
+    """Lossless agent-facing JSON; artifacts remain human-readable."""
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
 def _serialized_bytes(payload: Dict[str, Any]) -> int:
-    # Measure the exact wire form the server emits (indent=2, ensure_ascii=False).
-    return len(json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
+    return len(_wire_json(payload).encode("utf-8"))
 
 
 def _finalize_byte_count(payload: Dict[str, Any]) -> int:
@@ -764,7 +771,7 @@ def compact_blueprint(
     the ``truncation`` block -- must fit ``max_response_bytes``: when it does
     not, the display caps are reduced deterministically (packages -> groups ->
     rows) until it does, and ``truncation.bytes`` always equals the exact size
-    of the final JSON payload (``ensure_ascii=False, indent=2``), never a
+    of the final JSON payload (``ensure_ascii=False, separators=(",", ":")``), never a
     pre-truncation estimate.
 
     The cap applies to the serialized **payload** (the text in the tool result
@@ -916,25 +923,19 @@ def get_upgrade_plan(
     name=TOOL_NAME,
     title="Upgrade plan",
     description=(
-        "Produce a planning-only dependency upgrade plan for a Node project. "
-        "Runs the pinned DepLoom planning core as an isolated subprocess and "
-        "returns a compact Upgrade Blueprint protocol. Never writes to the project; "
-        "output and metadata caching happen in a managed directory outside the "
-        "project. exclude lists package names removed from planning scope BEFORE "
-        "planning (not filtered afterwards). Honesty: authority is always "
-        "PLANNING_ONLY; a PROPOSED verdict means 'can be proposed', NOT 'already "
-        "updated'. target_mode selects pinned targets or advisory suggestions; "
-        "neither relaxes compatibility constraints. mutable_packages limits changes "
-        "while retaining the other packages as constraints. required_packages "
-        "asks the existing Core to move those packages, but does not pin an "
-        "exact version. objective='explicit-version-targets' with exact_targets "
-        "provides exact stable semver assignments through Core's real peer/engine "
-        "solver; the response summary.exactTargetPolicy distinguishes the exact "
-        "PROPOSED version from final postPlanGoal and policy shortfall, with "
-        "original blocker evidence and unavailable per-package lag proof. "
-        "Unknown security/runtime remains NOT_VERIFIED. draft_max_candidates "
-        "widens candidate evidence independently of the deadline. Review critical "
-        "evidence and workspaceCoverage before acting within existing user authority."
+        "Plan Node upgrades using pinned Core; never edits the project. Output, state "
+        "and metadata cache remain outside it. PLANNING_ONLY/NOT_VERIFIED: PROPOSED "
+        "is not installed or runtime-verified. target_mode=pinned|advisory changes "
+        "recommendations, never peer/engine guards. Set objective, mutable_packages, "
+        "approved_version_lines and registry explicitly. Exclusions apply before "
+        "planning; other packages remain constraints. required_packages means move, "
+        "not exact. For exact stable assignments use objective=explicit-version-targets "
+        "with exact_targets; summary.exactTargetPolicy separates feasibility from "
+        "final health, shortfall and original blockers; per-row lag proof may be "
+        "unavailable. Inspect decisionCompleteness, decisionEvidence and workspaceCoverage; "
+        "read artifacts for missing critical evidence. Unknown security/runtime stays "
+        "NOT_VERIFIED. draft_max_candidates bounds search, deadline_seconds bounds time. "
+        "Act only within existing authority."
     ),
 )
 async def get_upgrade_plan_tool(
@@ -1050,10 +1051,14 @@ async def explain_conflict_tool(
 def _result(payload: Dict[str, Any]) -> CallToolResult:
     is_error = not bool(payload.get("ok"))
     return CallToolResult(
-        content=[TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))],
+        content=[TextContent(type="text", text=_wire_json(payload))],
         isError=is_error,
         structuredContent=payload,
     )
+
+
+register_goal_tools(server, _result)
+register_workspace_tools(server, _result)
 
 
 def main() -> int:

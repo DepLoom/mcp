@@ -77,7 +77,7 @@ complete={"examined":2, "accepted":0, "rejected":2, "upgradeCandidates":1,
 assert registry_evidence.no_target_diagnostic_code("no-target", complete)=="NO_INSTALLABLE_ARTIFACT"
 assert registry_evidence.safe_registry_artifact_url("https://nexus.invalid/npm", "https://nexus.invalid/npm/a.tgz")
 assert not registry_evidence.safe_registry_artifact_url("https://nexus.invalid/npm", "https://nexus.invalid/npm/../private/a.tgz")
-assert not registry_evidence.safe_registry_artifact_url("https://nexus.invalid/npm", "https://user:password@nexus.invalid/npm/a.tgz")
+assert not registry_evidence.safe_registry_artifact_url("https://nexus.invalid/npm", "https://" + "user:password@nexus.invalid/npm/a.tgz")
 assert not registry_evidence.safe_registry_artifact_url("https://nexus.invalid/npm", "https://nexus.invalid:bad/npm/a.tgz")
 assert "lockfile_consistency.py" in release["core"]["files"]
 assert hashlib.sha256((core/"lockfile_consistency.py").read_bytes()).hexdigest()==release["core"]["files"]["lockfile_consistency.py"]

@@ -22,11 +22,11 @@ import tempfile
 import time
 
 from correctness_oracle import (
-    CHALK_RUNTIME_ORACLE, _chalk_oracle_env, npm_bin, read_json, source_files,
+    CHALK_RUNTIME_ORACLE, CHALK_REGISTRY, _chalk_oracle_env, npm_bin, read_json, source_files,
 )
 from d1_mcp_value_preflight import EXPECTED_CORE_SHA, EXPECTED_SOURCE_SHA, source_sha
 
-REGISTRY = "https://registry.npmjs.org/"
+REGISTRY = CHALK_REGISTRY
 SCENARIOS = (
     ("ORIGINAL_EXACT_5_3_0", "5.3.0", [5], "blocked", 1, False),
     ("SEPARATE_MAJOR5_5_6_2", "5.6.2", [5], "blocked", 1, False),

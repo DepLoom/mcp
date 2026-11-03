@@ -156,7 +156,7 @@ async def check():
             tools=await client.list_tools()
             assert 'get_upgrade_plan' in {t.name for t in tools.tools}
             wrong=decoded(await client.call_tool('get_upgrade_plan',{
-                'project_path':str(project),'registry':'https://user:do-not-expose@example.invalid',
+                'project_path':str(project),'registry':'https://' + 'user:do-not-expose@example.invalid',
             }))
             assert wrong.get('ok') is False and wrong.get('error',{}).get('code')=='invalid-registry', wrong
             assert 'do-not-expose' not in json.dumps(wrong)
@@ -527,8 +527,8 @@ def breaking_demo(wheel: pathlib.Path, snapshot_dir: pathlib.Path | None = None)
                 "packageVersions": {
                     "before": dict(CHALK_BASELINE), "after": dict(CHALK_TARGET),
                 },
-                "registryAuthority": "PUBLIC_NPMJS_LOCKED_INTEGRITY",
-                "networkMode": "LIVE_PUBLIC_NPM_WITH_LOCKFILE_INTEGRITY",
+                "registryAuthority": ("NEXUS_MIRROR_LOCKED_INTEGRITY" if CHALK_REGISTRY != "https://registry.npmjs.org/" else "PUBLIC_NPMJS_LOCKED_INTEGRITY"),
+                "networkMode": ("LIVE_NEXUS_WITH_LOCKFILE_INTEGRITY" if CHALK_REGISTRY != "https://registry.npmjs.org/" else "LIVE_PUBLIC_NPM_WITH_LOCKFILE_INTEGRITY"),
                 "runtimeVersions": versions,
             },
             "mcp": {

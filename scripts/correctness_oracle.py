@@ -236,7 +236,22 @@ def verify_candidate(baseline: pathlib.Path, candidate: pathlib.Path,
 # P2: public Chalk 4 -> 5, documented removal of .keyword() and ESM-only v5.
 # This is an independent evaluator; do not distribute its reference patch in
 # the future participant's editable workspace.
-CHALK_REGISTRY = "https://registry.npmjs.org/"
+def chalk_registry_from_environment():
+    from urllib.parse import urlsplit
+    registry = os.environ.get("D1_NPM_REGISTRY")
+    if os.environ.get("D1_REGISTRY_PROFILE") == "nexus" and not registry:
+        raise OracleFailure("EXPLICIT_CUSTOM_REGISTRY_REQUIRED")
+    if registry is None:
+        return "https://registry.npmjs.org/"
+    parsed = urlsplit(registry)
+    if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+            or parsed.username is not None or parsed.password is not None
+            or parsed.query or parsed.fragment or any(c.isspace() for c in registry)):
+        raise OracleFailure("INVALID_CUSTOM_REGISTRY")
+    return registry.rstrip("/") + "/"
+
+
+CHALK_REGISTRY = chalk_registry_from_environment()
 CHALK_BASELINE = {"chalk": "4.1.2", "is-number": "7.0.0"}
 CHALK_TARGET = {"chalk": "5.3.0", "is-number": "7.0.0"}
 CHALK_MUTABLE = frozenset({"package.json", "package-lock.json", "src/format.cjs"})
@@ -339,8 +354,10 @@ def chalk_static_contract(baseline: pathlib.Path, candidate: pathlib.Path,
             parsed = urlsplit(resolved)
             pkg = key.split("node_modules/")[-1]
             suffix = f"/{pkg}/-/{pkg}-{entry.get('version')}.tgz"
-            if (parsed.scheme != "https" or parsed.netloc != "registry.npmjs.org"
-                or parsed.path != suffix or parsed.query or parsed.fragment
+            registry = urlsplit(CHALK_REGISTRY)
+            expected_path = registry.path.rstrip("/") + suffix
+            if (parsed.scheme != "https" or parsed.netloc != registry.netloc
+                or parsed.path != expected_path or parsed.query or parsed.fragment
                 or parsed.username or parsed.password):
                 raise OracleFailure("CHALK_FOREIGN_LOCK_ARTIFACT")
         except ValueError:

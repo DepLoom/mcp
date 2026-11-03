@@ -26,6 +26,7 @@ EXPECTED_REFERENCES = {
     "execution-policy.md",
     "verification-policy.md",
     "evidence-report.md",
+    "goal-and-migration-evidence.md",
 }
 EXPECTED_EXAMPLES = {
     "plan-only.md",

@@ -1,9 +1,22 @@
-# Skill contract 2.0.0: delivery and verification
+# Skill contract 2.0.1: delivery and verification
 
 The canonical workflow lives in `skills/deploom-upgrade/SKILL.md`, with details
 loaded from references only when needed. This revision does not claim a new
 agent benchmark or a real project migration. The Stage 3 pilot remains evidence
 for its original revision.
+
+## Optional explicit-goal references (2.0.1)
+
+The existing health-policy route is retained. The Skill can select the installed
+`get_goal_plan` contract for an explicitly agreed functional or finite coupled
+goal. It must not translate Yellow/Green into REPORT_ONLY. One progressive
+reference explains on-demand `officialMigrationEvidence`, supported exact pairs,
+source identity and syntax-only uncertainty. Ordinary planning omits the request;
+references cannot authorize execution or replace verification.
+
+Client discovery, on-disk identity, explicit content reading and autonomous
+model behavior are separate observations. An installer receipt or a skills list
+is not proof that a running model consumed the instructions.
 
 ## Behavioral changes
 

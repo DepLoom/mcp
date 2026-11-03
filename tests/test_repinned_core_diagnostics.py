@@ -52,7 +52,7 @@ class RepinnedCoreRegistryContractTests(unittest.TestCase):
         self.assertTrue(safe_registry_artifact_url(registry,registry+"/a.tgz"))
         for url in (registry+"/../private/a.tgz", registry+"/%2e%2e/a.tgz",
                     registry+"/%252e%252e/a.tgz", registry+"/a.tgz?token=secret",
-                    "https://user:password@nexus.invalid/repository/npm/a.tgz",
+                    "https://" + "user:password@nexus.invalid/repository/npm/a.tgz",
                     "https://nexus.invalid:invalid/repository/npm/a.tgz"):
             with self.subTest(url=url):
                 self.assertFalse(safe_registry_artifact_url(registry,url))

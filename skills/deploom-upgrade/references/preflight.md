@@ -19,14 +19,16 @@ Read existing user authority first. Record missing evidence as unknown.
    and actual runtime. Keep the whole graph as compatibility context even when
    only a subset may change. `mutable_packages` limits edits; it is not an
    instruction to exclude contextual peers from analysis.
-5. Read configured registry and package scripts. Pass the registry to the MCP;
-   never expose credentials. Discover bootstrap, typecheck, lint, build, tests,
+5. Read configured registry and package scripts; never expose credentials. Pass
+   registry explicitly on the health-plan route. The goal route uses its host
+   context, not an invented registry argument. Discover bootstrap, typecheck, lint, build, tests,
    Storybook and runtime entry points affected by proposed updates.
 6. Record which checks are required by the user/protocol and already authorized.
    Resolve project-rule conflicts using the user's explicit decision. Do not ask
    again for authority already granted. A genuine client denial is still a block.
-7. Confirm `get_upgrade_plan` availability. If absent, report infrastructure
-   unavailability; do not present a manual plan as a DepLoom verdict.
+7. Confirm the selected planning tool (`get_upgrade_plan` or `get_goal_plan`)
+   is available. If absent, report that route as unavailable; do not present a
+   manual plan as a DepLoom verdict.
 8. Record expected contract identity from `contract.json`, installed receipt if
    available, and actually loaded Skill identity separately. An on-disk match
    is not evidence of the current client's loaded content.

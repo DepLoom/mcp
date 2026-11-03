@@ -42,7 +42,9 @@ try {
   $dirty = @(& git status --porcelain --untracked-files=no)
   Check-Exit 'GIT_STATUS'
   if ($dirty.Count -gt 0) { throw 'TRACKED_CHECKOUT_DIRTY' }
-  $coreSha = 'd1594c36eb5b35447e941cf0f528b8cbd15705b5'
+  $releaseManifest = Get-Content -LiteralPath (Join-Path $PWD.ProviderPath 'release-manifest.json') -Raw | ConvertFrom-Json
+  $coreSha = [string]$releaseManifest.core.revision
+  if ($coreSha -cnotmatch '^[0-9a-f]{40}$') { throw 'INVALID_PINNED_CORE_REVISION' }
   $actualCore = @(& git -C upstream/deploom rev-parse --verify HEAD)
   Check-Exit 'CORE_SUBMODULE'
   if ($actualCore.Count -ne 1 -or $actualCore[0].Trim() -cne $coreSha) {

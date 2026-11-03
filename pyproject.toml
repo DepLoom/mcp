@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deploom-mcp"
-version = "0.2.0"
-description = "DepLoom MCP: headless dependency planning with explicit scope, evidence and target authority. Planning-only."
+version = "0.2.1"
+description = "Dependency planning and host-authorized verified goal execution for supported DepLoom profiles."
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
 dependencies = [
@@ -29,4 +29,4 @@ deploom-install-skill = "deploom_mcp.distribution:install_skill_main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-deploom_mcp = ["py.typed"]
+deploom_mcp = ["py.typed", "migration_usage.cjs"]

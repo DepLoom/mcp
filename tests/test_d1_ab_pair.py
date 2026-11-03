@@ -156,8 +156,8 @@ class NativeEventTests(unittest.TestCase):
         from types import SimpleNamespace
         base=dict(wall=600,tools=40,input_cap=20000,output_cap=4000,
                   model=MODEL,effort=EFFORT)
-        for arg,value in (("wall",901),("tools",45),("input_cap",25000),
-                          ("output_cap",8000),("model","not-terra")):
+        for arg,value in (("wall",901),("tools",45),("input_cap",300001),
+                          ("output_cap",8001),("model","not-terra")):
             trial=dict(base);trial[arg]=value
             with self.subTest(arg=arg),self.assertRaisesRegex(
                     RuntimeError,"LIMIT_OUTSIDE_APPROVED_BOUND|TASK_MODEL_EFFORT_NOT_LOCKED"):

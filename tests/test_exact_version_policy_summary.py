@@ -163,7 +163,7 @@ class PolicyAwareExactSummaryTests(unittest.TestCase):
         self.assertTrue(clipped["decisionCompleteness"]["requiresArtifactRead"])
         self.assertTrue(clipped["truncation"]["truncated"])
         self.assertEqual(clipped["truncation"]["bytes"],
-                         len(json.dumps(clipped, ensure_ascii=False, indent=2).encode("utf-8")))
+                         len(json.dumps(clipped, ensure_ascii=False, separators=(",", ":")).encode("utf-8")))
 
     def test_active_final_peer_blocker_survives_without_reinterpreting_solver(self):
         bp = published_exact(target="6.0.0", goal="feasible")

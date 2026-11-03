@@ -6,6 +6,7 @@ the code-adaptation from the Yellow demonstration to either agent workspace.
 from __future__ import annotations
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 
@@ -15,7 +16,9 @@ from correctness_oracle import (
 
 ORIGINAL_P2_TARGET = {"chalk": "5.3.0", "is-number": "7.0.0"}
 D1_AB_CHALK6_TARGET = {"chalk": "6.0.0", "is-number": "7.0.0"}
-EXPECTED_SEED_SHA256 = "4adfa455d02e9f354e5b47e7b4d983f6676b620b13dc1454bda9248272d97cb6"
+EXPECTED_SEED_SHA256 = ("2f5028d61641399f083ec2b98556ab97f828025319110981b03cc277df3f1a47"
+    if os.environ.get("D1_REGISTRY_PROFILE") == "nexus" else
+    "4adfa455d02e9f354e5b47e7b4d983f6676b620b13dc1454bda9248272d97cb6")
 FROZEN_FILENAMES = frozenset((
     ".npmrc", "README.md", "build.cjs", "test.cjs", "src/index.cjs",
     "src/format.cjs", "package.json", "package-lock.json",

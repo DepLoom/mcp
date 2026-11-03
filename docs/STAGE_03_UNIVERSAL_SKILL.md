@@ -4,7 +4,7 @@
 
 The remaining sections record the original 2026-10-24 Stage 3 delivery and pilot.
 Their test counts, file count, client versions and E2E PASS refer to that revision,
-not to the current Skill contract. The current canonical Skill is **2.0.0**;
+not to the current Skill contract. The current canonical Skill is **2.0.1**;
 `skills/deploom-upgrade/contract.json` binds SKILL.md, all references/examples and
 the evidence validator by SHA-256. Its installer receipt identifies on-disk
 content and explicitly leaves loaded-client content `NOT_OBSERVED`.

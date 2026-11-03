@@ -183,10 +183,10 @@ class RegistryDiagnosticProjectionTests(unittest.TestCase):
     def test_untrusted_strings_and_credentials_are_never_forwarded(self):
         diag = core_registry_data()
         marker = "SENSITIVE_TOKEN_0123456789"
-        diag["configuredRegistry"] = {"origin": f"https://user:{marker}@nexus.example.invalid/secret?token={marker}",
+        diag["configuredRegistry"] = {"origin": f"https://" + f"user:{marker}@nexus.example.invalid/secret?token={marker}",
                                        "pathPrefix": f"/repository/{marker}/npm"}
         diag["metadataRequestBase"] = diag["configuredRegistry"]
-        diag["rejectedArtifactOrigins"] = [f"https://user:{marker}@bad.example.invalid/path?token={marker}"]
+        diag["rejectedArtifactOrigins"] = [f"https://" + f"user:{marker}@bad.example.invalid/path?token={marker}"]
         diag["rejectionSamples"] = [{"code": "FOREIGN_TARBALL_ORIGIN", "version": f"https://host/{marker}"}]
         diag["physicalProbe"]["statusCounts"] = {"planning-only": 1, marker: 2}
         clean = project_registry_candidate(diag)

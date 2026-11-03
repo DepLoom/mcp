@@ -20,10 +20,14 @@ import tempfile
 import time
 import venv
 
-from correctness_oracle import source_files
+from correctness_oracle import source_files, CHALK_REGISTRY
 
-EXPECTED_SOURCE_SHA = "4adfa455d02e9f354e5b47e7b4d983f6676b620b13dc1454bda9248272d97cb6"
-EXPECTED_CORE_SHA = "d1594c36eb5b35447e941cf0f528b8cbd15705b5"
+EXPECTED_SOURCE_SHA = ("2f5028d61641399f083ec2b98556ab97f828025319110981b03cc277df3f1a47"
+    if os.environ.get("D1_REGISTRY_PROFILE") == "nexus" else
+    "4adfa455d02e9f354e5b47e7b4d983f6676b620b13dc1454bda9248272d97cb6")
+EXPECTED_CORE_SHA = json.loads((Path(__file__).resolve().parents[1] / "release-manifest.json").read_text(encoding="utf-8"))["core"]["revision"]
+if not re.fullmatch(r"[0-9a-f]{40}", EXPECTED_CORE_SHA):
+    raise ValueError("INVALID_PINNED_CORE_REVISION")
 SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$")
 STATUSES = {
     "PROPOSED", "NO_TARGET", "NO_CHANGE", "POLICY_SATISFIED", "BLOCKED",
@@ -537,6 +541,9 @@ async def run():
            "skillBundleSha256":manifest["skill"]["bundleSha256"]}
 print(json.dumps(asyncio.run(run()),sort_keys=True))
 """
+
+if CHALK_REGISTRY != "https://registry.npmjs.org/":
+    RUNTIME = RUNTIME.replace("https://registry.npmjs.org", CHALK_REGISTRY.rstrip("/"))
 
 
 def source_sha(path: Path) -> str:

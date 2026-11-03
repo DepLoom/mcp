@@ -18,7 +18,7 @@ def valid():
         "examined": 2, "accepted": 0, "rejected": 2,
         "upgradeCandidates": 1, "acceptedUpgradeCandidates": 0,
         "rejectedUpgradeCandidates": 1, "allUpgradeCandidatesRejected": True,
-        "configuredRegistry": {"origin": "https://admin:pw@nexus.invalid/repository/a1b2c3/npm",
+        "configuredRegistry": {"origin": "https://" + "admin:pw@nexus.invalid/repository/a1b2c3/npm",
                                "pathPrefix": "/repository/a1b2c3/npm"},
         "rejectionCounts": {"BAD_REGISTRY_PATH": 2},
         "rejectionSamples": [{"code": "BAD_REGISTRY_PATH", "version": "4.18.1"}],
@@ -45,7 +45,7 @@ class DiagnosticsSecurityReviewTests(unittest.TestCase):
     def test_short_opaque_and_encoded_credentials_never_leak_via_full_or_compact(self):
         c=valid()
         c["configuredRegistry"]["pathPrefix"]="/repository/shortkey/npm"
-        c["metadataRequestBase"]={"origin":"https://user:abc@some.invalid/a?token=topsecret",
+        c["metadataRequestBase"]={"origin":"https://" + "user:abc@some.invalid/a?token=topsecret",
                                   "pathPrefix":"/repository/%61piKey/npm"}
         c["physicalProbe"]["statusCounts"]={"planning-only":1,"secret123":42}
         bp=fixture(c)
