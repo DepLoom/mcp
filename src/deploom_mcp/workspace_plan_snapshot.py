@@ -1,10 +1,12 @@
 """Planning-only handoff from a bound workspace inventory to bundled Core."""
 from __future__ import annotations
 
+from hashlib import sha256
 import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 from deploom_mcp.distribution import resolve_core_dir
@@ -35,7 +37,10 @@ def plan_workspace_snapshot(project: Path, request: dict) -> dict:
 
     preflight = request.get("preflight")
     if "preflight" in request:
-        if not isinstance(preflight, dict) or not {"reauthor"} <= preflight.keys() <= {"reauthor", "immutableInstances"}:
+        if not isinstance(preflight, dict) or not {"reauthor"} <= preflight.keys() <= {"reauthor", "immutableInstances", "candidateLimit"}:
+            raise GoalContractError("INVALID_WORKSPACE_PREFLIGHT_REQUEST")
+        limit = preflight.get("candidateLimit", 3)
+        if type(limit) is not int or not 1 <= limit <= 3:
             raise GoalContractError("INVALID_WORKSPACE_PREFLIGHT_REQUEST")
         pins = preflight.get("immutableInstances", [])
         if (not isinstance(pins, list) or len(pins) > 128
@@ -95,12 +100,19 @@ def plan_workspace_snapshot(project: Path, request: dict) -> dict:
                         raise GoalContractError("INVALID_WORKSPACE_PLAN_TOPOLOGY")
                     providers[consumer, peer] = provider
                 topology = WorkspaceTopology(providers, tuple(groups))
-            result = plan_workspace_upgrade(
-                packages, declarations, admitted, exact, request["packuments"],
-                environment=request["environment"], topology=topology, timeout_ms=5000)
-            if preflight is not None:
-                result["packageManagerValidation"] = _preflight(
-                    project, preflight, result, admitted, inputs)
+            def solve(excluded, timeout_ms):
+                return plan_workspace_upgrade(
+                    packages, declarations, admitted, exact, request["packuments"],
+                    environment=request["environment"], topology=topology, timeout_ms=timeout_ms,
+                    excluded_assignments=tuple(excluded))
+
+            if preflight is None:
+                result = solve((), 5000)
+            else:
+                def verify(candidate, timeout_seconds):
+                    return _preflight(project, preflight, candidate, admitted, inputs, timeout_seconds)
+
+                result = _try_workspace_candidates(solve, verify, limit, request)
         finally:
             sys.path.pop(0)
         return {**result, "inventoryDigest": digest, "candidateEvidence": "CALLER_SNAPSHOT",
@@ -109,7 +121,51 @@ def plan_workspace_snapshot(project: Path, request: dict) -> dict:
     return observe_npm_workspace(project, plan_snapshot=plan)
 
 
-def _preflight(project, request, plan, admitted, inputs):
+def _try_workspace_candidates(solve, verify, limit, request):
+    deadline = time.monotonic() + 60
+    vectors, attempts = [], []
+    result = None
+    stop = "CANDIDATE_LIMIT"
+    for _ in range(limit):
+        remaining = deadline - time.monotonic()
+        if remaining < 1:
+            stop = "TIME_BUDGET"
+            break
+        plan = solve(vectors, min(5000, int(remaining * 1000)))
+        if vectors and plan["status"] != "SAT_IN_MODELED_DOMAIN":
+            stop = ("NO_DISTINCT_MODELED_CANDIDATE" if plan["status"] == "UNSAT_IN_MODELED_DOMAIN"
+                    else "ALTERNATIVE_MODEL_UNKNOWN")
+            break
+        remaining = deadline - time.monotonic()
+        if remaining < 1:
+            if result is None:
+                result = {**plan, "packageManagerValidation": {"status": "NOT_RUN", "code": "TIME_BUDGET"}}
+            stop = "TIME_BUDGET"
+            break
+        assignment = plan["assignment"]
+        if assignment is not None and assignment in vectors:
+            stop = "DUPLICATE_CANDIDATE"
+            break
+        native = verify(plan, int(remaining))
+        result = {**plan, "packageManagerValidation": native}
+        if assignment is not None:
+            vectors.append(assignment)
+            attempts.append({"assignment": assignment, "validation": native})
+        if (native["status"] != "RESOLUTION_FAILED"
+                or native["code"] not in {"ERESOLVE", "EBADENGINE", "LOCK_PEER_MISMATCH"}):
+            stop = native["status"]
+            break
+        if not any(len(row["versions"]) > 1 and row["exactTarget"] is None for row in request["mutable"]):
+            stop = "NO_DISTINCT_MODELED_CANDIDATE"
+            break
+    if result is None:
+        raise GoalContractError("WORKSPACE_PLAN_TIMEOUT")
+    snapshot = json.dumps(request, sort_keys=True, ensure_ascii=True).encode()
+    return {**result, "candidateSearch": {"limit": limit, "timeoutSeconds": 60,
+            "requestSha256": sha256(snapshot).hexdigest(), "stop": stop, "attempts": attempts}}
+
+
+def _preflight(project, request, plan, admitted, inputs, timeout_seconds):
     if plan["status"] != "SAT_IN_MODELED_DOMAIN":
         return {"status": "NOT_RUN", "code": "WORKSPACE_PLAN_UNAVAILABLE"}
     configured = [os.environ.get(key) for key in ("DEPLOOM_WORKSPACE_NPM_ARTIFACTS",
@@ -147,7 +203,7 @@ def _preflight(project, request, plan, admitted, inputs):
     result = run_workspace_npm_preflight(
         manifests, inputs["package-lock.json"], assignment, frozenset(admitted),
         artifacts=artifacts.resolve(), cache=cache.resolve(), registry=registry,
-        reauthor=reauthor, timeout_seconds=60,
+        reauthor=reauthor, timeout_seconds=timeout_seconds,
         immutable_instances=frozenset(request.get("immutableInstances", ())))
     # Only the local host can resolve the artifact identifier to its owned directory.
     scratch = result.pop("workspace", None)
