@@ -12,10 +12,17 @@ from deploom_mcp.workspace_verification_attempt import (
 )
 
 
+def workspace_toolchain():
+    from draft_npm_preflight import _npm_command
+
+    node, npm = _npm_command()
+    return {"nodeSha256": hashlib.sha256(Path(node).read_bytes()).hexdigest(),
+            "npmCliSha256": hashlib.sha256(Path(npm).read_bytes()).hexdigest()}
+
+
 def finalize_workspace_profile(output, project, *, source_key, plan, commands, install,
                                expected_receipt_sha256, seconds):
     """Re-observe current state without replaying commands or granting apply."""
-    from draft_npm_preflight import _npm_command
     from resolved_dependency_state import MaterializedDependencyObligationError, observe_npm_dependency_obligations
     from source_snapshot import source_snapshot_fingerprint
 
@@ -52,10 +59,7 @@ def finalize_workspace_profile(output, project, *, source_key, plan, commands, i
     def check_boundary():
         if source_snapshot_fingerprint(project, remaining_budget=remaining) != source_key:
             raise ValueError("WORKSPACE_FINALIZATION_SOURCE_CHANGED")
-        node, npm = _npm_command()
-        toolchain = {"nodeSha256": hashlib.sha256(Path(node).read_bytes()).hexdigest(),
-                     "npmCliSha256": hashlib.sha256(Path(npm).read_bytes()).hexdigest()}
-        if toolchain != plan["resolverToolchain"]:
+        if workspace_toolchain() != plan["resolverToolchain"]:
             raise ValueError("WORKSPACE_FINALIZATION_TOOLCHAIN_CHANGED")
 
     check_boundary()
@@ -75,6 +79,7 @@ def finalize_workspace_profile(output, project, *, source_key, plan, commands, i
             "attemptId": state["attemptId"], "verificationReceiptSha256": expected_receipt_sha256,
             "admissionSha256": state["admissionSha256"], "profileSha256": admission["profileSha256"],
             "sourceSnapshotKey": source_key, "lockSha256": plan["approvedLockSha256"],
+            "resolverIdentitySha256": plan["resolverIdentitySha256"], "toolchain": plan["resolverToolchain"],
             "physicalTreeSha256": tree["materializedTreeObservationDigest"],
             "checkCount": len(commands), "installation": expected_install,
             "finalPolicy": "NOT_ASSESSED", "applyAuthorized": False, "fullAcceptance": False}

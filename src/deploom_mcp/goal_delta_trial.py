@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 import time
@@ -265,11 +266,16 @@ def _inventory(core, root, policy, timeout):
 
 
 def _write_files(project, proposal):
-    for name, raw in _proposal_artifacts(proposal):
+    _write_exact_files(project, _proposal_artifacts(proposal))
+
+
+def _write_exact_files(project, files):
+    for name, raw in files:
         path = _plain_under(project/name, project)
         temporary = path.with_name(path.name+".deploom-trial.tmp")
         with temporary.open("xb") as stream:
             stream.write(raw);stream.flush();os.fsync(stream.fileno())
+        shutil.copymode(path, temporary)
         temporary.replace(path)
 
 

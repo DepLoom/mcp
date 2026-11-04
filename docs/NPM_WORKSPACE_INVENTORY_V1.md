@@ -209,3 +209,19 @@ and pinned tarball integrity. A mirror may supply the same bytes through
 It records the independent peer conflict, joint model, native lock, strict
 scripts-off install, physical workspace links, npm ls and both SSR checks.
 The report distinguishes this check from browser and policy acceptance.
+
+### Apply a separately approved delivery
+
+Use `workspace_acceptance apply-delivery <baseline-project>` with
+`--delivery`, the raw `--expected-delivery-sha256` of its receipt, the
+approved `--expected-profile-sha256`, `--goal targeted|policy` and a new
+`--destination`. A policy goal also requires `--expected-policy-sha256`.
+
+Application rechecks the approved baseline, sealed candidate, exact source
+preimages and postimages, required profile, and Node/npm binaries. It
+applies the authorized bytes to an isolated copy, then checks its complete
+source manifest before publishing `project/` and `terminal.json`. Require
+an `APPLIED` terminal record before consuming that project. A conflicting
+or interrupted attempt cannot overwrite a prior output. The baseline
+checkout is read-only and the new copy contains source only. Installation
+and checks in that copy require separate execution.

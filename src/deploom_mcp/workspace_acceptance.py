@@ -131,6 +131,15 @@ def main(argv=None):
     policy_delivery.add_argument("--policy-json", required=True, type=Path)
     policy_delivery.add_argument("--audit-report", required=True, type=Path)
     policy_delivery.add_argument("--expected-audit-sha256", required=True)
+    apply = modes.add_parser("apply-delivery", help="Apply an approved delivery in a new isolated copy")
+    apply.add_argument("project", type=Path, help="Approved baseline project")
+    apply.add_argument("--delivery", required=True, type=Path)
+    apply.add_argument("--destination", required=True, type=Path)
+    apply.add_argument("--expected-delivery-sha256", required=True)
+    apply.add_argument("--expected-profile-sha256", required=True)
+    apply.add_argument("--goal", choices=("targeted", "policy"), required=True)
+    apply.add_argument("--expected-policy-sha256")
+    apply.add_argument("--deadline-seconds", type=int, default=90)
     status = modes.add_parser("verify-status", help="Read an existing workspace verification attempt")
     status.add_argument("output", type=Path)
     audit = modes.add_parser("audit-candidate", help="Audit the exact resolved npm candidate for known advisories")
@@ -162,6 +171,26 @@ def main(argv=None):
     project = args.project.absolute()
     if project != project.resolve(strict=True) or not project.is_dir():
         parser.error("project must be a resolved local directory")
+    if args.mode == "apply-delivery":
+        from deploom_mcp.workspace_delivery_apply import apply_workspace_delivery
+
+        if (not 1 <= args.deadline_seconds <= 900 or (args.goal == "policy") != bool(args.expected_policy_sha256)
+                or not all(re.fullmatch(r"[a-f0-9]{64}", value) for value in
+                           (args.expected_delivery_sha256, args.expected_profile_sha256)
+                           + ((args.expected_policy_sha256,) if args.expected_policy_sha256 else ()))):
+            parser.error("supply approved delivery and profile SHA-256, plus the policy SHA-256 for a policy goal")
+        try:
+            result = apply_workspace_delivery(
+                project, args.delivery, args.destination, expected_receipt_sha256=args.expected_delivery_sha256,
+                expected_profile_sha256=args.expected_profile_sha256, goal=args.goal,
+                expected_policy_sha256=args.expected_policy_sha256, seconds=args.deadline_seconds,
+            )
+        except (OSError, RuntimeError, ValueError, KeyError, TypeError) as exc:
+            message = str(exc)
+            print(message if re.fullmatch(r"[A-Z_]+", message) else "WORKSPACE_APPLY_UNPROVEN", file=sys.stderr)
+            return 1
+        print(json.dumps(result))
+        return 0
     if args.mode == "source-key":
         deadline = time.monotonic() + 30
         print(source_snapshot_fingerprint(project, remaining_budget=lambda: max(0, deadline - time.monotonic())))

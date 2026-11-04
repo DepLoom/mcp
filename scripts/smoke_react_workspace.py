@@ -41,6 +41,36 @@ def place(project, files):
         path.write_bytes(raw)
 
 
+def apply_verified_fixture(out, baseline, trial, resolver, receipt, cli):
+    proof = json.loads(receipt.read_bytes())
+    terminal = json.loads(cli("verify-status", "verify-status", receipt))
+    name = "packages/app/main.cjs"
+    repairs = out / "approved-source-repairs.json"
+    repairs.write_bytes(dump([{"path": name, "beforeSha256": sha(baseline / name),
+                              "afterSha256": sha(trial / name)}]))
+    native = json.loads((resolver / "receipt.json").read_bytes())["receipt"]
+    delivery = out / "delivery"
+    cli("deliver", "deliver-targeted", trial, "--expected-source-key", proof["sourceSnapshotKey"],
+        "--expected-lock-sha256", native["candidateLockSha256"],
+        "--expected-resolver-identity-sha256", native["resolverIdentitySha256"],
+        "--baseline-lock", baseline / "package-lock.json", "--resolver-dir", resolver,
+        "--check", "npm ls --all", "--check", "node packages/app/main.cjs", "--check", "node packages/legacy/main.cjs",
+        "--attempt-receipt", receipt, "--expected-receipt-sha256", terminal["receiptSha256"],
+        "--baseline-project", baseline, "--expected-baseline-source-key", cli("baseline-key", "source-key", baseline),
+        "--destination", delivery, "--source-repairs-json", repairs)
+    artifact = delivery / "receipt.json"
+    target = out / "applied"
+    result = json.loads(cli("apply", "apply-delivery", baseline, "--delivery", delivery, "--destination", target,
+                            "--expected-delivery-sha256", sha(artifact), "--goal", "targeted",
+                            "--expected-profile-sha256", proof["finalVerificationProfileDigest"]))
+    if (result["state"] != "APPLIED"
+            or result["installation"] != "NOT_RUN_IN_DELIVERED_COPY"
+            or (target / "project/node_modules").exists()
+            or sha(target / "project" / name) != sha(trial / name)):
+        raise RuntimeError("applied source differs from the verified fixture")
+    return sha(target / "terminal.json")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", required=True, type=Path)
@@ -177,11 +207,15 @@ def main():
             or [row["status"] for row in proof["commandObservations"]] != ["PASS"] * 3
             or baseline_hashes != {name: sha(baseline / name) for name in baseline_hashes}):
         raise RuntimeError("installed verification differs from required profile")
+    applied_sha256 = apply_verified_fixture(out, baseline, trial, resolver, receipt, cli)
+    if baseline_hashes != {name: sha(baseline / name) for name in baseline_hashes}:
+        raise RuntimeError("baseline changed during isolated application")
     report = {"coreRevision": json.loads(release_manifest_path().read_bytes())["core"]["revision"],
               "fixtureSha256": sha(source), "node": node_version, "npm": npm_version, "independentVector": "ERESOLVE",
               "jointPlan": plan["status"], "nativeLock": result["status"], "install": proof["installation"]["status"],
               "physicalLinks": 3, "npmLs": "PASS", "appSsr": "PASS", "legacySsr": "PASS",
               "candidateLockSha256": result["candidateLockSha256"], "verificationSha256": sha(receipt),
+              "isolatedApply": "APPLIED", "applyReceiptSha256": applied_sha256,
               "browser": "NOT_RUN", "finalPolicy": "NOT_ASSESSED"}
     (out / "report.json").write_bytes(dump(report))
     print(json.dumps(report))
