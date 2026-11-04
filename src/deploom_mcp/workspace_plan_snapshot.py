@@ -116,6 +116,14 @@ def _preflight(project, request, plan, admitted, inputs):
             or any(path.resolve().is_relative_to(project) or project.is_relative_to(path.resolve())
                    for path in (artifacts, cache))):
         raise GoalContractError("WORKSPACE_PREFLIGHT_HOST_PATH_INVALID")
+    for path in inputs:
+        if not path.endswith("package.json"):
+            continue
+        try:
+            (project / Path(path).parent / ".npmrc").lstat()
+        except FileNotFoundError:
+            continue
+        return {"status": "NOT_RUN", "code": "WORKSPACE_PREFLIGHT_PROJECT_NPMRC_UNSUPPORTED"}
     from deploom_mcp.dependency_audit import AuditError, checked_registry
     from workspace_npm_preflight import run_workspace_npm_preflight
 
