@@ -36,7 +36,7 @@ def _pairs(rows):
     return value
 
 
-def _read(path: Path, limit: int, *, root: Path | None = None, root_handle=None) -> tuple[bytes, dict]:
+def _read_bytes(path: Path, limit: int, *, root: Path | None = None, root_handle=None) -> bytes:
     before = _safe(path)
     if before.st_size > limit:
         raise GoalContractError("WORKSPACE_INPUT_LIMIT")
@@ -51,10 +51,27 @@ def _read(path: Path, limit: int, *, root: Path | None = None, root_handle=None)
     identity = lambda info: (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
     if len(raw) > limit or identity(before) != identity(opened) or identity(opened) != identity(read_end) or identity(read_end) != identity(after):
         raise GoalContractError("WORKSPACE_INPUT_CHANGED")
+    return raw
+
+
+def _read(path: Path, limit: int, *, root: Path | None = None, root_handle=None) -> tuple[bytes, dict]:
+    raw = _read_bytes(path, limit, root=root, root_handle=root_handle)
     value = json.loads(raw.decode("utf-8-sig"), object_pairs_hook=_pairs)
     if not isinstance(value, dict):
         raise GoalContractError("WORKSPACE_INVALID_JSON_OBJECT")
     return raw, value
+
+
+def _npmrc_inputs(root, root_handle, paths):
+    configs = {}
+    for manifest in paths:
+        path = (Path(manifest).parent / ".npmrc").as_posix()
+        try:
+            (root / path).lstat()
+        except FileNotFoundError:
+            continue
+        configs[path] = _read_bytes(root / path, 16 * 1024, root=root, root_handle=root_handle)
+    return configs
 
 
 def _relative(value: str) -> bool:
@@ -173,6 +190,7 @@ def _observe_npm_workspace_bound(root, root_handle, max_directories, max_manifes
         raise GoalContractError("WORKSPACE_INVALID_LOCK")
     paths = _discover(root, patterns, max_directories, max_manifests, root_handle)
     inputs = {"package.json": root_raw, "package-lock.json": lock_raw}
+    configs = _npmrc_inputs(root, root_handle, paths)
     owners, declarations, names = [], [], {}
     for path in paths:
         if path == "package.json":
@@ -228,8 +246,12 @@ def _observe_npm_workspace_bound(root, root_handle, max_directories, max_manifes
             raise GoalContractError("WORKSPACE_INPUT_CHANGED")
     identity = {"manifestInputs": {p: hashlib.sha256(b).hexdigest() for p, b in sorted(inputs.items())},
                 "workspaceOwners": [o["owner"] for o in owners], "patterns": patterns}
+    if configs != _npmrc_inputs(root, root_handle, paths):
+        raise GoalContractError("WORKSPACE_INPUT_CHANGED")
+    if configs:
+        identity["npmConfigInputs"] = {path: hashlib.sha256(raw).hexdigest() for path, raw in configs.items()}
     if plan_snapshot is not None:
-        return plan_snapshot(canonical_digest(identity), declarations, packages, inputs)
+        return plan_snapshot(canonical_digest(identity), declarations, packages, {**inputs, **configs})
     lock_resolutions = None
     if lock_resolver is not None:
         lock_resolutions = []

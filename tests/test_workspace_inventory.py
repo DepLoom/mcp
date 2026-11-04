@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from deploom_mcp.goal_contract import GoalContractError
 from deploom_mcp.workspace_inventory import observe_npm_workspace
+from deploom_mcp.workspace_plan_snapshot import _workspace_registry
 
 
 class WorkspaceInventoryTests(unittest.TestCase):
@@ -44,6 +45,33 @@ class WorkspaceInventoryTests(unittest.TestCase):
     def fails(self, code):
         with self.assertRaisesRegex(GoalContractError, code):
             observe_npm_workspace(self.root)
+
+    def test_project_npmrc_is_bound_without_exposing_its_contents(self):
+        config = self.root / ".npmrc"
+        before = observe_npm_workspace(self.root)
+        raw = b"registry=https://mirror.example.invalid/npm/\r\nsave-exact=true\r\n"
+        config.write_bytes(raw)
+        after = observe_npm_workspace(self.root)
+        self.assertNotEqual(before["inventoryDigest"], after["inventoryDigest"])
+        self.assertEqual(after["identity"]["npmConfigInputs"], {".npmrc": hashlib.sha256(raw).hexdigest()})
+        self.assertNotIn("mirror.example.invalid", json.dumps(after))
+        self.assertEqual(_workspace_registry(None, {".npmrc": raw}), "https://mirror.example.invalid/npm")
+        self.assertEqual(_workspace_registry("https://mirror.example.invalid/npm", {".npmrc": raw}),
+                         "https://mirror.example.invalid/npm")
+        with self.assertRaisesRegex(GoalContractError, "PROJECT_REGISTRY_MISMATCH"):
+            _workspace_registry("https://registry.npmjs.org", {".npmrc": raw})
+        config.write_bytes(raw.replace(b"true", b"false"))
+        self.assertNotEqual(after["inventoryDigest"], observe_npm_workspace(self.root)["inventoryDigest"])
+
+    def test_project_npmrc_rejects_settings_the_isolated_command_does_not_preserve(self):
+        for raw in (b"strict-peer-deps=false", b"//registry.example.invalid/:_authToken=example",
+                    b"registry=https://mirror.example.invalid/\x24{REGISTRY}",
+                    b"registry=https://one.invalid\nregistry=https://two.invalid",
+                    b"save-exact=maybe"):
+            with self.subTest(raw=raw), self.assertRaisesRegex(GoalContractError, "PROJECT_NPMRC_UNSUPPORTED"):
+                _workspace_registry(None, {".npmrc": raw})
+        with self.assertRaisesRegex(GoalContractError, "MEMBER_NPMRC_UNSUPPORTED"):
+            _workspace_registry(None, {"packages/a/.npmrc": b"save-exact=true"})
 
     def test_owner_and_section_preserved_no_flattening_or_execution(self):
         before = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in self.root.rglob('*') if p.is_file()}

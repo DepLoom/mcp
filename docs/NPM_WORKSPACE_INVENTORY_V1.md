@@ -32,7 +32,8 @@ alias/protocol or credential-bearing specs are rejected without echoing them.
 Proposal targets receive this validation before constructing worker arguments.
 
 The returned `inventoryDigest` binds the bytes of the root manifest, root lock,
-member manifests, membership and supported pattern list. Inputs and discovery
+member manifests, observed root and member `.npmrc` hashes, membership and
+supported pattern list. It does not return the contents of npm configuration. Inputs and discovery
 are read twice to reject observed changes. This is a dependency-input observation,
 not an atomic full-source snapshot or an execution continuity proof. No toolchain,
 registry availability, solver optimality, placement, installation, health or
@@ -68,7 +69,7 @@ Call `get_upgrade_plan(project_path=..., workspace_request=...)` in Python or pa
 1. Call `observe_workspace_inventory_v1` on the npm lockfile owner and reuse its `inventoryDigest`.
 2. Supply `targets` with one exact `selector: {owner, section, name}` per declaration. The root owner is `.`. Each target has `approvedLines`, an ordered finite list of stable `versions` in those major lines, and an `exactTarget` from that list or `null`.
 3. Supply `packuments` for the frozen candidate evidence, `environment` with the modeled Node and npm versions, and `topology`. Use `null` to model the observed layout when it can be proven. An explicit layout uses `instanceGroups` and `providers`, with owner-qualified declaration triples.
-4. For a pure plan, omit `preflight`. For host-authorized lock-only validation, set `preflight: {reauthor: null}`. The host must have configured its isolated offline npm cache, registry and artifact directory. Optional `immutableInstances` pins exact lock paths and `candidateLimit` sets a maximum from one to three within the shared 60-second budget.
+4. For a pure plan, omit `preflight`. For host-authorized lock-only validation, set `preflight: {reauthor: null}`. The host must configure its isolated offline npm cache and artifact directory. Native npm uses the HTTPS registry declared in the root `.npmrc`, or the host's `DEPLOOM_WORKSPACE_NPM_REGISTRY` if the project does not declare one. If both exist, they must match. Optional `immutableInstances` pins exact lock paths and `candidateLimit` sets a maximum from one to three within the shared 60-second budget.
 
 Call `get_workspace_plan_details` with the issued `details.planId`, `requestId`, nullable
 `candidateId` and `details.snapshotSha256`, mapped to the snake-case tool parameters.
@@ -80,6 +81,20 @@ digests, without exposing raw logs or reading a path supplied by the client.
 
 The [workspace response schema](../contracts/workspace-upgrade-blueprint.schema.json) separates the modeled assignment, native npm validation, installation, checks, runtime, acceptance and policy. The response is planning-only. A matching candidate lock can be reviewed for an authorized isolated trial.
 
+A supported root `.npmrc` may contain a credential-free HTTPS `registry` and
+boolean `save-exact`. The native preflight passes the validated registry to npm
+and writes exact candidate versions itself. It uses isolated npm config files
+and rejects unsupported settings or a member `.npmrc` rather than silently
+dropping them. The npm cache must already have the evidence needed to resolve
+against that registry.
+
+Existing root npm overrides with registry specs or references to root dependencies
+are preserved during preflight. In this case the same npm distribution checks
+the effective virtual peer edges, including overrides. Declaration versions,
+held lock artifacts and the permitted lock delta are still checked separately.
+This evidence covers lock resolution. Installation and runtime require their
+own checks.
+
 ## Whole-workspace policy planning
 
 Use `goalKind: MONOREPO_TO_POLICY` with `policy: {targetLevel: "yellow"}` or
@@ -90,7 +105,8 @@ to OSV. Authorize the inventory for the selected registry before enabling it.
 Missing host configuration, unavailable evidence or a name omitted from the
 OSV allowlist can leave the result unknown. The opt-in
 `DEPLOOM_WORKSPACE_POLICY_SYSTEM_PROXY=1` uses the existing system proxy.
-Native preflight, if requested, requires the same registry identity.
+If the project declares a registry, it must match the host's online registry.
+Native preflight, if requested, also requires that same registry identity.
 
 Targets control mutable declarations. An empty target list holds every
 declaration. Held external declarations still count toward the lag denominator.
