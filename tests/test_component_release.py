@@ -145,7 +145,9 @@ class McpVersionSynchronizationTests(unittest.TestCase):
         p=root/'pyproject.toml';p.write_bytes(f.original.replace(b'deploom-core',b'deploom-mcp'))
         (root/'src/deploom_mcp').mkdir(parents=True);(root/'src/deploom_mcp/__init__.py').write_text('__version__ = "0.1.1"\n')
         (root/'scripts').mkdir();(root/'scripts/update_release_manifest.py').write_bytes((ROOT/'scripts/update_release_manifest.py').read_bytes());(root/'build_support.py').write_bytes((ROOT/'build_support.py').read_bytes())
-        (root/'contracts').mkdir();(root/'contracts/upgrade-blueprint.schema.json').write_text('{}')
+        (root/'contracts').mkdir()
+        for schema in ('upgrade-blueprint.schema.json', 'workspace-upgrade-blueprint.schema.json'):
+            (root/'contracts'/schema).write_text('{}')
         (root/'skills/deploom-upgrade').mkdir(parents=True);(root/'skills/deploom-upgrade/contract.json').write_text(json.dumps({'contractVersion':'fixture','bundleSha256':'a'*64}))
         core=root/'upstream/deploom';core.mkdir(parents=True)
         for args in [('init','-b','main'),('config','user.name','Release Fixture'),('config','user.email','fixture@example.invalid'),('config','commit.gpgSign','false')]:

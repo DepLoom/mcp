@@ -46,3 +46,44 @@ jobs:
           python scripts/install_skill.py --client opencode --scope project --project "${{ runner.temp }}/skill-project" --verify
           python scripts/install_skill.py --client codex --scope user --config-home "${{ runner.temp }}/skill-home" --verify
           python scripts/install_skill.py --client opencode --scope project --project "${{ runner.temp }}/skill-project" --dry-run
+
+  react-workspace:
+    name: React workspace wheel smoke (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.18.0'
+      - name: Build and install the checked-out wheel
+        shell: pwsh
+        run: |
+          python -m pip install build setuptools wheel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m build --wheel --no-isolation
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $wheel = @(Get-ChildItem -LiteralPath dist -Filter '*.whl')
+          if ($wheel.Count -ne 1) { throw 'Expected exactly one built wheel' }
+          $runtime = Join-Path $env:RUNNER_TEMP react-workspace-runtime
+          python -m pip install --target $runtime $wheel[0].FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "PYTHONPATH=$runtime" >> $env:GITHUB_ENV
+      - name: Independent peer conflict, joint plan, native install and SSR
+        run: python scripts/smoke_react_workspace.py --out "${{ runner.temp }}/react-workspace-smoke"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: react-workspace-${{ matrix.os }}
+          path: ${{ runner.temp }}/react-workspace-smoke/report.json
+          if-no-files-found: error

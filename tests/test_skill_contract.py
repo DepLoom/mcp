@@ -27,6 +27,7 @@ EXPECTED_REFERENCES = {
     "verification-policy.md",
     "evidence-report.md",
     "goal-and-migration-evidence.md",
+    "npm-workspaces.md",
 }
 EXPECTED_EXAMPLES = {
     "plan-only.md",

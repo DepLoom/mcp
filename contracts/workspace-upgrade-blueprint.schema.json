@@ -1,0 +1,1535 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DepLoom npm workspace upgrade blueprint, compact v2",
+  "type": "object",
+  "required": [
+    "ok",
+    "schemaVersion",
+    "kind",
+    "goalKind",
+    "inventoryDigest",
+    "requestId",
+    "candidateId",
+    "authority",
+    "verification",
+    "executionReady",
+    "coverage",
+    "intent",
+    "constraintModel",
+    "jointAssignment",
+    "packageManagerValidation",
+    "installation",
+    "checks",
+    "runtime",
+    "acceptance",
+    "policy",
+    "action",
+    "details"
+  ],
+  "properties": {
+    "ok": {
+      "const": true
+    },
+    "schemaVersion": {
+      "const": 2
+    },
+    "kind": {
+      "const": "npm-workspace-upgrade-blueprint"
+    },
+    "goalKind": {
+      "enum": [
+        "TARGETED_UPGRADE",
+        "MONOREPO_TO_POLICY"
+      ]
+    },
+    "inventoryDigest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "requestId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "candidateId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "authority": {
+      "const": "PLANNING_ONLY"
+    },
+    "verification": {
+      "const": "NOT_VERIFIED"
+    },
+    "executionReady": {
+      "const": false
+    },
+    "coverage": {
+      "type": "object",
+      "required": [
+        "discoveredOwnerCount",
+        "discoveredDeclarationCount",
+        "constraintDeclarationCount",
+        "selectedDeclarationCount",
+        "heldDeclarationCount",
+        "evaluatedOwnerCoverage"
+      ],
+      "properties": {
+        "discoveredOwnerCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "discoveredDeclarationCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "constraintDeclarationCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "selectedDeclarationCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "heldDeclarationCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "evaluatedOwnerCoverage": {
+          "enum": [
+            "UNKNOWN",
+            "MODELED_DOMAIN_ONLY"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "intent": {
+      "type": "object",
+      "required": [
+        "targets",
+        "unselectedDirectDependencies",
+        "immutableInstances"
+      ],
+      "properties": {
+        "targets": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "unselectedDirectDependencies": {
+          "const": "HOLD_DECLARATION_AND_LOCK_VERSION"
+        },
+        "immutableInstances": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "type": "string"
+          }
+        },
+        "workspacePolicy": {
+          "$ref": "#/$defs/workspacePolicyOptions"
+        }
+      },
+      "additionalProperties": false
+    },
+    "constraintModel": {
+      "type": "object",
+      "required": [
+        "status",
+        "reason",
+        "topology",
+        "domainEvidence",
+        "transitivePlacement"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "SAT_IN_MODELED_DOMAIN",
+            "UNSAT_IN_MODELED_DOMAIN",
+            "UNKNOWN"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "topology": {
+          "enum": [
+            "OBSERVED_LOCK_LAYOUT",
+            "PROPOSED_INSTANCE_LAYOUT"
+          ]
+        },
+        "domainEvidence": {
+          "enum": [
+            "CALLER_SNAPSHOT",
+            "CORE_REGISTRY"
+          ]
+        },
+        "transitivePlacement": {
+          "const": "NOT_MODELED"
+        }
+      },
+      "additionalProperties": false
+    },
+    "jointAssignment": {
+      "type": "object",
+      "required": [
+        "status",
+        "targets"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "COMPUTED",
+            "UNSAT_IN_MODELED_DOMAIN",
+            "UNKNOWN"
+          ]
+        },
+        "targets": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/selection"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "packageManagerValidation": {
+      "type": "object",
+      "required": [
+        "status",
+        "code"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "NOT_RUN",
+            "RESOLUTION_PASSED",
+            "RESOLUTION_FAILED",
+            "UNKNOWN"
+          ]
+        },
+        "code": {
+          "type": "string"
+        },
+        "authority": {
+          "const": "LOCKFILE_ONLY"
+        },
+        "npmExitCode": {
+          "type": "integer"
+        },
+        "baselineLockSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "candidateLockSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "resolverIdentitySha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "resolverArtifactId": {
+          "type": "string",
+          "pattern": "^workspace-npm-[a-z0-9_]{8}$"
+        },
+        "learningAllowed": {
+          "const": false
+        },
+        "search": {
+          "type": "object",
+          "required": [
+            "limit",
+            "timeoutSeconds",
+            "attemptCount",
+            "stop",
+            "attempts"
+          ],
+          "properties": {
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3
+            },
+            "timeoutSeconds": {
+              "const": 60
+            },
+            "attemptCount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 3
+            },
+            "stop": {
+              "type": "string"
+            },
+            "attempts": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 3,
+              "items": {
+                "type": "object",
+                "required": [
+                  "candidateId",
+                  "status",
+                  "code"
+                ],
+                "properties": {
+                  "candidateId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "status": {
+                    "enum": [
+                      "NOT_RUN",
+                      "RESOLUTION_PASSED",
+                      "RESOLUTION_FAILED",
+                      "UNKNOWN"
+                    ]
+                  },
+                  "code": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "RESOLUTION_PASSED"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "resolverArtifactId",
+              "candidateLockSha256",
+              "resolverIdentitySha256"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "resolverArtifactId"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "installation": {
+      "type": "object",
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "const": "NOT_RUN"
+        }
+      },
+      "additionalProperties": false
+    },
+    "checks": {
+      "type": "object",
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "const": "NOT_RUN"
+        }
+      },
+      "additionalProperties": false
+    },
+    "runtime": {
+      "type": "object",
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "const": "NOT_RUN"
+        }
+      },
+      "additionalProperties": false
+    },
+    "acceptance": {
+      "type": "object",
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "const": "NOT_RUN"
+        }
+      },
+      "additionalProperties": false
+    },
+    "policy": {
+      "$ref": "#/$defs/workspacePolicyResult"
+    },
+    "action": {
+      "type": "object",
+      "required": [
+        "kind",
+        "code"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "REVIEW_FOR_AUTHORIZED_ISOLATED_TRIAL",
+            "REVIEW_FOR_AUTHORIZED_PREFLIGHT",
+            "INSPECT_BLOCKER"
+          ]
+        },
+        "code": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "details": {
+      "type": "object",
+      "required": [
+        "planId",
+        "snapshotSha256",
+        "expiresInSeconds"
+      ],
+      "properties": {
+        "planId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]{43}$"
+        },
+        "snapshotSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "expiresInSeconds": {
+          "const": 900
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "target": {
+      "type": "object",
+      "required": [
+        "selector",
+        "approvedLines",
+        "versions",
+        "exactTarget"
+      ],
+      "properties": {
+        "selector": {
+          "type": "object",
+          "required": [
+            "owner",
+            "section",
+            "name"
+          ],
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "section": {
+              "enum": [
+                "dependencies",
+                "devDependencies",
+                "optionalDependencies"
+              ]
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "approvedLines": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "versions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+          }
+        },
+        "exactTarget": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "selection": {
+      "type": "object",
+      "required": [
+        "declaration",
+        "declaredSpec",
+        "baselineLock",
+        "selectedVersion"
+      ],
+      "properties": {
+        "declaration": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": "string"
+          }
+        },
+        "declaredSpec": {
+          "type": "string"
+        },
+        "baselineLock": {
+          "anyOf": [
+            {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "selectedVersion": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "nativeReceipt": {
+      "type": "object",
+      "required": [
+        "status",
+        "code"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "NOT_RUN",
+            "RESOLUTION_PASSED",
+            "RESOLUTION_FAILED",
+            "UNKNOWN"
+          ]
+        },
+        "code": {
+          "type": "string"
+        },
+        "authority": {
+          "const": "LOCKFILE_ONLY"
+        },
+        "npmExitCode": {
+          "type": "integer"
+        },
+        "baselineLockSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "candidateLockSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "resolverIdentitySha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "learningAllowed": {
+          "const": false
+        },
+        "commands": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "required": [
+              "phase",
+              "npmExitCode",
+              "outputSha256"
+            ],
+            "properties": {
+              "phase": {
+                "type": "string"
+              },
+              "npmExitCode": {
+                "type": "integer"
+              },
+              "outputSha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "status": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "lockDelta": {
+          "type": "object",
+          "required": [
+            "status",
+            "code"
+          ],
+          "properties": {
+            "status": {
+              "type": "string"
+            },
+            "code": {
+              "type": "string"
+            },
+            "changedPackageCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "changedEdgeCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "impactedInstanceCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "unrelatedCount": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "immutableInstanceCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "details": {
+      "type": "object",
+      "required": [
+        "ok",
+        "schemaVersion",
+        "inventoryDigest",
+        "requestId",
+        "candidateId",
+        "authority",
+        "verification",
+        "executionReady",
+        "installation",
+        "checks",
+        "runtime",
+        "acceptance",
+        "policy",
+        "constraintModel",
+        "kind",
+        "snapshotSha256",
+        "scope",
+        "page",
+        "targets",
+        "rules",
+        "ruleCoverage",
+        "packageManagerValidation",
+        "search",
+        "candidateReceipts"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "schemaVersion": {
+          "const": 2
+        },
+        "inventoryDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "requestId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "candidateId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "authority": {
+          "const": "PLANNING_ONLY"
+        },
+        "verification": {
+          "const": "NOT_VERIFIED"
+        },
+        "executionReady": {
+          "const": false
+        },
+        "installation": {
+          "type": "object",
+          "required": [
+            "status"
+          ],
+          "properties": {
+            "status": {
+              "const": "NOT_RUN"
+            }
+          },
+          "additionalProperties": false
+        },
+        "checks": {
+          "type": "object",
+          "required": [
+            "status"
+          ],
+          "properties": {
+            "status": {
+              "const": "NOT_RUN"
+            }
+          },
+          "additionalProperties": false
+        },
+        "runtime": {
+          "type": "object",
+          "required": [
+            "status"
+          ],
+          "properties": {
+            "status": {
+              "const": "NOT_RUN"
+            }
+          },
+          "additionalProperties": false
+        },
+        "acceptance": {
+          "type": "object",
+          "required": [
+            "status"
+          ],
+          "properties": {
+            "status": {
+              "const": "NOT_RUN"
+            }
+          },
+          "additionalProperties": false
+        },
+        "policy": {
+          "$ref": "#/$defs/workspacePolicyResult"
+        },
+        "constraintModel": {
+          "type": "object",
+          "required": [
+            "status",
+            "reason",
+            "topology",
+            "domainEvidence",
+            "transitivePlacement"
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "SAT_IN_MODELED_DOMAIN",
+                "UNSAT_IN_MODELED_DOMAIN",
+                "UNKNOWN"
+              ]
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "topology": {
+              "enum": [
+                "OBSERVED_LOCK_LAYOUT",
+                "PROPOSED_INSTANCE_LAYOUT"
+              ]
+            },
+            "domainEvidence": {
+              "enum": [
+                "CALLER_SNAPSHOT",
+                "CORE_REGISTRY"
+              ]
+            },
+            "transitivePlacement": {
+              "const": "NOT_MODELED"
+            }
+          },
+          "additionalProperties": false
+        },
+        "kind": {
+          "const": "npm-workspace-plan-details"
+        },
+        "snapshotSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "scope": {
+          "type": "object",
+          "required": [
+            "owner",
+            "section"
+          ],
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "section": {
+              "enum": [
+                "dependencies",
+                "devDependencies",
+                "optionalDependencies"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "page": {
+          "type": "object",
+          "required": [
+            "offset",
+            "total",
+            "nextOffset"
+          ],
+          "properties": {
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "nextOffset": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "targets": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "required": [
+              "declaration",
+              "declaredSpec",
+              "baselineLock",
+              "selectedVersion",
+              "modeledDomain"
+            ],
+            "properties": {
+              "declaration": {
+                "type": "array",
+                "minItems": 3,
+                "maxItems": 3,
+                "items": {
+                  "type": "string"
+                }
+              },
+              "declaredSpec": {
+                "type": "string"
+              },
+              "baselineLock": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "selectedVersion": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "modeledDomain": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "maxItems": 32,
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "rules": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "object",
+            "required": [
+              "consumer",
+              "candidateVersion",
+              "provider",
+              "providerContext",
+              "allowedVersions",
+              "provenance"
+            ],
+            "properties": {
+              "consumer": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "minItems": 3,
+                    "maxItems": 3,
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "candidateVersion": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "provider": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "minItems": 3,
+                    "maxItems": 3,
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "providerContext": {
+                "enum": [
+                  "NONE",
+                  "IN_SCOPE",
+                  "EXTERNAL"
+                ]
+              },
+              "allowedVersions": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "maxItems": 32,
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "provenance": {
+                "enum": [
+                  "workspace-modeled-peer-range",
+                  "workspace-modeled-engine-range",
+                  "workspace-proposed-instance"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "ruleCoverage": {
+          "enum": [
+            "UNAVAILABLE",
+            "PARTIAL",
+            "COMPLETE_IN_MODELED_SCOPE"
+          ]
+        },
+        "packageManagerValidation": {
+          "$ref": "#/$defs/nativeReceipt"
+        },
+        "search": {
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "limit",
+                "timeoutSeconds",
+                "attemptCount",
+                "stop",
+                "attempts"
+              ],
+              "properties": {
+                "limit": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 3
+                },
+                "timeoutSeconds": {
+                  "const": 60
+                },
+                "attemptCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 3
+                },
+                "stop": {
+                  "type": "string"
+                },
+                "attempts": {
+                  "type": "array",
+                  "minItems": 0,
+                  "maxItems": 3,
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "candidateId",
+                      "status",
+                      "code"
+                    ],
+                    "properties": {
+                      "candidateId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      },
+                      "status": {
+                        "enum": [
+                          "NOT_RUN",
+                          "RESOLUTION_PASSED",
+                          "RESOLUTION_FAILED",
+                          "UNKNOWN"
+                        ]
+                      },
+                      "code": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "candidateReceipts": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "required": [
+              "status",
+              "code",
+              "candidateId"
+            ],
+            "properties": {
+              "status": {
+                "enum": [
+                  "NOT_RUN",
+                  "RESOLUTION_PASSED",
+                  "RESOLUTION_FAILED",
+                  "UNKNOWN"
+                ]
+              },
+              "code": {
+                "type": "string"
+              },
+              "authority": {
+                "const": "LOCKFILE_ONLY"
+              },
+              "npmExitCode": {
+                "type": "integer"
+              },
+              "baselineLockSha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "candidateLockSha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "resolverIdentitySha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "learningAllowed": {
+                "const": false
+              },
+              "commands": {
+                "type": "array",
+                "maxItems": 3,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "phase",
+                    "npmExitCode",
+                    "outputSha256"
+                  ],
+                  "properties": {
+                    "phase": {
+                      "type": "string"
+                    },
+                    "npmExitCode": {
+                      "type": "integer"
+                    },
+                    "outputSha256": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "lockDelta": {
+                "type": "object",
+                "required": [
+                  "status",
+                  "code"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "type": "string"
+                  },
+                  "changedPackageCount": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "changedEdgeCount": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "impactedInstanceCount": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "unrelatedCount": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "additionalProperties": false
+              },
+              "immutableInstanceCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "candidateId": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "workspacePolicyOptions": {
+      "type": "object",
+      "required": [
+        "targetLevel",
+        "minLagOkPct",
+        "lagPolicyMonths",
+        "maxKnownHigh"
+      ],
+      "properties": {
+        "targetLevel": {
+          "enum": [
+            "yellow",
+            "green"
+          ]
+        },
+        "minLagOkPct": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "lagPolicyMonths": {
+          "enum": [
+            3,
+            6,
+            9,
+            12
+          ]
+        },
+        "maxKnownHigh": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxKnownModerate": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxKnownLow": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "workspaceHealth": {
+      "type": "object",
+      "required": [
+        "status",
+        "targetLevel",
+        "authority",
+        "finalAudit"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "FEASIBLE_IN_MODELED_DOMAIN",
+            "BLOCKED_IN_MODELED_DOMAIN",
+            "UNKNOWN"
+          ]
+        },
+        "targetLevel": {
+          "enum": [
+            "yellow",
+            "green"
+          ]
+        },
+        "authority": {
+          "const": "DECLARED_DOMAIN_PLANNING_ONLY"
+        },
+        "finalAudit": {
+          "const": "NOT_RUN"
+        },
+        "targetScope": {
+          "const": "ACTIVE_WORKSPACE_DECLARATIONS"
+        },
+        "lagDenominator": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lagRequired": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "severityLimits": {
+          "type": "object",
+          "properties": {
+            "C": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "H": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "M": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "L": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "U": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "M+L": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "securityUnit": {
+          "const": "UNIQUE_PACKAGE_NAMES_PER_SEVERITY"
+        },
+        "internalLinkDeclarations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lagConfirmed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lagUnknown": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "securityUnknown": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "knownBySeverity": {
+          "type": "object",
+          "properties": {
+            "C": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "H": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "M": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "L": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "U": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "evidence": {
+          "type": "object",
+          "required": [
+            "status",
+            "source",
+            "lagWindowMonths",
+            "lagReference",
+            "exactVersionCount",
+            "unknownLagVersionCount",
+            "unknownSecurityVersionCount",
+            "osvSkippedNameCount",
+            "snapshotSha256",
+            "registryIdentitySha256"
+          ],
+          "properties": {
+            "status": {
+              "const": "COLLECTED"
+            },
+            "source": {
+              "const": "CORE_REGISTRY_AND_EXACT_OSV"
+            },
+            "lagWindowMonths": {
+              "enum": [
+                3,
+                6,
+                9,
+                12
+              ]
+            },
+            "lagReference": {
+              "enum": [
+                "LATEST_ALLOWED_REGISTRY_METADATA",
+                "LATEST_INSTALLABLE_IN_CONFIGURED_REGISTRY"
+              ]
+            },
+            "exactVersionCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "unknownLagVersionCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "unknownSecurityVersionCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "osvSkippedNameCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "snapshotSha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "registryIdentitySha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "FEASIBLE_IN_MODELED_DOMAIN"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "lagDenominator",
+              "lagRequired",
+              "lagConfirmed",
+              "lagUnknown",
+              "securityUnknown",
+              "knownBySeverity",
+              "evidence"
+            ]
+          }
+        }
+      ]
+    },
+    "workspacePolicyResult": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "status",
+            "targetScope"
+          ],
+          "properties": {
+            "status": {
+              "const": "NOT_ASSESSED"
+            },
+            "targetScope": {
+              "const": "NONE_FOR_TARGETED_UPGRADE"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/workspaceHealth"
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "goalKind": {
+            "const": "MONOREPO_TO_POLICY"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "policy": {
+            "$ref": "#/$defs/workspaceHealth"
+          },
+          "intent": {
+            "required": [
+              "workspacePolicy"
+            ]
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "policy": {
+            "properties": {
+              "status": {
+                "const": "NOT_ASSESSED"
+              }
+            }
+          },
+          "intent": {
+            "not": {
+              "required": [
+                "workspacePolicy"
+              ]
+            }
+          }
+        }
+      }
+    }
+  ]
+}

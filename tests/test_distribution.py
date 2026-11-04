@@ -30,6 +30,7 @@ class DistributionTests(unittest.TestCase):
         core = self.write("upstream/deploom/dependency_live_roadmap_generator.py", "print('synthetic core')\n")
         self.write("upstream/deploom/private-local.json", '{"neverPackage":true}')
         schema = self.write("contracts/upgrade-blueprint.schema.json", '{"type":"object"}')
+        workspace_schema = self.write("contracts/workspace-upgrade-blueprint.schema.json", '{"type":"object"}')
         skill = self.write("skills/deploom-upgrade/SKILL.md", "---\nname: synthetic\n---\n")
         reference = self.write("skills/deploom-upgrade/references/contract.md", "synthetic execution contract\n")
         files = {"SKILL.md": digest(skill.read_bytes()), "references/contract.md": digest(reference.read_bytes())}
@@ -42,7 +43,9 @@ class DistributionTests(unittest.TestCase):
             self.write(f"scripts/{name}", "# synthetic\n")
         core_files = {"dependency_live_roadmap_generator.py": digest(core.read_bytes())}
         manifest = {"mcpVersion": "0.2.0", "core": {"files": core_files, "contentSha256": inventory_digest(core_files)},
-                    "schemaSha256": digest(schema.read_bytes()), "skillManifestSha256": digest(contract.read_bytes())}
+                    "schemaSha256": digest(schema.read_bytes()),
+                    "workspaceSchemaSha256": digest(workspace_schema.read_bytes()),
+                    "skillManifestSha256": digest(contract.read_bytes())}
         self.write("release-manifest.json", json.dumps(manifest))
         return manifest
 
@@ -56,6 +59,7 @@ class DistributionTests(unittest.TestCase):
         with patch.object(distribution, "_package_root", return_value=dest):
             self.assertEqual(distribution.resolve_core_dir(), dest / "_core")
             self.assertTrue(distribution.blueprint_schema_path().is_file())
+            self.assertTrue(distribution.blueprint_schema_path(workspace=True).is_file())
             self.assertTrue(distribution.release_manifest_path().is_file())
             self.assertTrue((distribution.skill_root() / "contract.json").is_file())
 

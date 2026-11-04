@@ -1,0 +1,233 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "package.json": "{\n  \"name\": \"deploom-react-monorepo-control\",\n  \"version\": \"1.0.0\",\n  \"private\": true,\n  \"workspaces\": [\n    \"packages/*\"\n  ],\n  \"dependencies\": {\n    \"react\": \"18.3.1\"\n  },\n  \"scripts\": {\n    \"test\": \"node packages/app/main.cjs && node packages/legacy/main.cjs\"\n  }\n}\n",
+    "packages/app/package.json": "{\n  \"name\": \"deploom-control-app\",\n  \"version\": \"1.0.0\",\n  \"private\": true,\n  \"dependencies\": {\n    \"react\": \"18.3.1\",\n    \"react-dom\": \"18.3.1\",\n    \"deploom-control-ui\": \"1.0.0\",\n    \"is-number\": \"7.0.0\"\n  }\n}\n",
+    "packages/legacy/package.json": "{\n  \"name\": \"deploom-control-legacy\",\n  \"version\": \"1.0.0\",\n  \"private\": true,\n  \"dependencies\": {\n    \"react\": \"18.3.1\",\n    \"react-dom\": \"18.3.1\"\n  }\n}\n",
+    "packages/ui/package.json": "{\n  \"name\": \"deploom-control-ui\",\n  \"version\": \"1.0.0\",\n  \"private\": true,\n  \"main\": \"index.cjs\",\n  \"peerDependencies\": {\n    \"react\": \"^18.3.1 || ^19.0.0\"\n  }\n}\n",
+    "packages/app/main.cjs": "const assert = require(\"node:assert/strict\");\nconst React = require(\"react\");\nconst ui = require(\"deploom-control-ui\");\nconst { renderToStaticMarkup } = require(\"react-dom/server\");\nassert.equal(React.version, \"18.3.1\");\nassert.equal(require(\"react-dom\").version, \"18.3.1\");\nassert.strictEqual(React, ui.react);\nassert.equal(require(\"is-number/package.json\").version, \"7.0.0\");\nfor (const initial of [0, 17, -6]) {\n  assert.equal(renderToStaticMarkup(React.createElement(ui.Counter, { initial })), `<strong>${initial}</strong>`);\n}\n",
+    "packages/legacy/main.cjs": "const assert = require(\"node:assert/strict\");\nconst React = require(\"react\");\nconst { renderToStaticMarkup } = require(\"react-dom/server\");\nassert.equal(React.version, \"18.3.1\");\nassert.equal(require(\"react-dom\").version, \"18.3.1\");\nfunction Probe() {\n  const [value] = React.useState(\"legacy\");\n  return React.createElement(\"i\", null, value);\n}\nassert.equal(renderToStaticMarkup(React.createElement(Probe)), \"<i>legacy</i>\");\n",
+    "packages/ui/index.cjs": "const React = require(\"react\");\nexports.react = React;\nexports.Counter = function Counter({ initial }) {\n  const [count] = React.useState(initial);\n  return React.createElement(\"strong\", null, count);\n};\n"
+  },
+  "baselineLock": {
+    "name": "deploom-react-monorepo-control",
+    "version": "1.0.0",
+    "lockfileVersion": 3,
+    "requires": true,
+    "packages": {
+      "": {
+        "name": "deploom-react-monorepo-control",
+        "version": "1.0.0",
+        "workspaces": [
+          "packages/*"
+        ],
+        "dependencies": {
+          "react": "18.3.1"
+        }
+      },
+      "node_modules/deploom-control-app": {
+        "resolved": "packages/app",
+        "link": true
+      },
+      "node_modules/deploom-control-legacy": {
+        "resolved": "packages/legacy",
+        "link": true
+      },
+      "node_modules/deploom-control-ui": {
+        "resolved": "packages/ui",
+        "link": true
+      },
+      "node_modules/is-number": {
+        "version": "7.0.0",
+        "resolved": "https://registry.npmjs.org/is-number/-/is-number-7.0.0.tgz",
+        "integrity": "sha512-41Cifkg6e8TylSpdtTpeLVMqvSBEVzTttHvERD741+pnZ8ANv0004MRL43QKPDlK9cGvNp6NZWZUBlbGXYxxng==",
+        "license": "MIT",
+        "engines": {
+          "node": ">=0.12.0"
+        }
+      },
+      "node_modules/js-tokens": {
+        "version": "4.0.0",
+        "resolved": "https://registry.npmjs.org/js-tokens/-/js-tokens-4.0.0.tgz",
+        "integrity": "sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==",
+        "license": "MIT"
+      },
+      "node_modules/loose-envify": {
+        "version": "1.4.0",
+        "resolved": "https://registry.npmjs.org/loose-envify/-/loose-envify-1.4.0.tgz",
+        "integrity": "sha512-lyuxPGr/Wfhrlem2CL/UcnUc1zcqKAImBDzukY7Y5F/yQiNdko6+fRLevlw1HgMySw7f611UIY408EtxRSoK3Q==",
+        "license": "MIT",
+        "dependencies": {
+          "js-tokens": "^3.0.0 || ^4.0.0"
+        },
+        "bin": {
+          "loose-envify": "cli.js"
+        }
+      },
+      "node_modules/react": {
+        "version": "18.3.1",
+        "resolved": "https://registry.npmjs.org/react/-/react-18.3.1.tgz",
+        "integrity": "sha512-wS+hAgJShR0KhEvPJArfuPVN1+Hz1t0Y6n5jLrGQbkb4urgPE/0Rve+1kMB1v/oWgHgm4WIcV+i7F2pTVj+2iQ==",
+        "license": "MIT",
+        "dependencies": {
+          "loose-envify": "^1.1.0"
+        },
+        "engines": {
+          "node": ">=0.10.0"
+        }
+      },
+      "node_modules/react-dom": {
+        "version": "18.3.1",
+        "resolved": "https://registry.npmjs.org/react-dom/-/react-dom-18.3.1.tgz",
+        "integrity": "sha512-5m4nQKp+rZRb09LNH59GM4BxTh9251/ylbKIbpe7TpGxfJ+9kv6BLkLBXIjjspbgbnIBNqlI23tRnTWT0snUIw==",
+        "license": "MIT",
+        "dependencies": {
+          "loose-envify": "^1.1.0",
+          "scheduler": "^0.23.2"
+        },
+        "peerDependencies": {
+          "react": "^18.3.1"
+        }
+      },
+      "node_modules/scheduler": {
+        "version": "0.23.2",
+        "resolved": "https://registry.npmjs.org/scheduler/-/scheduler-0.23.2.tgz",
+        "integrity": "sha512-UOShsPwz7NrMUqhR6t0hWjFduvOzbtv7toDH1/hIrfRNIDBnnBWd0CwJTGvTpngVlmwGCdP9/Zl/tVrDqcuYzQ==",
+        "license": "MIT",
+        "dependencies": {
+          "loose-envify": "^1.1.0"
+        }
+      },
+      "packages/app": {
+        "name": "deploom-control-app",
+        "version": "1.0.0",
+        "dependencies": {
+          "deploom-control-ui": "1.0.0",
+          "is-number": "7.0.0",
+          "react": "18.3.1",
+          "react-dom": "18.3.1"
+        }
+      },
+      "packages/legacy": {
+        "name": "deploom-control-legacy",
+        "version": "1.0.0",
+        "dependencies": {
+          "react": "18.3.1",
+          "react-dom": "18.3.1"
+        }
+      },
+      "packages/ui": {
+        "name": "deploom-control-ui",
+        "version": "1.0.0",
+        "peerDependencies": {
+          "react": "^18.3.1 || ^19.0.0"
+        }
+      }
+    }
+  },
+  "artifacts": {
+    "is-number@7.0.0": {
+      "name": "is-number",
+      "version": "7.0.0",
+      "integrity": "sha512-41Cifkg6e8TylSpdtTpeLVMqvSBEVzTttHvERD741+pnZ8ANv0004MRL43QKPDlK9cGvNp6NZWZUBlbGXYxxng==",
+      "url": "https://registry.npmjs.org/is-number/-/is-number-7.0.0.tgz"
+    },
+    "js-tokens@4.0.0": {
+      "name": "js-tokens",
+      "version": "4.0.0",
+      "integrity": "sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==",
+      "url": "https://registry.npmjs.org/js-tokens/-/js-tokens-4.0.0.tgz"
+    },
+    "loose-envify@1.4.0": {
+      "name": "loose-envify",
+      "version": "1.4.0",
+      "integrity": "sha512-lyuxPGr/Wfhrlem2CL/UcnUc1zcqKAImBDzukY7Y5F/yQiNdko6+fRLevlw1HgMySw7f611UIY408EtxRSoK3Q==",
+      "url": "https://registry.npmjs.org/loose-envify/-/loose-envify-1.4.0.tgz"
+    },
+    "react-dom@18.3.1": {
+      "name": "react-dom",
+      "version": "18.3.1",
+      "integrity": "sha512-5m4nQKp+rZRb09LNH59GM4BxTh9251/ylbKIbpe7TpGxfJ+9kv6BLkLBXIjjspbgbnIBNqlI23tRnTWT0snUIw==",
+      "url": "https://registry.npmjs.org/react-dom/-/react-dom-18.3.1.tgz"
+    },
+    "react-dom@19.0.0": {
+      "name": "react-dom",
+      "version": "19.0.0",
+      "integrity": "sha512-4GV5sHFG0e/0AD4X+ySy6UJd3jVl1iNsNHdpad0qhABJ11twS3TTBnseqsKurKcsNqCEFeGL3uLpVChpIO3QfQ==",
+      "url": "https://registry.npmjs.org/react-dom/-/react-dom-19.0.0.tgz"
+    },
+    "react@18.3.1": {
+      "name": "react",
+      "version": "18.3.1",
+      "integrity": "sha512-wS+hAgJShR0KhEvPJArfuPVN1+Hz1t0Y6n5jLrGQbkb4urgPE/0Rve+1kMB1v/oWgHgm4WIcV+i7F2pTVj+2iQ==",
+      "url": "https://registry.npmjs.org/react/-/react-18.3.1.tgz"
+    },
+    "react@19.0.0": {
+      "name": "react",
+      "version": "19.0.0",
+      "integrity": "sha512-V8AVnmPIICiWpGfm6GLzCR/W5FXLchHop40W4nXBmdlEceh16rCN8O8LNWm5bh5XUX91fh7KpA+W0TgMKmgTpQ==",
+      "url": "https://registry.npmjs.org/react/-/react-19.0.0.tgz"
+    },
+    "scheduler@0.23.2": {
+      "name": "scheduler",
+      "version": "0.23.2",
+      "integrity": "sha512-UOShsPwz7NrMUqhR6t0hWjFduvOzbtv7toDH1/hIrfRNIDBnnBWd0CwJTGvTpngVlmwGCdP9/Zl/tVrDqcuYzQ==",
+      "url": "https://registry.npmjs.org/scheduler/-/scheduler-0.23.2.tgz"
+    },
+    "scheduler@0.25.0": {
+      "name": "scheduler",
+      "version": "0.25.0",
+      "integrity": "sha512-xFVuu11jh+xcO7JOAGJNOXld8/TcEHK/4CituBUeUb5hqxJLj9YuemAEuvm9gQ/+pgXYfbQuqAkiYu+u7YEsNA==",
+      "url": "https://registry.npmjs.org/scheduler/-/scheduler-0.25.0.tgz"
+    }
+  },
+  "packuments": {
+    "is-number": {
+      "versions": {
+        "7.0.0": {
+          "name": "is-number",
+          "version": "7.0.0",
+          "engines": {
+            "node": ">=0.12.0"
+          }
+        }
+      }
+    },
+    "react": {
+      "versions": {
+        "18.3.1": {
+          "name": "react",
+          "version": "18.3.1",
+          "engines": {
+            "node": ">=0.10.0"
+          }
+        },
+        "19.0.0": {
+          "name": "react",
+          "version": "19.0.0",
+          "engines": {
+            "node": ">=0.10.0"
+          }
+        }
+      }
+    },
+    "react-dom": {
+      "versions": {
+        "18.3.1": {
+          "name": "react-dom",
+          "version": "18.3.1",
+          "peerDependencies": {
+            "react": "^18.3.1"
+          }
+        },
+        "19.0.0": {
+          "name": "react-dom",
+          "version": "19.0.0",
+          "peerDependencies": {
+            "react": "^19.0.0"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,7 +1,7 @@
 {
   "blueprintSchemaVersion": 2,
   "core": {
-    "contentSha256": "c6e2df99cc11af93886e2a905b800f3ef42dcd508d3d3983de0a890c40616d9f",
+    "contentSha256": "6b0382df9686fe8e393815a81f190c392f9ed2b03dfc8b41d46477be5190daef",
     "files": {
       "VERSION": "2698c63efcc74d9adc7a29889fc4ecc7fadfb58c4588db3f117f9d87cfaaff40",
       "analyze_verification_telemetry.py": "1ee235ef0b9cf275fe34c22cf16cb4049e88fb19953096ddaecbb73d7a700e6f",
@@ -90,7 +90,7 @@
       "lockfile_preflight.py": "b13ee58c00905c27223062e872f0c3219239b76249a19b3ea6c15e1fd1238924",
       "manual_dependency_audit.py": "2c7b393466c3b2b1e030fbacbb28b52697b7b21eddcb09c80c15e93eee8e3340",
       "materialization_retention.py": "9e4c37f073de700ef4a0d0fe2a5225a3b71b7e3e814c1fd48ab59189af5f6abf",
-      "materialized_workspace_verifier.py": "c49ceefe010435d322c70d64d0b72021dd2802a2dfc169b33f655c7479e49ac4",
+      "materialized_workspace_verifier.py": "491f083de2f162a56397767b0354a18d7d46a716ff6836337160e23931cb70f6",
       "migration_documents.py": "8f20583f19aa3bb09454ae3047866f301a50c4b7ab2f3fa8e8d64c0fdda25a19",
       "migration_research.py": "f95a8c7de05a867374f20582838ce7313504c8717b3d36ebf3bdebfd30b8c4d9",
       "migration_validation.py": "aa8cc3395c242a4d4f0f94affe5901fb36f0af7793fb829e696c97258294175b",
@@ -100,9 +100,9 @@
       "package_manager_profile.py": "17c0aa5f01cd6d73b5bfee2c468fd36b42696b09e2f1c2d54c54f34a75e74efe",
       "package_manager_telemetry.py": "03dcb08777e3865113e91fdc04058b6298cc2ca165ff1516652e31d989740ec5",
       "peer_solver_goal.py": "2e9dffd7f5da6145a513fc409e804f56e8cabc25c8c63b9bcaf1b2da30daeb7a",
-      "peer_solver_model.py": "4b42a838cf4c30de72550a3789a47ca4d078b336e91a0ab8b9076e18942c917c",
+      "peer_solver_model.py": "7653535756327a2c2e30f7971374e11b9a64e237546af79ea6cbb44a24408b7b",
       "peer_solver_transition.py": "80a00cec7aa2a2ebbf7907c121682dcae8a56a9f1c1aec6669df5b779b3a78eb",
-      "peer_solver_z3.py": "ff01bb3daaf7f220025b9469001385bdb77516cc4b0ce3cea1d6620d30e60495",
+      "peer_solver_z3.py": "9879dcccf47bb4db2f546454bd9fa49f8a7d4471ca5ede65e854a2c3b6d9f045",
       "planning_cache.py": "5b54a50d425ad82c1563a9b7f22f529dcbeee9c423d4092c637061b5fc144cd3",
       "prepared_workspace_fastpath.py": "906ac8374894b08ed4d0043fd69e5621cde5ee8ded2562b639dae33130720f8e",
       "project_execution_environment.py": "10cabffb0abd73704a305c5ab59ba14600de3343c6ca50e29d6c514ad4e096ac",
@@ -113,8 +113,8 @@
       "registry_metadata_cache.py": "71599efd302a915173c01afd303b1f43de6d5535a77874699bece32a369b36e2",
       "registry_request_context.py": "e1a5783e8859b7477a9a69fd600feaeeb1cae403a09098181099d1bd898fad0e",
       "reparse_materialization.py": "ddb8d24337b510f6b432571fa26917f9270433416f9b69f612cfbceaec2509c7",
-      "resolution_inventory.py": "d6c36b92e92ec486332c20f86e8b4693a828752c100025d743487954e7b08eed",
-      "resolved_dependency_state.py": "0a37f40587fa78c80e4d5bdbe09cae9cbac322f53b0c8c7a8d53ca42c1df8058",
+      "resolution_inventory.py": "5cbffe95dab1c69ca2656b80aaa54c69a2e2386c83a1cd24973247d80367749e",
+      "resolved_dependency_state.py": "64817d817a7009801d9e319aef1bbbcea1f378983ef49fa8ba8b8388fa79f3a1",
       "run_tool_tests.py": "70d3cf1e3b192d4d2f759dbc9583d6b119b0a609be9e283f40f156aa660023e3",
       "run_writer_lock.py": "811ac5cd1157ba021cdd1814c871ff5eca75643ff2c00f9a796e4dc10ed877fe",
       "runtime_metrics.py": "83c002498eae6abc34526a353ff4060e4f3f87b7fc4e07703c500eca5b96a582",
@@ -135,8 +135,9 @@
       "verification_experiment_registry.py": "ee7741da389a97b86320e9a13c559b5051f452b709bd8c9c56fd1cb5f53d758a",
       "verification_identity_diagnostics.py": "58da0339d91fe6735bab7ab731dfc8cc86ff85ed555f243fad8bcbc4c03d4ece",
       "verification_invocation.py": "166cdaa516e57db983c90c63466074e4f6178a1301ff400254551ab86a744478",
+      "verification_linux_pid_namespace.py": "2c9c157b5ab8e3db208399925a6f33bac79306a7fc34efa1bf7b827f065c3486",
       "verification_observability.py": "d30ec27b23a68c6e9c329910640c4360d320786443f9f3ad040270b2000a2ba2",
-      "verification_process_supervisor.py": "66d68e421298e4f07714d0ff90b00bbfe082ad13ade40573a3e494e5b19543ee",
+      "verification_process_supervisor.py": "bab4dcbb72a30ecbcadb06f865bd6185f221d69f0ae6013ae49b24edef16bc16",
       "verification_proof.py": "9b37fab4eaa42e5b565978542718f77038777ed112bfa23ed4153b87f813fbfa",
       "verification_source_closure.py": "8103e069e8cd73d65be720f7223981fd3b0a221c4e7b0583ccc6f7176166ad6d",
       "verification_stage_checkpoint.py": "573121e8eb0b73c056224287fe27fd12c2861042420b1bb793d89a82e42ea926",
@@ -145,19 +146,26 @@
       "windows_unc.py": "6b6589177faa963f0e1c8b3c7134a8719e9f251237ec6a075c667db6cf375bd1",
       "worker_runtime_state.py": "69cd5bf6ef0b4fb15bbf6b3418fbe7659a87bbbc5201bd9d2ef3e1e1d5a77345",
       "workspace_glob.py": "ab7e6fb0bb8abb2812362dc7c416e79cad319b471d5c94aa5012a42b308813c7",
+      "workspace_health_evidence.py": "8b39de6fe4e1d3f99c13d28c3d23b2528f6ce223cf586d6aa9e2eb98864ab3b0",
+      "workspace_health_policy.py": "6aa0024feb51775e2333f438f84486c18b4fcaaa6d1c7afb0b3d16a24065fe62",
       "workspace_noise.py": "0ed76379a5308cb8a5b053ed92293fdf4bd255c7799c6e77a644db8bac3af27a",
+      "workspace_npm_lock_delta.py": "176fd664a8638e028b353fa20e2e9864e9145dba365e4af330d10b3baf0e0b8d",
+      "workspace_npm_obligations.py": "646ed1b88dde5dccbcf4f5cf379deb8d3cd183dfd391cc0440a3657d4880d912",
+      "workspace_npm_preflight.py": "b5b15958dfb039b2a9a662145dab0e82ffc5c1e39b280acbed0e257f0d97a344",
+      "workspace_peer_model.py": "8f7669f7bd26a54bdf4e442667a6902d968993b9ece97d2592d4dbd60cf97439",
       "yarn_berry.py": "bd769e797823ff99129983f8295a52b5aac1f01f9be2c2a8eac9ffeaf20903d2"
     },
     "repository": "https://github.com/DepLoom/core",
-    "revision": "ec9f4289a0632eb3767a62cddbad411fdc15d6e0",
+    "revision": "b8913c85e5cfe88a7ad1a9ff863bd8dab819cbb5",
     "version": "1.0.0-preview.20"
   },
   "mcpVersion": "0.2.4",
   "schemaSha256": "974ea52175ea09928cddae9694b5eb750cc1024520e758e64f23ed967fe81627",
   "schemaVersion": 1,
   "skill": {
-    "bundleSha256": "5d9d3010d040104ff1dabd8cf072feaf8137be53c368e1cc1c9050e9fbaed96c",
-    "contractVersion": "2.0.3"
+    "bundleSha256": "af8270ec77c027690b755d26332f295aef6c7001a754cf0dd86ee8b07b54d476",
+    "contractVersion": "2.0.5"
   },
-  "skillManifestSha256": "869ae8545d940e7be4cebc3023e96cc1c82432ba4b93b34db642fb4a0b48e8f8"
+  "skillManifestSha256": "dfd850fda6e03c42f5fd4280ebaf96dcc64bbbffddb8519d19a230dc174ea593",
+  "workspaceSchemaSha256": "385d097361ec94dedd54e96018b8d355a5da408849a69758bf86ad57866d5a7f"
 }

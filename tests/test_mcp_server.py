@@ -57,6 +57,16 @@ RESERVED_VERIFIED = {"CONSTRAINT_SATISFIED", "MATERIALIZED", "PROJECT_VERIFIED"}
 class GetUpgradePlanValidationTests(unittest.TestCase):
     """Misuse paths: pure validation, never launches the planner."""
 
+    def test_workspace_request_rejects_flat_scope_options(self) -> None:
+        result = get_upgrade_plan(project_path="C:/nope", workspace_request={"schemaVersion": 2},
+                                  exact_targets={"react": "19.0.0"})
+        self.assertEqual(result["error"]["code"], "WORKSPACE_MIXED_FLAT_OPTIONS")
+
+    def test_workspace_policy_intent_cannot_be_downgraded_to_targeted(self) -> None:
+        result = get_upgrade_plan(project_path="C:/nope",
+                                  workspace_request={"schemaVersion": 2, "goalKind": "MONOREPO_TO_POLICY"})
+        self.assertEqual(result["error"]["code"], "INVALID_WORKSPACE_UPGRADE_REQUEST")
+
     def test_empty_project_path_is_invalid_args(self) -> None:
         res = get_upgrade_plan(project_path="")
         self.assertIs(res["ok"], False)

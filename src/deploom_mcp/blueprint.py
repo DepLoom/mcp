@@ -505,7 +505,9 @@ def _schema_path() -> Path:
     return blueprint_schema_path()
 
 
-def _validate_blueprint_schema(blueprint: Mapping[str, Any], schema_path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+def _validate_blueprint_schema(
+    blueprint: Mapping[str, Any], schema_path: Optional[Path] = None, *, definition: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
     """Runtime JSON Schema validation of the final blueprint (fail-closed).
 
     The published blueprint MUST conform to the shipped schema before a
@@ -525,6 +527,8 @@ def _validate_blueprint_schema(blueprint: Mapping[str, Any], schema_path: Option
         )
     try:
         schema = _read_json(path)
+        if definition is not None:
+            schema = {"$schema": schema["$schema"], "$defs": schema["$defs"], "$ref": f"#/$defs/{definition}"}
         jsonschema.validate(blueprint, schema)
     except jsonschema.ValidationError as exc:
         where = ".".join(str(p) for p in exc.absolute_path) or "<root>"

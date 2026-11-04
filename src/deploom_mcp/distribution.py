@@ -25,8 +25,9 @@ def resolve_core_dir() -> Path:
     return _checkout_root() / "upstream" / "deploom"
 
 
-def blueprint_schema_path() -> Path:
-    bundled = _package_root() / "resources" / "upgrade-blueprint.schema.json"
+def blueprint_schema_path(*, workspace: bool = False) -> Path:
+    filename = "workspace-upgrade-blueprint.schema.json" if workspace else "upgrade-blueprint.schema.json"
+    bundled = _package_root() / "resources" / filename
     if bundled.is_file():
         return bundled
     return _checkout_root() / "contracts" / bundled.name

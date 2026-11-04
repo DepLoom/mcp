@@ -60,6 +60,20 @@ class WorkspaceInventoryTests(unittest.TestCase):
         self.assertEqual(result['jointAssignment'], 'NOT_COMPUTED')
         self.assertEqual(result['physicalTree'], 'NOT_OBSERVED')
 
+    def test_lock_evidence_cannot_name_a_sibling_owner_provider(self):
+        from deploom_mcp.workspace_tools import _valid_success
+
+        def lookup(packages, name, owner):
+            return ("node_modules/kleur", "3.0.0") if name == "kleur" else None
+
+        result = observe_npm_workspace(self.root, lock_resolver=lookup)
+        self.assertTrue(_valid_success(result, None, ""))
+        self.assertEqual(result["physicalTree"], "NOT_OBSERVED")
+        row = next(row for row in result["lockResolutionEvidence"]["rows"]
+                   if row["owner"] == "packages/a")
+        row["lockPath"] = "packages/b/node_modules/kleur"
+        self.assertFalse(_valid_success(result, None, ""))
+
     def test_child_cannot_be_mistaken_for_lock_owner(self):
         with self.assertRaises(GoalContractError):
             observe_npm_workspace(self.root / 'packages/a')

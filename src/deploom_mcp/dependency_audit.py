@@ -138,7 +138,8 @@ async def audit_dependencies(*, project_path: str, package_manager: str = "auto"
                              registry: str | None = None, deadline_seconds: float = 120,
                              include_lag: bool = False, lag_months: int = 12,
                              output_dir: str | None = None,
-                             use_system_proxy: bool | None = None) -> dict[str, Any]:
+                             use_system_proxy: bool | None = None,
+                             _candidate_binding: dict | None = None) -> dict[str, Any]:
     """Audit an input snapshot, not the mutable checkout or installed runtime.
 
     Cancellation propagates; the shared async process runner kills the entire
@@ -148,6 +149,10 @@ async def audit_dependencies(*, project_path: str, package_manager: str = "auto"
         request = validate_request(project_path, package_manager=package_manager, registry=registry,
             deadline_seconds=deadline_seconds, include_lag=include_lag, lag_months=lag_months,
             use_system_proxy=use_system_proxy)
+        if _candidate_binding is not None:
+            if package_manager != "npm" or include_lag or not registry:
+                raise AuditError("candidate-audit-options-invalid", "candidate binding requires npm security-only audit")
+            request["candidateBinding"] = _candidate_binding
         from deploom_mcp.blueprint import resolve_output_outside
         root = Path(request["root"])
         if output_dir is not None and (not isinstance(output_dir, str) or not output_dir):

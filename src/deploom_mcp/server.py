@@ -71,7 +71,9 @@ from deploom_mcp.registry_projection import (
 )
 
 from deploom_mcp.goal_tools import register_goal_tools
+from deploom_mcp.workspace_plan_details import get_workspace_plan_details
 from deploom_mcp.workspace_tools import register_workspace_tools
+from deploom_mcp.workspace_upgrade import get_workspace_upgrade_plan
 
 SERVER_NAME = "deploom-mcp"
 TOOL_NAME = "get_upgrade_plan"
@@ -868,6 +870,21 @@ def compact_blueprint(
             evidence_cap = max(0, evidence_cap // 2)
 
 
+# Legacy arguments must not be reinterpreted as owner-qualified workspace intent.
+_WORKSPACE_FLAT_DEFAULTS = {
+    "target_level": "yellow", "min_lag_ok_pct": 80, "deadline_seconds": DEFAULT_DEADLINE_SECONDS,
+    "include_prerelease": False, "registry": None, "use_system_proxy": None,
+    "registry_metadata_ttl": 3600.0, "output_dir": None, "exclude": None, "target_mode": "pinned",
+    "objective": OBJECTIVES[0], "mutable_packages": None, "approved_version_lines": None,
+    "required_packages": None, "exact_targets": None, "draft_max_candidates": 3,
+    "previous_evidence_digest": None,
+}
+
+
+def _workspace_mixes_flat_options(arguments: dict) -> bool:
+    return any(arguments[key] != value for key, value in _WORKSPACE_FLAT_DEFAULTS.items())
+
+
 def get_upgrade_plan(
     *,
     project_path: str,
@@ -888,10 +905,15 @@ def get_upgrade_plan(
     exact_targets: Optional[Dict[str, str]] = None,
     draft_max_candidates: int = 3,
     previous_evidence_digest: Optional[str] = None,
+    workspace_request: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Synchronous variant: run the Stage 1 boundary and return the compact
     protocol. Used by embedding/CLI callers that run outside an event loop;
     the MCP tool itself uses the cancellable async path."""
+    if workspace_request is not None:
+        if _workspace_mixes_flat_options(locals()):
+            return {"ok": False, "error": {"code": "WORKSPACE_MIXED_FLAT_OPTIONS"}}
+        return asyncio.run(get_workspace_upgrade_plan(project_path, workspace_request))
     error, req = _build_request(
         project_path=project_path,
         target_level=target_level,
@@ -935,7 +957,13 @@ def get_upgrade_plan(
         "unavailable. Inspect decisionCompleteness, decisionEvidence and workspaceCoverage; "
         "read artifacts for missing critical evidence. Unknown security/runtime stays "
         "NOT_VERIFIED. draft_max_candidates bounds search, deadline_seconds bounds time. "
-        "Act only within existing authority."
+        "Act only within existing authority. For bounded npm lock-v3 workspaces, "
+        "workspace_request schemaVersion=2 and goalKind=TARGETED_UPGRADE select "
+        "exact owner/section/name declarations and caller-snapshot domains. Workspace "
+        "requests use their own options. Omit preflight for a pure model; opt in only "
+        "when authorized to run isolated lock-only npm. For MONOREPO_TO_POLICY, provide policy "
+        "and omit packuments: evidence is collected by Core through the host-configured registry "
+        "and permitted exact-version OSV queries. Workspace policy remains planning-only."
     ),
 )
 async def get_upgrade_plan_tool(
@@ -957,8 +985,13 @@ async def get_upgrade_plan_tool(
     exact_targets: Optional[Dict[str, str]] = None,
     draft_max_candidates: int = 3,
     previous_evidence_digest: Optional[str] = None,
+    workspace_request: Optional[Dict[str, Any]] = None,
     ctx: Context = None,  # type: ignore[assignment]  # injected by MCPServer
 ) -> CallToolResult:
+    if workspace_request is not None:
+        if _workspace_mixes_flat_options(locals()):
+            return _result({"ok": False, "error": {"code": "WORKSPACE_MIXED_FLAT_OPTIONS"}})
+        return _result(await get_workspace_upgrade_plan(project_path, workspace_request))
     error, req = _build_request(
         project_path=project_path,
         target_level=target_level,
@@ -1045,6 +1078,27 @@ async def explain_conflict_tool(
         package=package,
         expected_decision_digest=expected_decision_digest,
         max_items=max_items,
+    ))
+
+
+@server.tool(
+    name="get_workspace_plan_details",
+    title="Read scoped workspace plan evidence",
+    description=(
+        "Read an owner/section page from an issued workspace plan capability. Supply the exact planId, "
+        "requestId, candidateId (nullable) and snapshotSha256 from get_upgrade_plan. Reads only selected "
+        "declarations in that scope. External rule endpoints are redacted. Native status and command "
+        "digests are shared plan evidence. Handles expire or are evicted; no path reads, solver or npm run."
+    ),
+    annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False),
+)
+async def get_workspace_plan_details_tool(
+    plan_id: str, request_id: str, candidate_id: str | None, snapshot_sha256: str,
+    owner: str, section: str, offset: int = 0, limit: int = 8,
+) -> CallToolResult:
+    return _result(get_workspace_plan_details(
+        plan_id=plan_id, request_id=request_id, candidate_id=candidate_id, snapshot_sha256=snapshot_sha256,
+        owner=owner, section=section, offset=offset, limit=limit,
     ))
 
 
