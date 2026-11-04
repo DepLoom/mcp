@@ -135,3 +135,22 @@ collects fresh publication metadata from the same registry. The report includes
 the normalized policy hash, counts and per-owner lag evidence. Missing facts
 can yield `UNKNOWN`. With a policy file, exit zero requires a policy pass.
 Physical installation, project checks and runtime require separate evidence.
+
+### Observe an approved local trial
+
+The host-only `workspace_acceptance verify` command takes the approved
+source fingerprint, lock SHA-256 and resolver identity SHA-256. Supply those
+as `--expected-source-key`, `--expected-lock-sha256` and
+`--expected-resolver-identity-sha256` along with the owned trial, baseline
+lock, resolver directory, cache and required `--check` commands in order.
+The default observes an already installed tree. Explicit `--install` with
+the same resolver registry permits one offline scripts-off install in a
+clean trial.
+
+Choose a new `--output` outside the trial. Its sibling `<output>.attempt`
+holds a single-use admission and terminal record. Use
+`workspace_acceptance verify-status <output>` to read it after restarting
+the caller. A nonterminal record leaves process liveness unobserved and
+reserves the attempt against re-execution. The terminal record binds the
+exact receipt. This local evidence carries no authority to apply changes or
+publish a final migration checkpoint.

@@ -98,6 +98,8 @@ def main(argv=None):
     verify = modes.add_parser("verify", help="Run explicitly approved commands in a local workspace")
     verify.add_argument("project", type=Path)
     verify.add_argument("--expected-source-key", required=True)
+    verify.add_argument("--expected-lock-sha256", required=True)
+    verify.add_argument("--expected-resolver-identity-sha256", required=True)
     verify.add_argument("--baseline-lock", required=True, type=Path)
     verify.add_argument("--resolver-dir", required=True, type=Path)
     verify.add_argument("--cache", required=True, type=Path)
@@ -106,6 +108,8 @@ def main(argv=None):
     verify.add_argument("--deadline-seconds", type=int, default=180)
     verify.add_argument("--install", action="store_true", help="Permit one frozen offline npm ci in a clean workspace")
     verify.add_argument("--registry", help="Same trusted registry used for the resolver receipt; required with --install")
+    status = modes.add_parser("verify-status", help="Read an existing workspace verification attempt")
+    status.add_argument("output", type=Path)
     audit = modes.add_parser("audit-candidate", help="Audit the exact resolved npm candidate for known advisories")
     audit.add_argument("project", type=Path)
     audit.add_argument("--baseline-lock", required=True, type=Path)
@@ -118,6 +122,16 @@ def main(argv=None):
     audit.add_argument("--use-system-proxy", action="store_true")
     audit.add_argument("--policy-json", type=Path, help="Host-approved workspace Yellow/Green policy")
     args = parser.parse_args(argv)
+
+    if args.mode == "verify-status":
+        from deploom_mcp.workspace_verification_attempt import read_workspace_attempt
+
+        try:
+            result = read_workspace_attempt(args.output)
+        except (OSError, ValueError):
+            result = {"status": "WORKSPACE_ATTEMPT_UNPROVEN"}
+        print(json.dumps(result))
+        return 0 if result["status"] == "CURRENT_WORKSPACE_PROFILE_OBSERVED" else 1
 
     sys.path.insert(0, str(resolve_core_dir()))
     from source_snapshot import source_snapshot_fingerprint
@@ -159,40 +173,46 @@ def main(argv=None):
         policy_passed = args.policy_json is None or result.get("candidateAudit", {}).get("finalPolicy") == "PASS"
         return 0 if status == "BOUND_SECURITY_AUDIT_COMPLETE" and policy_passed else 1
 
-    if not re.fullmatch(r"[a-f0-9]{32}", args.expected_source_key):
-        parser.error("expected-source-key must be the approved source fingerprint")
+    if (not re.fullmatch(r"[a-f0-9]{32}", args.expected_source_key)
+            or not all(re.fullmatch(r"[a-f0-9]{64}", digest) for digest in
+                       (args.expected_lock_sha256, args.expected_resolver_identity_sha256))):
+        parser.error("supply the approved source, lock and resolver identities")
     if not 1 <= args.deadline_seconds <= 900 or args.install != bool(args.registry):
         parser.error("use a deadline of 1-900 seconds and supply --registry exactly when using --install")
     output = args.output.absolute()
     if output.parent != output.parent.resolve(strict=True) or output.is_relative_to(project):
         parser.error("output must be outside the workspace in an existing resolved directory")
 
+    from deploom_mcp.audit_worker import read_bytes
+    from deploom_mcp.workspace_verification_attempt import run_workspace_attempt
     from materialized_workspace_verifier import verify_current_workspace
     from workspace_npm_obligations import compile_npm_workspace_obligations
 
     deadline = time.time() + args.deadline_seconds
-    resolver = json.loads((args.resolver_dir / "receipt.json").read_bytes())
-    plan = compile_npm_workspace_obligations(
-        args.baseline_lock.read_bytes(), (args.resolver_dir / "package-lock.json").read_bytes(),
-        _candidate_manifests(project, resolver), resolver,
-    )
-    profile = {"commands": args.check, "materialize": args.install, "obligations": plan["obligationPlanDigest"]}
-    profile_digest = hashlib.sha256(json.dumps(profile, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    with output.open("x", encoding="utf-8") as stream:
-        try:
-            receipt = verify_current_workspace(
+    try:
+        resolver = json.loads(read_bytes(args.resolver_dir / "receipt.json"))
+        plan = compile_npm_workspace_obligations(
+            read_bytes(args.baseline_lock), read_bytes(args.resolver_dir / "package-lock.json"),
+            _candidate_manifests(project, resolver), resolver,
+        )
+        if (plan["approvedLockSha256"] != args.expected_lock_sha256
+                or plan["resolverIdentitySha256"] != args.expected_resolver_identity_sha256):
+            raise ValueError("WORKSPACE_VERIFICATION_APPROVAL_MISMATCH")
+        receipt = run_workspace_attempt(
+            output, project, source_key=args.expected_source_key, plan=plan, commands=args.check,
+            install=args.install, verify=lambda profile_digest: verify_current_workspace(
                 project, expected_source_key=args.expected_source_key, dependency_plan=plan,
                 commands=args.check, cache_dir=args.cache, deadline=deadline, final_profile_digest=profile_digest,
                 materialize=args.install, workspace_registry=args.registry,
-            )
-        except (OSError, RuntimeError, ValueError) as exc:
-            json.dump({"status": "WORKSPACE_VERIFICATION_UNPROVEN",
-                       "error": str(exc), "operations": getattr(exc, "operation_observations", ())}, stream, indent=2)
-            print("Workspace verification did not pass. See the local receipt.", file=sys.stderr)
-            return 1
-        json.dump(receipt, stream, indent=2)
+            ),
+        )
+    except (OSError, RuntimeError, ValueError, KeyError) as exc:
+        message = str(exc)
+        print(message if re.fullmatch(r"[A-Z_]+", message) else
+              "WORKSPACE_VERIFICATION_ADMISSION_UNPROVEN", file=sys.stderr)
+        return 1
     print(receipt["status"])
-    return 0
+    return 0 if receipt["status"] == "CURRENT_WORKSPACE_PROFILE_OBSERVED" else 1
 
 
 if __name__ == "__main__":
