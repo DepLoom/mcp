@@ -107,6 +107,13 @@ OSV allowlist can leave the result unknown. The opt-in
 `DEPLOOM_WORKSPACE_POLICY_SYSTEM_PROXY=1` uses the existing system proxy.
 If the project declares a registry, it must match the host's online registry.
 Native preflight, if requested, also requires that same registry identity.
+An optional `workspace_request.registry` HTTPS URL asserts the expected
+registry for policy collection or native npm preflight. It must match the
+registry already permitted for each selected stage. A URL supplied by the
+caller does not grant permission to query a new host. The workspace envelope
+described here is for npm lockfile v3 projects. Yarn Classic `.yarnrc` and
+Yarn Berry `.yarnrc.yml` are handled by the Yarn audit path, not the npm
+workspace resolver.
 
 Targets control mutable declarations. An empty target list holds every
 declaration. Held external declarations still count toward the lag denominator.

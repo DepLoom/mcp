@@ -963,7 +963,9 @@ def get_upgrade_plan(
         "requests use their own options. Omit preflight for a pure model; opt in only "
         "when authorized to run isolated lock-only npm. For MONOREPO_TO_POLICY, provide policy "
         "and omit packuments: evidence is collected by Core through the host-configured registry "
-        "and permitted exact-version OSV queries. Workspace policy remains planning-only."
+        "and permitted exact-version OSV queries. For policy collection or native preflight, "
+        "workspace_request.registry may assert the expected HTTPS registry, but must match the "
+        "authorized project and host settings. Workspace policy remains planning-only."
     ),
 )
 async def get_upgrade_plan_tool(
