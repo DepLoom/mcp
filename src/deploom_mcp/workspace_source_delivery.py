@@ -44,7 +44,8 @@ def _authorized_files(resolver, plan, source_repairs):
 
 
 def deliver_workspace_source(destination, baseline, project, *, baseline_key, source_key, plan,
-                             resolver, commands, attempt_receipt, expected_receipt_sha256, source_repairs, seconds):
+                             resolver, commands, attempt_receipt, expected_receipt_sha256, source_repairs, seconds,
+                             policy_evidence=None):
     """Publish only into a new destination. The verified trial and baseline are read-only."""
     from source_snapshot import (
         build_source_tree_manifest, persist_source_snapshot, source_snapshot_live_source_continuity,
@@ -115,6 +116,9 @@ def deliver_workspace_source(destination, baseline, project, *, baseline_key, so
                   "baselineSourceSnapshotKey": baseline_key, "deliveredSourceSnapshotKey": stored.key,
                   "exactFileDelta": changes, "exactFileDeltaSha256": canonical_digest(changes),
                   "sourceSnapshotDirectory": "verified-source"}
+        if policy_evidence is not None:
+            result.update(status="POLICY_WORKSPACE_SOURCE_DELIVERED", finalPolicy="PASS",
+                          policyEvidence=policy_evidence)
     _publish(destination / "receipt.json", result)
     return result
 

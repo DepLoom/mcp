@@ -221,6 +221,32 @@ class NativeAuditTests(unittest.TestCase):
             self.assertEqual("FAIL", green["candidateAudit"]["finalPolicy"])
             self.assertEqual(["H"], green["candidateAudit"]["policyAssessment"]["exceededSeverityCaps"])
             self.assertEqual(2, green["lag"]["requiredDeclarations"])
+
+            import sys
+            from deploom_mcp.distribution import resolve_core_dir
+            from deploom_mcp.workspace_policy_delivery import load_delivery_policy
+
+            plan = {"approvedLockSha256": binding["lockSha256"], "registrySha256": binding["registrySha256"],
+                    "resolverIdentitySha256": binding["resolverIdentitySha256"],
+                    "workspaceOwners": {"": {"manifestSha256": files["package.json"]},
+                                        "packages/app": {"manifestSha256": files["packages/app/package.json"]}}}
+            policy = self.base / "approved-policy.json"
+            yellow_audit = yellow["artifacts"]
+            green_audit = green["artifacts"]
+            policy.write_text('{"targetLevel":"yellow","minLagOkPct":50}', encoding="utf-8")
+            with patch.object(sys, "path", [str(resolve_core_dir()), *sys.path]):
+                evidence = load_delivery_policy(yellow_audit["report"], yellow_audit["sha256"], policy, plan)
+                self.assertEqual((1, 2), (evidence["lagConfirmed"], evidence["lagDenominator"]))
+                with self.assertRaisesRegex(ValueError, "WORKSPACE_DELIVERY_AUDIT_DIGEST_MISMATCH"):
+                    load_delivery_policy(yellow_audit["report"], "0" * 64, policy, plan)
+                with self.assertRaisesRegex(ValueError, "WORKSPACE_DELIVERY_AUDIT_BINDING_MISMATCH"):
+                    load_delivery_policy(yellow_audit["report"], yellow_audit["sha256"], policy,
+                                         {**plan, "resolverIdentitySha256": "d" * 64})
+                policy.write_text('{"targetLevel":"green"}', encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "WORKSPACE_DELIVERY_AUDIT_BINDING_MISMATCH"):
+                    load_delivery_policy(yellow_audit["report"], yellow_audit["sha256"], policy, plan)
+                with self.assertRaisesRegex(ValueError, "WORKSPACE_DELIVERY_POLICY_NOT_MET"):
+                    load_delivery_policy(green_audit["report"], green_audit["sha256"], policy, plan)
             self.assertEqual(files, {p.relative_to(self.project).as_posix(): sha256(p.read_bytes()).hexdigest()
                                      for p in self.project.rglob("*.json")})
 

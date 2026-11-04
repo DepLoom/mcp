@@ -183,3 +183,12 @@ directory. Use the receipt to identify the exact delta and source snapshot.
 Both input projects stay read-only during delivery. The snapshot is source
 only. Treat policy assessment and approval to change a live checkout as
 separate steps.
+
+For a Yellow/Green goal, use `workspace_acceptance deliver-policy` with the
+same approval inputs plus `--policy-json`, `--audit-report` and
+`--expected-audit-sha256` from `audit-candidate`. The report must cover the
+same resolver, registry, owner manifests and lock, and the normalized policy
+must pass. A missing or incomplete audit, a different policy or candidate,
+or a failed policy leaves the destination untouched. The receipt retains
+both the approved policy and audit digests. `deliver-targeted` is for a
+separately approved targeted goal and records no final policy result.
