@@ -185,6 +185,12 @@ async def plan_workspace_snapshot_v1(project_path: str, request: dict) -> dict:
                 "NOT_RUN", "RESOLUTION_PASSED", "RESOLUTION_FAILED", "UNKNOWN"
             }:
                 raise GoalContractError("WORKSPACE_WORKER_INVALID_RESULT")
+            if receipt["status"] == "RESOLUTION_PASSED":
+                artifact = receipt.get("resolverArtifactId")
+                if not isinstance(artifact, str) or not re.fullmatch(r"workspace-npm-[a-z0-9_]{8}", artifact):
+                    raise GoalContractError("WORKSPACE_WORKER_INVALID_RESULT")
+            elif "resolverArtifactId" in receipt:
+                raise GoalContractError("WORKSPACE_WORKER_INVALID_RESULT")
             if receipt["status"] == "NOT_RUN":
                 if set(receipt) != {"status", "code"}:
                     raise GoalContractError("WORKSPACE_WORKER_INVALID_RESULT")

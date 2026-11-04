@@ -142,6 +142,8 @@ def _preflight(project, request, plan, admitted, inputs):
         manifests, inputs["package-lock.json"], assignment, frozenset(admitted),
         artifacts=artifacts.resolve(), cache=cache.resolve(), registry=registry,
         reauthor=reauthor, timeout_seconds=60)
-    # The scratch path is host-owned; the response contains only receipts.
-    result.pop("workspace", None)
+    # Only the local host can resolve the artifact identifier to its owned directory.
+    scratch = result.pop("workspace", None)
+    if result["status"] == "RESOLUTION_PASSED" and scratch is not None:
+        result["resolverArtifactId"] = Path(scratch).name
     return result
