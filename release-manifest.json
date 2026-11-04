@@ -1,7 +1,7 @@
 {
   "blueprintSchemaVersion": 2,
   "core": {
-    "contentSha256": "650b6efd19c5f5671c514c3b8cbc307377138826986770f8a235c004bcebd450",
+    "contentSha256": "f9c6c98a8c515931b59f960b926a0d2ecc03f7151acb5a0f8e7aeb811d1ff79d",
     "files": {
       "VERSION": "2698c63efcc74d9adc7a29889fc4ecc7fadfb58c4588db3f117f9d87cfaaff40",
       "analyze_verification_telemetry.py": "1ee235ef0b9cf275fe34c22cf16cb4049e88fb19953096ddaecbb73d7a700e6f",
@@ -147,14 +147,14 @@
       "worker_runtime_state.py": "69cd5bf6ef0b4fb15bbf6b3418fbe7659a87bbbc5201bd9d2ef3e1e1d5a77345",
       "workspace_glob.py": "ab7e6fb0bb8abb2812362dc7c416e79cad319b471d5c94aa5012a42b308813c7",
       "workspace_noise.py": "0ed76379a5308cb8a5b053ed92293fdf4bd255c7799c6e77a644db8bac3af27a",
-      "workspace_npm_lock_delta.py": "762f0cbb1373b94a52e7a7b179596b4f0b8624963c8c65d81f02ae84245933ab",
+      "workspace_npm_lock_delta.py": "176fd664a8638e028b353fa20e2e9864e9145dba365e4af330d10b3baf0e0b8d",
       "workspace_npm_obligations.py": "646ed1b88dde5dccbcf4f5cf379deb8d3cd183dfd391cc0440a3657d4880d912",
-      "workspace_npm_preflight.py": "5229edf00469564e187a7cd17b7b1a0bae8023df4b6322107a9bd15bf70eccab",
+      "workspace_npm_preflight.py": "b5b15958dfb039b2a9a662145dab0e82ffc5c1e39b280acbed0e257f0d97a344",
       "workspace_peer_model.py": "5d4a447979a70fa954aebccf605cb217dba88f70f43602d03d9a3bbbaee8224c",
       "yarn_berry.py": "bd769e797823ff99129983f8295a52b5aac1f01f9be2c2a8eac9ffeaf20903d2"
     },
     "repository": "https://github.com/DepLoom/core",
-    "revision": "7b48b00a2da688d45659cfd9bf34703e565c9e88",
+    "revision": "e61247b7e84a115e7bbbfc06403764049f3f2fc9",
     "version": "1.0.0-preview.20"
   },
   "mcpVersion": "0.2.4",

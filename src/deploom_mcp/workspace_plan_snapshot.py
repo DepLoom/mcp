@@ -34,8 +34,14 @@ def plan_workspace_snapshot(project: Path, request: dict) -> dict:
         raise GoalContractError("INVALID_WORKSPACE_PLAN_REQUEST")
 
     preflight = request.get("preflight")
-    if "preflight" in request and (not isinstance(preflight, dict) or set(preflight) != {"reauthor"}):
-        raise GoalContractError("INVALID_WORKSPACE_PREFLIGHT_REQUEST")
+    if "preflight" in request:
+        if not isinstance(preflight, dict) or not {"reauthor"} <= preflight.keys() <= {"reauthor", "immutableInstances"}:
+            raise GoalContractError("INVALID_WORKSPACE_PREFLIGHT_REQUEST")
+        pins = preflight.get("immutableInstances", [])
+        if (not isinstance(pins, list) or len(pins) > 128
+                or any(not isinstance(path, str) or not path or len(path) > 512 for path in pins)
+                or len(set(pins)) != len(pins)):
+            raise GoalContractError("INVALID_WORKSPACE_PREFLIGHT_REQUEST")
 
     def plan(digest, rows, packages, inputs):
         if digest != request["inventoryDigest"]:
@@ -141,7 +147,8 @@ def _preflight(project, request, plan, admitted, inputs):
     result = run_workspace_npm_preflight(
         manifests, inputs["package-lock.json"], assignment, frozenset(admitted),
         artifacts=artifacts.resolve(), cache=cache.resolve(), registry=registry,
-        reauthor=reauthor, timeout_seconds=60)
+        reauthor=reauthor, timeout_seconds=60,
+        immutable_instances=frozenset(request.get("immutableInstances", ())))
     # Only the local host can resolve the artifact identifier to its owned directory.
     scratch = result.pop("workspace", None)
     if result["status"] == "RESOLUTION_PASSED" and scratch is not None:
