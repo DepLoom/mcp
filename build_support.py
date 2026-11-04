@@ -40,6 +40,7 @@ def validate_release(root: Path) -> dict:
         if digest(checked_source(core, relative).read_bytes()) != expected:
             raise ValueError(f"Core release resource changed: {relative}")
     for name, relative in (("schemaSha256", "contracts/upgrade-blueprint.schema.json"),
+                           ("workspaceSchemaSha256", "contracts/workspace-upgrade-blueprint.schema.json"),
                            ("skillManifestSha256", "skills/deploom-upgrade/contract.json")):
         if digest(checked_source(root, relative).read_bytes()) != manifest[name]:
             raise ValueError(f"release resource changed: {relative}; regenerate release-manifest.json")
@@ -87,7 +88,8 @@ def copy_resources(root: Path, package: Path) -> None:
         shutil.copyfile(core / relative, target)
     resources = package / "resources"
     resources.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(root / "contracts" / "upgrade-blueprint.schema.json", resources / "upgrade-blueprint.schema.json")
+    for schema in ("upgrade-blueprint.schema.json", "workspace-upgrade-blueprint.schema.json"):
+        shutil.copyfile(root / "contracts" / schema, resources / schema)
     shutil.copyfile(root / "release-manifest.json", resources / "release-manifest.json")
     source_skill = root / "skills" / "deploom-upgrade"
     skill_contract = json.loads((source_skill / "contract.json").read_text(encoding="utf-8"))

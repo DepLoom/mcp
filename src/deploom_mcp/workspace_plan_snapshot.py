@@ -76,7 +76,8 @@ def plan_workspace_snapshot(project: Path, request: dict) -> dict:
             raise GoalContractError("WORKSPACE_PLANNING_CORE_UNAVAILABLE")
         sys.path.insert(0, str(core_dir))
         try:
-            from workspace_peer_model import WorkspaceTopology, plan_workspace_upgrade
+            from resolution_inventory import npm_lock_resolved_instance
+            from workspace_peer_model import WorkspaceTopology, declaration_id, plan_workspace_upgrade
 
             if raw_topology is not None:
                 if (not isinstance(raw_topology, dict) or set(raw_topology) != {"instanceGroups", "providers"}
@@ -113,6 +114,20 @@ def plan_workspace_snapshot(project: Path, request: dict) -> dict:
                     return _preflight(project, preflight, candidate, admitted, inputs, timeout_seconds)
 
                 result = _try_workspace_candidates(solve, verify, limit, request)
+
+            # Summarize the same bound read used by the solver, including owners
+            # with no declarations. Baseline resolution remains lockfile evidence.
+            owners = sorted({Path(path).parent.as_posix() for path in inputs if path.endswith("package.json")})
+            result["workspaceEvidence"] = {
+                "owners": owners, "declarationCount": len(rows),
+                "constraintDeclarationCount": len(declarations),
+                "targets": [
+                    {"declaration": list(key), "declaredSpec": declarations[key],
+                     "baselineLock": npm_lock_resolved_instance(packages, key[2], "" if key[0] == "." else key[0]),
+                     "selectedVersion": (result["assignment"] or {}).get(declaration_id(key))}
+                    for key in sorted(admitted)
+                ],
+            }
         finally:
             sys.path.pop(0)
         return {**result, "inventoryDigest": digest, "candidateEvidence": "CALLER_SNAPSHOT",

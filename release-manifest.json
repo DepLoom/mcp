@@ -164,5 +164,6 @@
     "bundleSha256": "5d9d3010d040104ff1dabd8cf072feaf8137be53c368e1cc1c9050e9fbaed96c",
     "contractVersion": "2.0.3"
   },
-  "skillManifestSha256": "869ae8545d940e7be4cebc3023e96cc1c82432ba4b93b34db642fb4a0b48e8f8"
+  "skillManifestSha256": "869ae8545d940e7be4cebc3023e96cc1c82432ba4b93b34db642fb4a0b48e8f8",
+  "workspaceSchemaSha256": "d3c211cbacc2cf1c6316e74ef5d34970e702f159c712389e06347ec95248c669"
 }

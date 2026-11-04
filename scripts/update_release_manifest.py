@@ -53,6 +53,7 @@ def release_manifest(root: Path) -> dict:
                  "version": (core / "VERSION").read_text(encoding="utf-8").strip(),
                  "contentSha256": inventory_digest(files), "files": files},
         "schemaSha256": digest((root / "contracts" / "upgrade-blueprint.schema.json").read_bytes()),
+        "workspaceSchemaSha256": digest((root / "contracts" / "workspace-upgrade-blueprint.schema.json").read_bytes()),
         "skillManifestSha256": digest(skill_path.read_bytes()),
         "skill": {"contractVersion": skill["contractVersion"], "bundleSha256": skill["bundleSha256"]},
     }

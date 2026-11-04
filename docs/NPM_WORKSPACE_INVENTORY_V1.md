@@ -60,3 +60,14 @@ Every successful result retains `executionReady=false`, `NOT_VERIFIED` and
 `jointAssignment=NOT_COMPUTED`. Full workspace solving and execution still require
 owner-qualified constraints, authorized lock/source changes, safe materialization,
 physical dependency verification and independent checkpoint/current/resume checks.
+
+## Targeted workspace plans through the main API
+
+Call `get_upgrade_plan(project_path=..., workspace_request=...)` in Python or pass the same fields to the MCP tool. The workspace envelope uses `schemaVersion: 2` and `goalKind: TARGETED_UPGRADE`. The existing flat-project parameters retain their defaults when the workspace envelope is present.
+
+1. Call `observe_workspace_inventory_v1` on the npm lockfile owner and reuse its `inventoryDigest`.
+2. Supply `targets` with one exact `selector: {owner, section, name}` per declaration. The root owner is `.`. Each target has `approvedLines`, an ordered finite list of stable `versions` in those major lines, and an `exactTarget` from that list or `null`.
+3. Supply `packuments` for the frozen candidate evidence, `environment` with the modeled Node and npm versions, and `topology`. Use `null` to model the observed layout when it can be proven. An explicit layout uses `instanceGroups` and `providers`, with owner-qualified declaration triples.
+4. For a pure plan, omit `preflight`. For host-authorized lock-only validation, set `preflight: {reauthor: null}`. The host must have configured its isolated offline npm cache, registry and artifact directory. Optional `immutableInstances` pins exact lock paths and `candidateLimit` sets a maximum from one to three within the shared 60-second budget.
+
+The [workspace response schema](../contracts/workspace-upgrade-blueprint.schema.json) separates the modeled assignment, native npm validation, installation, checks, runtime, acceptance and policy. The response is planning-only. A matching candidate lock can be reviewed for an authorized isolated trial. `MONOREPO_TO_POLICY` returns an explicit unsupported-goal error on this route.
