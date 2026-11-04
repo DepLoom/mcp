@@ -70,6 +70,19 @@ def read_workspace_attempt(output):
         return {"status": "WORKSPACE_ATTEMPT_UNPROVEN"}
 
 
+def workspace_verification_profile(plan, commands, install):
+    return {"commands": commands, "checkBindings": [], "materialize": install,
+            "obligations": plan["obligationPlanDigest"]}
+
+
+def workspace_verification_admission(project, source_key, plan, profile):
+    return {"sourceSnapshotKey": source_key, "workspacePathDigest": canonical_digest(str(project)),
+            "resolverIdentitySha256": plan["resolverIdentitySha256"], "toolchain": plan["resolverToolchain"],
+            "lockSha256": plan["approvedLockSha256"], "baselineLockSha256": plan["baselineLockSha256"],
+            "registrySha256": plan["registrySha256"], "profileSha256": canonical_digest(profile),
+            "installAuthorized": profile["materialize"], "lifecycleScriptsAuthorized": False}
+
+
 def run_workspace_attempt(output, project, *, source_key, plan, commands, install, verify):
     output, journal = _paths(output)
     if output.is_relative_to(project) or project.is_relative_to(journal) or output.exists():
@@ -77,13 +90,8 @@ def run_workspace_attempt(output, project, *, source_key, plan, commands, instal
     # Directory creation is the single-writer admission lock. An interrupted
     # attempt stays reserved even if no receipt reached disk.
     journal.mkdir()
-    profile = {"commands": commands, "checkBindings": [], "materialize": install,
-               "obligations": plan["obligationPlanDigest"]}
-    admission = {"sourceSnapshotKey": source_key, "workspacePathDigest": canonical_digest(str(project)),
-                 "resolverIdentitySha256": plan["resolverIdentitySha256"], "toolchain": plan["resolverToolchain"],
-                 "lockSha256": plan["approvedLockSha256"], "baselineLockSha256": plan["baselineLockSha256"],
-                 "registrySha256": plan["registrySha256"], "profileSha256": canonical_digest(profile),
-                 "installAuthorized": install, "lifecycleScriptsAuthorized": False}
+    profile = workspace_verification_profile(plan, commands, install)
+    admission = workspace_verification_admission(project, source_key, plan, profile)
     run = {"state": "RUNNING", "attemptId": uuid.uuid4().hex, "admission": admission,
            "admissionSha256": canonical_digest(admission)}
     _publish(journal / "running.json", run)

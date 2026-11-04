@@ -154,3 +154,14 @@ the caller. A nonterminal record leaves process liveness unobserved and
 reserves the attempt against re-execution. The terminal record binds the
 exact receipt. This local evidence carries no authority to apply changes or
 publish a final migration checkpoint.
+
+Use `workspace_acceptance finalize` to recheck a completed local attempt.
+Provide the same project and approved source, lock and resolver identities,
+the baseline lock and resolver directory, every approved `--check` in
+order, `--attempt-receipt`, and the canonical `--expected-receipt-sha256`
+reported by `verify-status`. Use `--require-fresh-install` when that was
+part of the approved profile. Finalization re-observes the source, lock,
+toolchain and physical tree without replaying project commands. A changed
+input, a different attempt, or a reduced profile fails the gate. The result
+is evidence for this trial and profile only. It neither evaluates final
+health policy nor applies changes to the source checkout.

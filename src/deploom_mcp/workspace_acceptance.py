@@ -108,6 +108,18 @@ def main(argv=None):
     verify.add_argument("--deadline-seconds", type=int, default=180)
     verify.add_argument("--install", action="store_true", help="Permit one frozen offline npm ci in a clean workspace")
     verify.add_argument("--registry", help="Same trusted registry used for the resolver receipt; required with --install")
+    final = modes.add_parser("finalize", help="Recheck an approved verification attempt against the current local trial")
+    final.add_argument("project", type=Path)
+    final.add_argument("--expected-source-key", required=True)
+    final.add_argument("--expected-lock-sha256", required=True)
+    final.add_argument("--expected-resolver-identity-sha256", required=True)
+    final.add_argument("--baseline-lock", required=True, type=Path)
+    final.add_argument("--resolver-dir", required=True, type=Path)
+    final.add_argument("--check", action="append", required=True)
+    final.add_argument("--attempt-receipt", required=True, type=Path)
+    final.add_argument("--expected-receipt-sha256", required=True)
+    final.add_argument("--require-fresh-install", action="store_true")
+    final.add_argument("--deadline-seconds", type=int, default=90)
     status = modes.add_parser("verify-status", help="Read an existing workspace verification attempt")
     status.add_argument("output", type=Path)
     audit = modes.add_parser("audit-candidate", help="Audit the exact resolved npm candidate for known advisories")
@@ -177,11 +189,16 @@ def main(argv=None):
             or not all(re.fullmatch(r"[a-f0-9]{64}", digest) for digest in
                        (args.expected_lock_sha256, args.expected_resolver_identity_sha256))):
         parser.error("supply the approved source, lock and resolver identities")
-    if not 1 <= args.deadline_seconds <= 900 or args.install != bool(args.registry):
-        parser.error("use a deadline of 1-900 seconds and supply --registry exactly when using --install")
-    output = args.output.absolute()
-    if output.parent != output.parent.resolve(strict=True) or output.is_relative_to(project):
-        parser.error("output must be outside the workspace in an existing resolved directory")
+    if not 1 <= args.deadline_seconds <= 900:
+        parser.error("use a deadline of 1-900 seconds")
+    if args.mode == "verify":
+        if args.install != bool(args.registry):
+            parser.error("supply --registry exactly when using --install")
+        output = args.output.absolute()
+        if output.parent != output.parent.resolve(strict=True) or output.is_relative_to(project):
+            parser.error("output must be outside the workspace in an existing resolved directory")
+    elif not re.fullmatch(r"[a-f0-9]{64}", args.expected_receipt_sha256):
+        parser.error("supply the canonical receipt SHA-256 from the approved terminal attempt")
 
     from deploom_mcp.audit_worker import read_bytes
     from deploom_mcp.workspace_verification_attempt import run_workspace_attempt
@@ -198,6 +215,16 @@ def main(argv=None):
         if (plan["approvedLockSha256"] != args.expected_lock_sha256
                 or plan["resolverIdentitySha256"] != args.expected_resolver_identity_sha256):
             raise ValueError("WORKSPACE_VERIFICATION_APPROVAL_MISMATCH")
+        if args.mode == "finalize":
+            from deploom_mcp.workspace_finalize import finalize_workspace_profile
+
+            result = finalize_workspace_profile(
+                args.attempt_receipt, project, source_key=args.expected_source_key, plan=plan,
+                commands=args.check, install=args.require_fresh_install,
+                expected_receipt_sha256=args.expected_receipt_sha256, seconds=args.deadline_seconds,
+            )
+            print(json.dumps(result))
+            return 0
         receipt = run_workspace_attempt(
             output, project, source_key=args.expected_source_key, plan=plan, commands=args.check,
             install=args.install, verify=lambda profile_digest: verify_current_workspace(
@@ -209,6 +236,7 @@ def main(argv=None):
     except (OSError, RuntimeError, ValueError, KeyError) as exc:
         message = str(exc)
         print(message if re.fullmatch(r"[A-Z_]+", message) else
+              "WORKSPACE_FINALIZATION_UNPROVEN" if args.mode == "finalize" else
               "WORKSPACE_VERIFICATION_ADMISSION_UNPROVEN", file=sys.stderr)
         return 1
     print(receipt["status"])
