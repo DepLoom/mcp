@@ -165,3 +165,21 @@ toolchain and physical tree without replaying project commands. A changed
 input, a different attempt, or a reduced profile fails the gate. The result
 is evidence for this trial and profile only. It neither evaluates final
 health policy nor applies changes to the source checkout.
+
+### Deliver a verified targeted change
+
+Run `workspace_acceptance deliver-targeted` with the same approved inputs
+as `finalize`, plus `--baseline-project`, `--expected-baseline-source-key`
+and a new `--destination` outside both projects. The verification attempt
+must include a fresh strict offline install with scripts off. The baseline
+manifests and lock must match the resolver's preimages. Each additional
+source modification needs an entry in `--source-repairs-json` with `path`,
+`beforeSha256` and `afterSha256`. The first delivery profile handles
+changes to existing files. Unapproved files or path changes fail before
+publication.
+
+Delivery saves a sealed source snapshot and a terminal receipt in the new
+directory. Use the receipt to identify the exact delta and source snapshot.
+Both input projects stay read-only during delivery. The snapshot is source
+only. Treat policy assessment and approval to change a live checkout as
+separate steps.

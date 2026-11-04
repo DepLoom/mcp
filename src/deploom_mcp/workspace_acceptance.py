@@ -109,17 +109,23 @@ def main(argv=None):
     verify.add_argument("--install", action="store_true", help="Permit one frozen offline npm ci in a clean workspace")
     verify.add_argument("--registry", help="Same trusted registry used for the resolver receipt; required with --install")
     final = modes.add_parser("finalize", help="Recheck an approved verification attempt against the current local trial")
-    final.add_argument("project", type=Path)
-    final.add_argument("--expected-source-key", required=True)
-    final.add_argument("--expected-lock-sha256", required=True)
-    final.add_argument("--expected-resolver-identity-sha256", required=True)
-    final.add_argument("--baseline-lock", required=True, type=Path)
-    final.add_argument("--resolver-dir", required=True, type=Path)
-    final.add_argument("--check", action="append", required=True)
-    final.add_argument("--attempt-receipt", required=True, type=Path)
-    final.add_argument("--expected-receipt-sha256", required=True)
+    delivery = modes.add_parser("deliver-targeted", help="Save an approved targeted trial as a separate source snapshot")
+    for command in (final, delivery):
+        command.add_argument("project", type=Path)
+        command.add_argument("--expected-source-key", required=True)
+        command.add_argument("--expected-lock-sha256", required=True)
+        command.add_argument("--expected-resolver-identity-sha256", required=True)
+        command.add_argument("--baseline-lock", required=True, type=Path)
+        command.add_argument("--resolver-dir", required=True, type=Path)
+        command.add_argument("--check", action="append", required=True)
+        command.add_argument("--attempt-receipt", required=True, type=Path)
+        command.add_argument("--expected-receipt-sha256", required=True)
+        command.add_argument("--deadline-seconds", type=int, default=90)
     final.add_argument("--require-fresh-install", action="store_true")
-    final.add_argument("--deadline-seconds", type=int, default=90)
+    delivery.add_argument("--baseline-project", required=True, type=Path)
+    delivery.add_argument("--expected-baseline-source-key", required=True)
+    delivery.add_argument("--destination", required=True, type=Path)
+    delivery.add_argument("--source-repairs-json", type=Path)
     status = modes.add_parser("verify-status", help="Read an existing workspace verification attempt")
     status.add_argument("output", type=Path)
     audit = modes.add_parser("audit-candidate", help="Audit the exact resolved npm candidate for known advisories")
@@ -215,6 +221,18 @@ def main(argv=None):
         if (plan["approvedLockSha256"] != args.expected_lock_sha256
                 or plan["resolverIdentitySha256"] != args.expected_resolver_identity_sha256):
             raise ValueError("WORKSPACE_VERIFICATION_APPROVAL_MISMATCH")
+        if args.mode == "deliver-targeted":
+            from deploom_mcp.workspace_source_delivery import deliver_workspace_source, read_source_repairs
+
+            result = deliver_workspace_source(
+                args.destination, args.baseline_project, project,
+                baseline_key=args.expected_baseline_source_key, source_key=args.expected_source_key,
+                plan=plan, resolver=resolver, commands=args.check, attempt_receipt=args.attempt_receipt,
+                expected_receipt_sha256=args.expected_receipt_sha256,
+                source_repairs=read_source_repairs(args.source_repairs_json), seconds=args.deadline_seconds,
+            )
+            print(json.dumps(result))
+            return 0
         if args.mode == "finalize":
             from deploom_mcp.workspace_finalize import finalize_workspace_profile
 
@@ -236,8 +254,8 @@ def main(argv=None):
     except (OSError, RuntimeError, ValueError, KeyError) as exc:
         message = str(exc)
         print(message if re.fullmatch(r"[A-Z_]+", message) else
-              "WORKSPACE_FINALIZATION_UNPROVEN" if args.mode == "finalize" else
-              "WORKSPACE_VERIFICATION_ADMISSION_UNPROVEN", file=sys.stderr)
+              {"deliver-targeted": "WORKSPACE_DELIVERY_UNPROVEN", "finalize": "WORKSPACE_FINALIZATION_UNPROVEN"}
+              .get(args.mode, "WORKSPACE_VERIFICATION_ADMISSION_UNPROVEN"), file=sys.stderr)
         return 1
     print(receipt["status"])
     return 0 if receipt["status"] == "CURRENT_WORKSPACE_PROFILE_OBSERVED" else 1
