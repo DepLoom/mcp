@@ -45,19 +45,39 @@ def _project_registry(inputs):
         raise GoalContractError("WORKSPACE_PREFLIGHT_PROJECT_NPMRC_UNSUPPORTED") from None
 
 
-def _workspace_registry(configured, inputs):
+def _workspace_registry(configured, inputs, requested=None):
     registry = checked_registry(configured)
     project_registry = _project_registry(inputs)
     if registry and project_registry and registry != project_registry:
         raise GoalContractError("WORKSPACE_PREFLIGHT_PROJECT_REGISTRY_MISMATCH")
-    return project_registry or registry
+    allowed = project_registry or registry
+    if requested is not None:
+        if allowed is None:
+            raise GoalContractError("WORKSPACE_REQUEST_REGISTRY_NOT_AUTHORIZED")
+        if requested != allowed:
+            raise GoalContractError("WORKSPACE_REQUEST_REGISTRY_MISMATCH")
+    return allowed
+
+
+def _requested_registry(request, health_goal):
+    if "registry" not in request:
+        return None
+    if not health_goal and "preflight" not in request:
+        raise GoalContractError("WORKSPACE_REQUEST_REGISTRY_REQUIRES_ONLINE_STAGE")
+    try:
+        registry = checked_registry(request["registry"])
+    except AuditError:
+        raise GoalContractError("WORKSPACE_REQUEST_REGISTRY_INVALID") from None
+    if not registry or not registry.startswith("https://") or any(char in registry for char in ";$`{}"):
+        raise GoalContractError("WORKSPACE_REQUEST_REGISTRY_INVALID")
+    return registry
 
 
 def plan_workspace_snapshot(project: Path, request: dict) -> dict:
     """Bind a bounded caller-provided metadata snapshot to current project bytes."""
     health_goal = isinstance(request, dict) and "policy" in request
     required = {"inventoryDigest", "mutable", "environment", "topology", "policy" if health_goal else "packuments"}
-    if (not isinstance(request, dict) or not required <= request.keys() <= required | {"preflight"}
+    if (not isinstance(request, dict) or not required <= request.keys() <= required | {"preflight", "registry"}
             or not isinstance(request["inventoryDigest"], str)
             or not re.fullmatch(r"[0-9a-f]{64}", request["inventoryDigest"])
             or not isinstance(request["mutable"], list)
@@ -73,6 +93,7 @@ def plan_workspace_snapshot(project: Path, request: dict) -> dict:
         from deploom_mcp.workspace_policy_request import validate_workspace_policy
 
         health_options = validate_workspace_policy(request["policy"])
+    requested_registry = _requested_registry(request, health_goal)
     preflight = request.get("preflight")
     if "preflight" in request:
         if not isinstance(preflight, dict) or not {"reauthor"} <= preflight.keys() <= {"reauthor", "immutableInstances", "candidateLimit"}:
@@ -89,6 +110,17 @@ def plan_workspace_snapshot(project: Path, request: dict) -> dict:
     def plan(digest, rows, packages, inputs):
         if digest != request["inventoryDigest"]:
             raise GoalContractError("STALE_WORKSPACE_INVENTORY")
+        if requested_registry:
+            policy_registry = os.environ.get("DEPLOOM_WORKSPACE_POLICY_REGISTRY")
+            if health_goal and not policy_registry:
+                raise GoalContractError("WORKSPACE_REQUEST_REGISTRY_NOT_AUTHORIZED")
+            try:
+                if health_goal:
+                    _workspace_registry(policy_registry, inputs, requested_registry)
+                if preflight is not None:
+                    _workspace_registry(os.environ.get("DEPLOOM_WORKSPACE_NPM_REGISTRY"), inputs, requested_registry)
+            except AuditError:
+                raise GoalContractError("WORKSPACE_REQUEST_REGISTRY_NOT_AUTHORIZED") from None
         declarations = {(row["owner"], row["section"], row["name"]): row["declaredSpec"]
                         for row in rows if row["section"] != "peerDependencies"}
         admitted, exact, approved = {}, {}, {}

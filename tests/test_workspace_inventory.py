@@ -10,7 +10,8 @@ from unittest.mock import patch
 
 from deploom_mcp.goal_contract import GoalContractError
 from deploom_mcp.workspace_inventory import observe_npm_workspace
-from deploom_mcp.workspace_plan_snapshot import _workspace_registry
+from deploom_mcp.workspace_plan_snapshot import _workspace_registry, plan_workspace_snapshot
+from deploom_mcp.workspace_upgrade import _snapshot_request
 
 
 class WorkspaceInventoryTests(unittest.TestCase):
@@ -62,6 +63,41 @@ class WorkspaceInventoryTests(unittest.TestCase):
             _workspace_registry("https://registry.npmjs.org", {".npmrc": raw})
         config.write_bytes(raw.replace(b"true", b"false"))
         self.assertNotEqual(after["inventoryDigest"], observe_npm_workspace(self.root)["inventoryDigest"])
+
+    def test_workspace_request_registry_must_match_existing_authority_before_planning(self):
+        registry = "https://mirror.example.invalid/npm"
+        (self.root / ".npmrc").write_text(f"registry={registry}\n", encoding="utf-8")
+        request = {
+            "schemaVersion": 2, "goalKind": "MONOREPO_TO_POLICY",
+            "inventoryDigest": observe_npm_workspace(self.root)["inventoryDigest"],
+            "targets": [], "environment": {}, "topology": None,
+            "policy": {"targetLevel": "yellow"}, "registry": registry + "/",
+        }
+        env = {"DEPLOOM_WORKSPACE_POLICY_REGISTRY": registry}
+        with patch.dict(os.environ, env, clear=True):
+            with patch("deploom_mcp.workspace_policy_request.bind_workspace_policy_solver") as bind:
+                bind.return_value = lambda *_: {
+                    "assignment": None, "status": "UNSAT_IN_MODELED_DOMAIN",
+                    "topology": "OBSERVED_LOCK_LAYOUT",
+                }
+                result = plan_workspace_snapshot(self.root, _snapshot_request(request))
+                self.assertEqual(result["status"], "UNSAT_IN_MODELED_DOMAIN")
+                bind.assert_called_once()
+                bind.reset_mock()
+                for other in ("https://other.example.invalid/npm", registry + "/another"):
+                    with self.subTest(registry=other), self.assertRaisesRegex(GoalContractError, "REQUEST_REGISTRY_MISMATCH"):
+                        plan_workspace_snapshot(self.root, _snapshot_request({**request, "registry": other}))
+                bind.assert_not_called()
+        with patch.dict(os.environ, {}, clear=True), self.assertRaisesRegex(GoalContractError, "REGISTRY_NOT_AUTHORIZED"):
+            plan_workspace_snapshot(self.root, _snapshot_request(request))
+
+    def test_workspace_request_registry_rejects_unsafe_destinations(self):
+        for registry in (None, "http://mirror.example.invalid/npm", "https://mirror.example.invalid/npm?x=1"):
+            with self.subTest(registry=registry), self.assertRaisesRegex(GoalContractError, "REQUEST_REGISTRY_INVALID"):
+                plan_workspace_snapshot(self.root, {
+                    "inventoryDigest": "a" * 64, "mutable": [], "environment": {},
+                    "topology": None, "policy": {"targetLevel": "yellow"}, "registry": registry,
+                })
 
     def test_project_npmrc_rejects_settings_the_isolated_command_does_not_preserve(self):
         for raw in (b"strict-peer-deps=false", b"//registry.example.invalid/:_authToken=x",

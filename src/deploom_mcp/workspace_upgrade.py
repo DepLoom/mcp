@@ -25,7 +25,7 @@ def _snapshot_request(request: dict) -> dict:
         raise GoalContractError("UNSUPPORTED_WORKSPACE_GOAL")
     health_goal = goal == "MONOREPO_TO_POLICY"
     required = _REQUEST_FIELDS | ({"policy"} if health_goal else {"packuments"})
-    if not required <= request.keys() <= required | {"preflight"}:
+    if not required <= request.keys() <= required | {"preflight", "registry"}:
         raise GoalContractError("INVALID_WORKSPACE_UPGRADE_REQUEST")
     policy = validate_workspace_policy(request["policy"]) if health_goal else None
     targets = request["targets"]
