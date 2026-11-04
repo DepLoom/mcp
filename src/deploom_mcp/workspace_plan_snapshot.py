@@ -9,6 +9,7 @@ import sys
 import time
 from pathlib import Path
 
+from deploom_mcp.dependency_audit import AuditError, checked_registry
 from deploom_mcp.distribution import resolve_core_dir
 from deploom_mcp.goal_contract import GoalContractError
 from deploom_mcp.workspace_inventory import observe_npm_workspace
@@ -18,6 +19,38 @@ def _key(value):
     if not isinstance(value, list) or len(value) != 3 or not all(isinstance(v, str) for v in value):
         raise GoalContractError("INVALID_WORKSPACE_PLAN_DECLARATION")
     return tuple(value)
+
+
+def _project_registry(inputs):
+    """Interpret only settings whose behavior the isolated npm command preserves."""
+    if any(path.endswith("/.npmrc") for path in inputs):
+        raise GoalContractError("WORKSPACE_PREFLIGHT_MEMBER_NPMRC_UNSUPPORTED")
+    options = {}
+    try:
+        for raw in inputs.get(".npmrc", b"").decode("utf-8-sig").splitlines():
+            line = raw.strip()
+            if not line or line.startswith(("#", ";")):
+                continue
+            key, sep, value = (part.strip() for part in line.partition("="))
+            if not sep or key not in {"registry", "save-exact"} or key in options:
+                raise ValueError
+            options[key] = value
+        if "save-exact" in options and options["save-exact"] not in {"true", "false"}:
+            raise ValueError
+        registry = checked_registry(options.get("registry"))
+        if registry and (not registry.startswith("https://") or any(char in registry for char in ";$`{}")):
+            raise ValueError
+        return registry
+    except (ValueError, AuditError):
+        raise GoalContractError("WORKSPACE_PREFLIGHT_PROJECT_NPMRC_UNSUPPORTED") from None
+
+
+def _workspace_registry(configured, inputs):
+    registry = checked_registry(configured)
+    project_registry = _project_registry(inputs)
+    if registry and project_registry and registry != project_registry:
+        raise GoalContractError("WORKSPACE_PREFLIGHT_PROJECT_REGISTRY_MISMATCH")
+    return project_registry or registry
 
 
 def plan_workspace_snapshot(project: Path, request: dict) -> dict:
@@ -118,6 +151,14 @@ def plan_workspace_snapshot(project: Path, request: dict) -> dict:
             if health_goal:
                 from deploom_mcp.workspace_policy_request import bind_workspace_policy_solver
 
+                # Policy collection is online. The project can select the registry
+                # only when it agrees with the host's explicit online permission.
+                policy_registry = os.environ.get("DEPLOOM_WORKSPACE_POLICY_REGISTRY")
+                if policy_registry:
+                    try:
+                        _workspace_registry(policy_registry, inputs)
+                    except AuditError:
+                        raise GoalContractError("WORKSPACE_POLICY_HOST_REGISTRY_INVALID") from None
                 solve = bind_workspace_policy_solver(health_options, packages, declarations, approved, exact,
                                                      admitted, request["environment"], topology)
             else:
@@ -205,7 +246,7 @@ def _preflight(project, request, plan, admitted, inputs, timeout_seconds):
         return {"status": "NOT_RUN", "code": "WORKSPACE_PLAN_UNAVAILABLE"}
     configured = [os.environ.get(key) for key in ("DEPLOOM_WORKSPACE_NPM_ARTIFACTS",
                   "DEPLOOM_WORKSPACE_NPM_CACHE", "DEPLOOM_WORKSPACE_NPM_REGISTRY")]
-    if not all(configured):
+    if not all(configured[:2]):
         return {"status": "NOT_RUN", "code": "WORKSPACE_PREFLIGHT_HOST_DISABLED"}
     artifacts, cache = (Path(value) for value in configured[:2])
     project = project.resolve()
@@ -213,21 +254,16 @@ def _preflight(project, request, plan, admitted, inputs, timeout_seconds):
             or any(path.resolve().is_relative_to(project) or project.is_relative_to(path.resolve())
                    for path in (artifacts, cache))):
         raise GoalContractError("WORKSPACE_PREFLIGHT_HOST_PATH_INVALID")
-    for path in inputs:
-        if not path.endswith("package.json"):
-            continue
-        try:
-            (project / Path(path).parent / ".npmrc").lstat()
-        except FileNotFoundError:
-            continue
-        return {"status": "NOT_RUN", "code": "WORKSPACE_PREFLIGHT_PROJECT_NPMRC_UNSUPPORTED"}
-    from deploom_mcp.dependency_audit import AuditError, checked_registry
-    from workspace_npm_preflight import run_workspace_npm_preflight
-
     try:
-        registry = checked_registry(configured[2])
-    except AuditError as exc:
-        raise GoalContractError("WORKSPACE_PREFLIGHT_HOST_REGISTRY_INVALID") from exc
+        registry = _workspace_registry(configured[2], inputs)
+    except GoalContractError as exc:
+        return {"status": "NOT_RUN", "code": exc.code}
+    except AuditError:
+        raise GoalContractError("WORKSPACE_PREFLIGHT_HOST_REGISTRY_INVALID") from None
+    if not registry:
+        return {"status": "NOT_RUN", "code": "WORKSPACE_PREFLIGHT_HOST_DISABLED"}
+
+    from workspace_npm_preflight import run_workspace_npm_preflight
 
     if "policy" in plan and plan["policy"]["evidence"]["registryIdentitySha256"] != sha256(registry.encode()).hexdigest():
         return {"status": "NOT_RUN", "code": "WORKSPACE_POLICY_RESOLVER_REGISTRY_MISMATCH"}

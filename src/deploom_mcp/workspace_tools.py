@@ -47,6 +47,10 @@ def _valid_success(row, targets, expected_digest):
         inputs=identity["manifestInputs"]
         if set(inputs)!={"package-lock.json",*[o["manifestPath"] for o in owners]} or not all(_sha(v) for v in inputs.values()):
             return False
+        configs = identity.get("npmConfigInputs", {})
+        config_paths = {(Path(o["manifestPath"]).parent / ".npmrc").as_posix() for o in owners}
+        if not isinstance(configs, dict) or not configs.keys() <= config_paths or not all(_sha(v) for v in configs.values()):
+            return False
         for o in owners:
             if o["manifestPath"] != ("package.json" if o["owner"]=="." else o["owner"]+"/package.json") or o["manifestSha256"]!=inputs[o["manifestPath"]]:
                 return False
