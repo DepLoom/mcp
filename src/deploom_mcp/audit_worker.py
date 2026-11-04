@@ -385,11 +385,12 @@ def execute(request: dict) -> dict:
         "network": {"useSystemProxy": request.get("useSystemProxy", False),
                     "source": request.get("systemProxySource", "default")}}
     candidate = request.get("candidateBinding")
+    candidate_policy = candidate.get("policy") if candidate is not None else None
     if candidate is not None:
         report["candidateAudit"] = {"status": "UNKNOWN", "basis": "EXACT_RESOLVER_CANDIDATE",
             "resolverIdentitySha256": candidate["resolverIdentitySha256"],
             "lockSha256": candidate["lockSha256"], "registrySha256": candidate["registrySha256"],
-            "finalPolicy": "NOT_ASSESSED"}
+            "finalPolicy": "UNKNOWN" if candidate_policy is not None else "NOT_ASSESSED"}
     try:
         inputs, manifests, issues = collect_inputs(root, project)
         report["sourceFiles"] = {k: digest_bytes(v) for k, v in inputs.items()}
@@ -490,7 +491,16 @@ def execute(request: dict) -> dict:
         else:
             security["nodeUnit"] = "LOCKFILE_PATHS" if manager == "npm" else "NOT_REPORTED"
         report["security"] = security
-        if request["includeLag"]:
+        policy_result = None
+        if candidate_policy is not None:
+            from deploom_mcp.workspace_candidate_policy import audit_candidate_policy
+
+            report["lag"], policy_result = audit_candidate_policy(
+                inputs, manifests, metadata_registry, stdout, candidate_policy,
+                seconds=max(0.0, request["deadlineSeconds"] - (time.monotonic() - started)),
+                use_system_proxy=request.get("useSystemProxy", False),
+            )
+        elif request["includeLag"]:
             rows = []
             for name in manifests:
                 directory = (snapshot / name).parent
@@ -516,16 +526,25 @@ def execute(request: dict) -> dict:
         if candidate is not None and security["complete"]:
             report["candidateAudit"]["status"] = "BOUND_SECURITY_AUDIT_COMPLETE"
             report["candidateAudit"]["sourceInputSha256"] = report["sourceInputSha256"]
+        if policy_result is not None:
+            if not security["complete"]:
+                policy_result["verdict"] = "UNKNOWN"
+                report["lag"]["policyAttainment"] = "UNKNOWN"
+            report["candidateAudit"]["finalPolicy"] = policy_result["verdict"]
+            report["candidateAudit"]["policyAssessment"] = policy_result
         report["ok"] = True
-        report["status"] = "COMPLETE" if security["complete"] and (not request["includeLag"] or report["lag"]["complete"]) else "INCOMPLETE"
+        lag_required = request["includeLag"] or candidate_policy is not None
+        report["status"] = "COMPLETE" if security["complete"] and (not lag_required or report["lag"]["complete"]) else "INCOMPLETE"
     except AuditError as exc:
         report["error"] = {"code": exc.code, "message": str(exc)}
     except Exception as exc:
         report["error"] = {"code": "audit-worker-error", "message": type(exc).__name__}
     report["commands"] = runner.commands
     report["durationSeconds"] = round(time.monotonic() - started, 4)
-    report["limitations"] = ["Known-advisory evidence, not exploitability or runtime verification.",
-                             "No install, audit fix, automatic upgrade, or Yellow/Green policy claim."]
+    report["limitations"] = ["Known-advisory evidence; exploitability and runtime are outside this audit.",
+                             "The audit runs without installation, audit fix or automatic upgrades."]
+    if candidate_policy is not None:
+        report["limitations"].append("Policy evidence applies only to the exact candidate lock and policy digest.")
     return runner.redact(report)
 
 

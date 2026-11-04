@@ -125,5 +125,13 @@ inventory only when the host authorizes that destination. The saved audit
 report contains the lock, registry and resolver identity hashes.
 
 `BOUND_SECURITY_AUDIT_COMPLETE` describes collection of known-advisory
-evidence. The findings verdict may still be `FINDINGS`. This command leaves
-final policy, lag, physical installation and runtime to their own checks.
+evidence. The findings verdict may still be `FINDINGS`.
+
+Add `--policy-json <approved-policy.json>` to assess Yellow or Green on the
+same candidate. The policy file uses the options above, such as
+`{"targetLevel":"yellow","minLagOkPct":80,"lagPolicyMonths":12}`.
+The audit resolves each declaration from its owner in the exact lock and
+collects fresh publication metadata from the same registry. The report includes
+the normalized policy hash, counts and per-owner lag evidence. Missing facts
+can yield `UNKNOWN`. With a policy file, exit zero requires a policy pass.
+Physical installation, project checks and runtime require separate evidence.

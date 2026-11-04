@@ -40,7 +40,7 @@ def _candidate_manifests(project, resolver):
 async def audit_workspace_candidate(
     project: Path, *, baseline_lock: Path, resolver_dir: Path, expected_lock_sha256: str,
     expected_resolver_identity_sha256: str, registry: str, output_dir: Path, deadline_seconds: int = 120,
-    use_system_proxy: bool = False,
+    use_system_proxy: bool = False, policy: dict | None = None,
 ) -> dict:
     """Run independent npm audit on the exact compiled candidate dependency inputs."""
     from deploom_mcp.audit_worker import read_bytes
@@ -77,11 +77,16 @@ async def audit_workspace_candidate(
         return {name: hashlib.sha256(raw).hexdigest() for name, raw in inputs.items()}
 
     files = observe_npm_workspace(project, plan_snapshot=bind)
+    binding = {"files": files, "lockSha256": expected_lock_sha256, "registrySha256": registry_sha256,
+               "resolverIdentitySha256": expected_resolver_identity_sha256}
+    if policy is not None:
+        from deploom_mcp.workspace_policy_request import validate_workspace_policy
+
+        binding["policy"] = validate_workspace_policy(policy)
     return await audit_dependencies(
         project_path=str(project), package_manager="npm", registry=registry, output_dir=str(output_dir),
         deadline_seconds=deadline_seconds, use_system_proxy=use_system_proxy,
-        _candidate_binding={"files": files, "lockSha256": expected_lock_sha256, "registrySha256": registry_sha256,
-                            "resolverIdentitySha256": expected_resolver_identity_sha256},
+        _candidate_binding=binding,
     )
 
 
@@ -111,6 +116,7 @@ def main(argv=None):
     audit.add_argument("--output-dir", required=True, type=Path)
     audit.add_argument("--deadline-seconds", type=int, default=120)
     audit.add_argument("--use-system-proxy", action="store_true")
+    audit.add_argument("--policy-json", type=Path, help="Host-approved workspace Yellow/Green policy")
     args = parser.parse_args(argv)
 
     sys.path.insert(0, str(resolve_core_dir()))
@@ -127,12 +133,19 @@ def main(argv=None):
         from deploom_mcp.goal_contract import GoalContractError
 
         try:
+            policy = None
+            if args.policy_json is not None:
+                from deploom_mcp.audit_worker import read_bytes
+
+                policy = json.loads(read_bytes(args.policy_json))
+                if not isinstance(policy, dict):
+                    raise ValueError("INVALID_WORKSPACE_HEALTH_POLICY")
             result = asyncio.run(audit_workspace_candidate(
                 project, baseline_lock=args.baseline_lock, resolver_dir=args.resolver_dir.absolute(),
                 expected_lock_sha256=args.expected_lock_sha256,
                 expected_resolver_identity_sha256=args.expected_resolver_identity_sha256,
                 registry=args.registry, output_dir=args.output_dir.absolute(),
-                deadline_seconds=args.deadline_seconds, use_system_proxy=args.use_system_proxy,
+                deadline_seconds=args.deadline_seconds, use_system_proxy=args.use_system_proxy, policy=policy,
             ))
         except (OSError, RuntimeError, ValueError, KeyError) as exc:
             code = exc.code if isinstance(exc, GoalContractError) else (
@@ -140,9 +153,11 @@ def main(argv=None):
             result = {"ok": False, "error": {"code": code}, "security": {"verdict": "UNKNOWN"}}
         status = result.get("candidateAudit", {}).get("status", "UNKNOWN")
         print(json.dumps({"status": status, "security": result.get("security", {}).get("verdict", "UNKNOWN"),
-                          "finalPolicy": "NOT_ASSESSED", "artifacts": result.get("artifacts"),
+                          "finalPolicy": result.get("candidateAudit", {}).get("finalPolicy", "NOT_ASSESSED"),
+                          "artifacts": result.get("artifacts"),
                           "error": (result.get("error") or {}).get("code")}))
-        return 0 if status == "BOUND_SECURITY_AUDIT_COMPLETE" else 1
+        policy_passed = args.policy_json is None or result.get("candidateAudit", {}).get("finalPolicy") == "PASS"
+        return 0 if status == "BOUND_SECURITY_AUDIT_COMPLETE" and policy_passed else 1
 
     if not re.fullmatch(r"[a-f0-9]{32}", args.expected_source_key):
         parser.error("expected-source-key must be the approved source fingerprint")

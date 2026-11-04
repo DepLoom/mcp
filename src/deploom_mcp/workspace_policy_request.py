@@ -31,10 +31,21 @@ def validate_workspace_policy(value: dict) -> dict:
     return options
 
 
+def workspace_health_policy(options):
+    from workspace_health_policy import WorkspaceHealthPolicy
+
+    level = options["targetLevel"]
+    explicit_ml = "maxKnownModerate" in options or "maxKnownLow" in options
+    return WorkspaceHealthPolicy(
+        level, options["minLagOkPct"], max_high=options["maxKnownHigh"],
+        max_moderate=options.get("maxKnownModerate"), max_low=options.get("maxKnownLow"),
+        max_combined_moderate_low=20 if level == "green" and not explicit_ml else None,
+    )
+
+
 def bind_workspace_policy_solver(options, packages, declarations, approved, exact, admitted, environment, topology):
     from deploom_mcp.dependency_audit import AuditError, checked_registry
     from dependency_live_roadmap_generator import DeadlineClock, LiveDataClient
-    from workspace_health_policy import WorkspaceHealthPolicy
     from workspace_peer_model import plan_workspace_from_registry
 
     level = options["targetLevel"]
@@ -55,12 +66,7 @@ def bind_workspace_policy_solver(options, packages, declarations, approved, exac
     except AuditError as exc:
         raise GoalContractError("WORKSPACE_POLICY_HOST_REGISTRY_INVALID") from exc
 
-    explicit_ml = "maxKnownModerate" in options or "maxKnownLow" in options
-    policy = WorkspaceHealthPolicy(
-        level, options["minLagOkPct"], max_high=options["maxKnownHigh"],
-        max_moderate=options.get("maxKnownModerate"), max_low=options.get("maxKnownLow"),
-        max_combined_moderate_low=20 if level == "green" and not explicit_ml else None,
-    )
+    policy = workspace_health_policy(options)
     allowed = frozenset(
         name.strip() for name in os.environ.get("DEPLOOM_WORKSPACE_POLICY_OSV_PACKAGES", "").split(",") if name.strip()
     )

@@ -180,6 +180,50 @@ class NativeAuditTests(unittest.TestCase):
             self.assertFalse((self.project / "node_modules").exists())
             self.assertEqual([], list(self.outputs.glob("audits/*/private-*")))
 
+    def test_candidate_policy_reads_exact_versions_from_each_workspace(self):
+        with Registry() as registry:
+            root = {"name": "candidate", "version": "1.0.0", "private": True,
+                    "workspaces": ["packages/*"], "dependencies": {"sample-dep": ">=1.0.0"}}
+            member = {"name": "candidate-member", "version": "1.0.0", "dependencies": {"sample-dep": ">=1.0.0"}}
+            lock = {"name": "candidate", "version": "1.0.0", "lockfileVersion": 3, "requires": True,
+                    "packages": {"": root, "packages/app": member,
+                        "node_modules/candidate-member": {"resolved": "packages/app", "link": True},
+                        "node_modules/sample-dep": {"version": "1.0.0"},
+                        "packages/app/node_modules/sample-dep": {"version": "2.0.0"}}}
+            for name, value in (("package.json", root), ("package-lock.json", lock),
+                                ("packages/app/package.json", member)):
+                path = self.project / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(value), encoding="utf-8")
+            files = {p.relative_to(self.project).as_posix(): sha256(p.read_bytes()).hexdigest()
+                     for p in self.project.rglob("*.json")}
+            binding = {"files": files, "lockSha256": files["package-lock.json"],
+                       "registrySha256": sha256(registry.url.encode()).hexdigest(),
+                       "resolverIdentitySha256": "c" * 64}
+
+            def run(policy):
+                return asyncio.run(audit_dependencies(
+                    project_path=str(self.project), package_manager="npm", registry=registry.url,
+                    output_dir=str(self.outputs), deadline_seconds=30, _candidate_binding={**binding, "policy": policy},
+                ))
+
+            yellow = run({"targetLevel": "yellow", "minLagOkPct": 50})
+            self.assertTrue(yellow["ok"], yellow)
+            self.assertEqual("PASS", yellow["candidateAudit"]["finalPolicy"])
+            self.assertEqual("EXACT_OWNER_RESOLVED_CANDIDATE_LOCK", yellow["lag"]["basis"])
+            self.assertEqual([(".", "1.0.0", "lagging"), ("packages/app", "2.0.0", "ok")],
+                             [(row["owner"], row["version"], row["status"]) for row in yellow["lag"]["rows"]])
+            self.assertEqual(2, yellow["lag"]["totalDeclarations"])
+            self.assertEqual(1, yellow["candidateAudit"]["policyAssessment"]["knownBySeverity"]["H"])
+            self.assertFalse(yellow["runtimeVerified"])
+            green = run({"targetLevel": "green"})
+            self.assertTrue(green["ok"], green)
+            self.assertEqual("FAIL", green["candidateAudit"]["finalPolicy"])
+            self.assertEqual(["H"], green["candidateAudit"]["policyAssessment"]["exceededSeverityCaps"])
+            self.assertEqual(2, green["lag"]["requiredDeclarations"])
+            self.assertEqual(files, {p.relative_to(self.project).as_posix(): sha256(p.read_bytes()).hexdigest()
+                                     for p in self.project.rglob("*.json")})
+
     def test_classic_uses_exact_inventory_no_install_or_reresolution(self):
         with Registry() as registry:
             before = self.fixture("yarn-classic", registry.url)
