@@ -6,8 +6,8 @@ permissions:
   contents: read
 jobs:
   witness:
-    runs-on: ubuntu-latest
-    timeout-minutes: 6
+    runs-on: ubuntu-22.04
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
         with:
@@ -16,7 +16,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.18.0'
       - name: Install the exact released MCP source and bundled Core
         run: python -m pip install -e .
-      - name: Verify live workspace policy selection
+      - name: Verify live workspace policy selection and native acceptance
         run: python scripts/smoke_live_workspace_yellow.py

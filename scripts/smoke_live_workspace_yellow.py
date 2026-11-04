@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One read-only workspace Yellow witness using public npm and OSV."""
+"""One end-to-end workspace Yellow witness using public npm and OSV."""
 import asyncio
 from datetime import date
 from hashlib import sha256
@@ -16,6 +16,7 @@ import requests
 
 from deploom_mcp.distribution import blueprint_schema_path, release_manifest_path
 from smoke_live_proxy_osv import Proxy
+from workspace_yellow_witness_runtime import accept_workspace, prepare_runtime
 
 PACKAGE = "is-number"
 CURRENT = "1.0.0"
@@ -28,14 +29,7 @@ def make_workspace(project):
     root = {"name": "deploom-live-yellow", "version": "1.0.0",
             "workspaces": ["packages/*"], "dependencies": {PACKAGE: CURRENT}}
     member = {"name": "deploom-live-yellow-app", "version": "1.0.0"}
-    lock = {
-        "name": root["name"], "version": root["version"], "lockfileVersion": 3, "requires": True,
-        "packages": {"": root, "packages/app": member,
-                     "node_modules/" + member["name"]: {"resolved": "packages/app", "link": True},
-                     "node_modules/" + PACKAGE: {"version": CURRENT}},
-    }
-    for path, content in ((project / "package.json", root), (app / "package.json", member),
-                          (project / "package-lock.json", lock)):
+    for path, content in ((project / "package.json", root), (app / "package.json", member)):
         path.write_text(json.dumps(content), encoding="utf-8")
 
 def hashes(project):
@@ -58,6 +52,7 @@ async def plan_workspace(project, environment):
                     "targets": [{"selector": {"owner": ".", "section": "dependencies", "name": PACKAGE},
                                  "approvedLines": [1, 7], "versions": [CURRENT, LATEST], "exactTarget": None}],
                     "policy": {"targetLevel": "yellow"},
+                    "preflight": {"reauthor": None, "candidateLimit": 1},
                     "environment": {"node": "24.18.0", "npm": "11.16.0"}, "topology": None,
                 },
             })
@@ -72,6 +67,7 @@ def main():
         root = Path(directory)
         project = root / "project"
         make_workspace(project)
+        cache = prepare_runtime(root, project, REGISTRY, LATEST)
         before = hashes(project)
         endpoint = f"http://127.0.0.1:{proxy.server_address[1]}"
         thread = threading.Thread(target=proxy.serve_forever, daemon=True)
@@ -90,7 +86,10 @@ def main():
                            "DEPLOOM_MCP_STATE_DIR": str(root / "state"),
                            "DEPLOOM_WORKSPACE_POLICY_REGISTRY": REGISTRY,
                            "DEPLOOM_WORKSPACE_POLICY_OSV_PACKAGES": PACKAGE,
-                           "DEPLOOM_WORKSPACE_POLICY_SYSTEM_PROXY": "1"}
+                           "DEPLOOM_WORKSPACE_POLICY_SYSTEM_PROXY": "1",
+                           "DEPLOOM_WORKSPACE_NPM_ARTIFACTS": str(root / "native"),
+                           "DEPLOOM_WORKSPACE_NPM_CACHE": str(cache),
+                           "DEPLOOM_WORKSPACE_NPM_REGISTRY": REGISTRY}
             plan = asyncio.run(asyncio.wait_for(plan_workspace(project, environment), 85))
             jsonschema.validate(plan, json.loads(blueprint_schema_path(workspace=True).read_bytes()))
             policy = plan["policy"]
@@ -112,6 +111,11 @@ def main():
             assert policy["finalAudit"] == plan["installation"]["status"] == plan["runtime"]["status"] == "NOT_RUN"
             assert all(hosts.get(host, 0) > 0 for host in ("api.osv.dev", "registry.npmjs.org"))
             print("LIVE_WORKSPACE_YELLOW_PLAN_CONFIRMED", flush=True)
+            accepted = accept_workspace(root, project, plan, cache, REGISTRY, targets[0]["selectedVersion"])
+            assert hashes(project) == before and not (project / "node_modules").exists()
+            print(json.dumps({**accepted, "coreRevision": release["core"]["revision"],
+                              "sourceUnchanged": True}, sort_keys=True), flush=True)
+            print("LIVE_WORKSPACE_YELLOW_ACCEPTANCE_CONFIRMED", flush=True)
         finally:
             proxy.shutdown()
             thread.join(5)
