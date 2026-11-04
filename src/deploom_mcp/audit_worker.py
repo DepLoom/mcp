@@ -257,8 +257,27 @@ class Runner:
         return code, out, err
 
 
-def configure(snapshot: Path, inputs: dict[str, bytes], runner: Runner, requested_registry: str | None, manager: str) -> tuple[str, str]:
+def configure(
+    snapshot: Path, inputs: dict[str, bytes], runner: Runner, requested_registry: str | None, manager: str,
+    *, exact_candidate: bool = False,
+) -> tuple[str, str]:
     """Copy only declarative registry/TLS/auth settings; never Yarn code/plugins."""
+    if exact_candidate:
+        registry = checked_registry(requested_registry)
+        if manager != "npm" or registry is None:
+            raise AuditError("candidate-audit-registry-mismatch", "candidate audit requires the explicit npm registry")
+        for key in list(runner.env):
+            if key.lower().startswith("npm_config_") and key.lower() not in {
+                "npm_config_cache", "npm_config_ignore_scripts", "npm_config_fetch_retries", "npm_config_update_notifier",
+            }:
+                del runner.env[key]
+        (snapshot / ".npmrc").write_text("", encoding="utf-8")
+        for kind in ("user", "global"):
+            empty = runner.private / f"empty-{kind}-npmrc"
+            empty.write_text("", encoding="utf-8")
+            runner.env[f"npm_config_{kind}config"] = str(empty)
+        return registry, registry
+
     import yaml
     npm_lines: list[str] = []
     npm_registry = runner.env.get("npm_config_registry") or runner.env.get("NPM_CONFIG_REGISTRY")
@@ -365,10 +384,19 @@ def execute(request: dict) -> dict:
         "lag": {"requested": request["includeLag"], "complete": False, "status": "NOT_RUN"},
         "network": {"useSystemProxy": request.get("useSystemProxy", False),
                     "source": request.get("systemProxySource", "default")}}
+    candidate = request.get("candidateBinding")
+    if candidate is not None:
+        report["candidateAudit"] = {"status": "UNKNOWN", "basis": "EXACT_RESOLVER_CANDIDATE",
+            "resolverIdentitySha256": candidate["resolverIdentitySha256"],
+            "lockSha256": candidate["lockSha256"], "registrySha256": candidate["registrySha256"],
+            "finalPolicy": "NOT_ASSESSED"}
     try:
         inputs, manifests, issues = collect_inputs(root, project)
         report["sourceFiles"] = {k: digest_bytes(v) for k, v in inputs.items()}
         report["sourceInputSha256"] = _digest(inputs)
+        if candidate is not None and (issues or report["sourceFiles"] != candidate["files"]
+                                      or report["sourceFiles"].get("package-lock.json") != candidate["lockSha256"]):
+            raise AuditError("candidate-audit-input-mismatch", "candidate files changed or audit coverage differs")
         manager = detect_manager(inputs, request["packageManager"])
         report["packageManager"] = manager
         validate_lock_paths(inputs, manager, manifests)
@@ -380,7 +408,12 @@ def execute(request: dict) -> dict:
             # Config is rebuilt from declarative allowlists below.
             if name not in (".npmrc", ".yarnrc", ".yarnrc.yml"):
                 path.write_bytes(raw)
-        registry, metadata_registry = configure(snapshot, inputs, runner, request["registry"], manager)
+        registry, metadata_registry = configure(
+            snapshot, inputs, runner, request["registry"], manager, exact_candidate=candidate is not None,
+        )
+        if candidate is not None and (manager != "npm" or
+                digest_bytes(registry.encode("utf-8")) != candidate["registrySha256"]):
+            raise AuditError("candidate-audit-registry-mismatch", "native audit must use the resolver registry")
         report["registry"] = {"audit": registry, "metadata": metadata_registry, "fallbackUsed": False}
         report["coverage"] = {"manifests": manifests, "complete": not issues, "unresolvedEdges": issues,
             "basis": "CANONICAL_LOCKFILE", "installedNodeModulesExamined": False,
@@ -428,7 +461,12 @@ def execute(request: dict) -> dict:
                        "--include=dev", "--include=optional", "--include=peer", "--registry", registry]
             if manager == "yarn-classic":
                 command.append("--legacy-peer-deps")
+            if candidate is not None:
+                command.extend(("--workspaces=true", "--include-workspace-root=true", "--include=prod"))
         code, stdout, stderr = runner.run(command, audit_cwd)
+        if candidate is not None and any(
+                digest_bytes(read_bytes(snapshot / name)) != expected for name, expected in candidate["files"].items()):
+            raise AuditError("candidate-audit-snapshot-changed", "audit modified the captured candidate inputs")
         # Yarn 4.9.x's --json --no-deprecations emits no JSON when the audit
         # endpoint returned an empty advisory map. Accept the documented CLI
         # success signal only for native Yarn 4+, never npm or an error/stderr.
@@ -475,6 +513,9 @@ def execute(request: dict) -> dict:
         if issues:
             security["complete"], security["verdict"] = False, "UNKNOWN"
             security["observedFindingsRetained"] = True
+        if candidate is not None and security["complete"]:
+            report["candidateAudit"]["status"] = "BOUND_SECURITY_AUDIT_COMPLETE"
+            report["candidateAudit"]["sourceInputSha256"] = report["sourceInputSha256"]
         report["ok"] = True
         report["status"] = "COMPLETE" if security["complete"] and (not request["includeLag"] or report["lag"]["complete"]) else "INCOMPLETE"
     except AuditError as exc:

@@ -100,3 +100,30 @@ The default M/L rule for Green is the existing combined cap of 20. Explicit
 per-severity caps use the corresponding configured values. The response
 identifies the modeled scope, evidence coverage and policy limits. Final
 audit, install and runtime have separate gates.
+
+## Audit the exact resolver candidate
+
+After materializing the candidate manifests and lock into the authorized
+isolated project, the host can run:
+
+```text
+python -m deploom_mcp.workspace_acceptance audit-candidate <project>
+  --baseline-lock <original-package-lock>
+  --resolver-dir <owned-resolver-artifact>
+  --expected-lock-sha256 <candidate-lock-sha256>
+  --expected-resolver-identity-sha256 <resolver-identity-sha256>
+  --registry <the-resolver-registry>
+  --output-dir <separate-local-evidence-directory>
+```
+
+Join the lines as one command or use the shell's line continuation. The host
+supplies the identities from the previously approved resolver result. The
+command checks the artifact, root lock and each member manifest, captures
+that exact input for npm audit, and rechecks it afterward. It uses the
+explicit registry and isolated npm config. The registry receives dependency
+inventory only when the host authorizes that destination. The saved audit
+report contains the lock, registry and resolver identity hashes.
+
+`BOUND_SECURITY_AUDIT_COMPLETE` describes collection of known-advisory
+evidence. The findings verdict may still be `FINDINGS`. This command leaves
+final policy, lag, physical installation and runtime to their own checks.

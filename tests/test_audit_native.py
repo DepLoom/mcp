@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import gzip
+from hashlib import sha256
 import json
 import os
 import tempfile
@@ -127,6 +128,57 @@ class NativeAuditTests(unittest.TestCase):
         self.assertEqual(1, report["security"]["auditExitCode"])
         self.assertFalse(any(path.endswith(".tgz") for path in registry.requests))
         self.assert_preserved(before)
+
+    def test_candidate_binding_audits_transitives_and_rejects_changed_inputs_before_network(self):
+        def write(path, data):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(data), encoding="utf-8")
+
+        with Registry() as registry:
+            root = {"name": "candidate", "version": "1.0.0", "private": True, "workspaces": ["packages/*"]}
+            member = {"name": "candidate-member", "version": "1.0.0", "dependencies": {"sample-parent": "1.0.0"}}
+            write(self.project / "package.json", root)
+            write(self.project / "packages/app/package.json", member)
+            lock = {"name": "candidate", "version": "1.0.0", "lockfileVersion": 3, "requires": True,
+                    "packages": {"": root, "packages/app": member,
+                        "node_modules/candidate-member": {"resolved": "packages/app", "link": True},
+                        "node_modules/sample-parent": {"version": "1.0.0", "dependencies": {"sample-dep": "1.0.0"}},
+                        "node_modules/sample-dep": {"version": "1.0.0"}}}
+            write(self.project / "package-lock.json", lock)
+            files = {p.relative_to(self.project).as_posix(): sha256(p.read_bytes()).hexdigest()
+                     for p in self.project.rglob("*.json")}
+            binding = {"files": files, "lockSha256": files["package-lock.json"],
+                       "registrySha256": sha256(registry.url.encode()).hexdigest(),
+                       "resolverIdentitySha256": "a" * 64}
+
+            def audit(candidate):
+                return asyncio.run(audit_dependencies(
+                    project_path=str(self.project), package_manager="npm", registry=registry.url,
+                    output_dir=str(self.outputs), deadline_seconds=30, _candidate_binding=candidate,
+                ))
+
+            report = audit(binding)
+            self.assertTrue(report["ok"], report)
+            self.assertEqual("BOUND_SECURITY_AUDIT_COMPLETE", report["candidateAudit"]["status"])
+            self.assertEqual("FINDINGS", report["security"]["verdict"])
+            self.assertEqual("NOT_ASSESSED", report["candidateAudit"]["finalPolicy"])
+            self.assertFalse(report["runtimeVerified"])
+            self.assertTrue(any(payload.get("sample-parent") == ["1.0.0"] and payload.get("sample-dep") == ["1.0.0"]
+                                for payload in registry.payloads), registry.payloads)
+            self.assertEqual(files, {p.relative_to(self.project).as_posix(): sha256(p.read_bytes()).hexdigest()
+                                     for p in self.project.rglob("*.json")})
+            before_requests = len(registry.requests)
+            mismatch = audit({**binding, "registrySha256": "b" * 64})
+            self.assertEqual("candidate-audit-registry-mismatch", mismatch["error"]["code"])
+            self.assertEqual("UNKNOWN", mismatch["candidateAudit"]["status"])
+            lock["packages"]["node_modules/sample-dep"]["version"] = "2.0.0"
+            write(self.project / "package-lock.json", lock)
+            rejected = audit(binding)
+            self.assertEqual("candidate-audit-input-mismatch", rejected["error"]["code"])
+            self.assertEqual("UNKNOWN", rejected["candidateAudit"]["status"])
+            self.assertEqual(before_requests, len(registry.requests))
+            self.assertFalse((self.project / "node_modules").exists())
+            self.assertEqual([], list(self.outputs.glob("audits/*/private-*")))
 
     def test_classic_uses_exact_inventory_no_install_or_reresolution(self):
         with Registry() as registry:

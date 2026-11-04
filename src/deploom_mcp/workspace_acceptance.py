@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
 import json
 from pathlib import Path
@@ -36,6 +37,54 @@ def _candidate_manifests(project, resolver):
     return result
 
 
+async def audit_workspace_candidate(
+    project: Path, *, baseline_lock: Path, resolver_dir: Path, expected_lock_sha256: str,
+    expected_resolver_identity_sha256: str, registry: str, output_dir: Path, deadline_seconds: int = 120,
+    use_system_proxy: bool = False,
+) -> dict:
+    """Run independent npm audit on the exact compiled candidate dependency inputs."""
+    from deploom_mcp.audit_worker import read_bytes
+    from deploom_mcp.blueprint import resolve_output_outside
+    from deploom_mcp.dependency_audit import audit_dependencies, checked_registry
+    from deploom_mcp.workspace_inventory import observe_npm_workspace
+    from workspace_npm_obligations import compile_npm_workspace_obligations
+
+    if (not re.fullmatch(r"[a-f0-9]{64}", expected_lock_sha256)
+            or not re.fullmatch(r"[a-f0-9]{64}", expected_resolver_identity_sha256)):
+        raise ValueError("INVALID_CANDIDATE_AUDIT_IDENTITY")
+    if (resolver_dir != resolver_dir.resolve(strict=True) or not resolver_dir.is_dir()
+            or resolve_output_outside(resolver_dir, output_dir) is None):
+        raise ValueError("INVALID_CANDIDATE_AUDIT_ARTIFACT_PATH")
+    registry = checked_registry(registry)
+    if registry is None:
+        raise ValueError("CANDIDATE_AUDIT_REGISTRY_REQUIRED")
+    registry_sha256 = hashlib.sha256(registry.encode("utf-8")).hexdigest()
+    resolver = json.loads(read_bytes(resolver_dir / "receipt.json"))
+    resolver_lock = read_bytes(resolver_dir / "package-lock.json")
+    receipt = resolver["receipt"]
+    if (receipt.get("candidateLockSha256") != expected_lock_sha256
+            or receipt.get("resolverIdentitySha256") != expected_resolver_identity_sha256
+            or hashlib.sha256(resolver_lock).hexdigest() != expected_lock_sha256
+            or resolver["identity"].get("registrySha256") != registry_sha256):
+        raise ValueError("CANDIDATE_AUDIT_RESOLVER_IDENTITY_MISMATCH")
+    before = read_bytes(baseline_lock)
+
+    def bind(_digest, _rows, _packages, inputs):
+        if inputs["package-lock.json"] != resolver_lock:
+            raise ValueError("CANDIDATE_AUDIT_LOCK_MISMATCH")
+        manifests = {Path(name).parent.as_posix(): raw for name, raw in inputs.items() if name.endswith("package.json")}
+        compile_npm_workspace_obligations(before, resolver_lock, manifests, resolver)
+        return {name: hashlib.sha256(raw).hexdigest() for name, raw in inputs.items()}
+
+    files = observe_npm_workspace(project, plan_snapshot=bind)
+    return await audit_dependencies(
+        project_path=str(project), package_manager="npm", registry=registry, output_dir=str(output_dir),
+        deadline_seconds=deadline_seconds, use_system_proxy=use_system_proxy,
+        _candidate_binding={"files": files, "lockSha256": expected_lock_sha256, "registrySha256": registry_sha256,
+                            "resolverIdentitySha256": expected_resolver_identity_sha256},
+    )
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     modes = parser.add_subparsers(dest="mode", required=True)
@@ -52,6 +101,16 @@ def main(argv=None):
     verify.add_argument("--deadline-seconds", type=int, default=180)
     verify.add_argument("--install", action="store_true", help="Permit one frozen offline npm ci in a clean workspace")
     verify.add_argument("--registry", help="Same trusted registry used for the resolver receipt; required with --install")
+    audit = modes.add_parser("audit-candidate", help="Audit the exact resolved npm candidate for known advisories")
+    audit.add_argument("project", type=Path)
+    audit.add_argument("--baseline-lock", required=True, type=Path)
+    audit.add_argument("--resolver-dir", required=True, type=Path)
+    audit.add_argument("--expected-lock-sha256", required=True)
+    audit.add_argument("--expected-resolver-identity-sha256", required=True)
+    audit.add_argument("--registry", required=True)
+    audit.add_argument("--output-dir", required=True, type=Path)
+    audit.add_argument("--deadline-seconds", type=int, default=120)
+    audit.add_argument("--use-system-proxy", action="store_true")
     args = parser.parse_args(argv)
 
     sys.path.insert(0, str(resolve_core_dir()))
@@ -64,6 +123,27 @@ def main(argv=None):
         deadline = time.monotonic() + 30
         print(source_snapshot_fingerprint(project, remaining_budget=lambda: max(0, deadline - time.monotonic())))
         return 0
+    if args.mode == "audit-candidate":
+        from deploom_mcp.goal_contract import GoalContractError
+
+        try:
+            result = asyncio.run(audit_workspace_candidate(
+                project, baseline_lock=args.baseline_lock, resolver_dir=args.resolver_dir.absolute(),
+                expected_lock_sha256=args.expected_lock_sha256,
+                expected_resolver_identity_sha256=args.expected_resolver_identity_sha256,
+                registry=args.registry, output_dir=args.output_dir.absolute(),
+                deadline_seconds=args.deadline_seconds, use_system_proxy=args.use_system_proxy,
+            ))
+        except (OSError, RuntimeError, ValueError, KeyError) as exc:
+            code = exc.code if isinstance(exc, GoalContractError) else (
+                str(exc) if re.fullmatch(r"[A-Z_]+", str(exc)) else "CANDIDATE_AUDIT_INPUT_UNPROVEN")
+            result = {"ok": False, "error": {"code": code}, "security": {"verdict": "UNKNOWN"}}
+        status = result.get("candidateAudit", {}).get("status", "UNKNOWN")
+        print(json.dumps({"status": status, "security": result.get("security", {}).get("verdict", "UNKNOWN"),
+                          "finalPolicy": "NOT_ASSESSED", "artifacts": result.get("artifacts"),
+                          "error": (result.get("error") or {}).get("code")}))
+        return 0 if status == "BOUND_SECURITY_AUDIT_COMPLETE" else 1
+
     if not re.fullmatch(r"[a-f0-9]{32}", args.expected_source_key):
         parser.error("expected-source-key must be the approved source fingerprint")
     if not 1 <= args.deadline_seconds <= 900 or args.install != bool(args.registry):
