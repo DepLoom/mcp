@@ -192,3 +192,20 @@ must pass. A missing or incomplete audit, a different policy or candidate,
 or a failed policy leaves the destination untouched. The receipt retains
 both the approved policy and audit digests. `deliver-targeted` is for a
 separately approved targeted goal and records no final policy result.
+
+
+### Reproduce the public React workspace check
+
+Use Node 24.18.0 and npm 11.16.0. Install the built MCP wheel into your
+test environment, then run from the MCP checkout:
+
+```sh
+python scripts/smoke_react_workspace.py --out <new-scratch-directory>
+```
+
+The fixture has one root and three members. It uses the public npm registry
+and pinned tarball integrity. A mirror may supply the same bytes through
+`--registry`. The script uses a new cache and isolated npm configuration.
+It records the independent peer conflict, joint model, native lock, strict
+scripts-off install, physical workspace links, npm ls and both SSR checks.
+The report distinguishes this check from browser and policy acceptance.
