@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deploom-mcp"
-version = "0.2.8"
+version = "0.2.9"
 description = "Dependency planning and host-authorized verified goal execution for supported DepLoom profiles."
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
