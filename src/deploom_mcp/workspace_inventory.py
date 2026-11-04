@@ -143,7 +143,7 @@ def _declarations(manifest: dict, owner: str) -> list[dict]:
     return rows
 
 
-def observe_npm_workspace(project: Path, *, max_directories: int = 2048, max_manifests: int = 256, lock_resolver=None) -> dict:
+def observe_npm_workspace(project: Path, *, max_directories: int = 2048, max_manifests: int = 256, lock_resolver=None, plan_snapshot=None) -> dict:
     """Observe an explicit root only. COMPLETE refers to declarations, never resolution."""
     if (type(max_directories) is not int or not 1 <= max_directories <= 2048
             or type(max_manifests) is not int or not 1 <= max_manifests <= 256):
@@ -155,10 +155,10 @@ def observe_npm_workspace(project: Path, *, max_directories: int = 2048, max_man
     for component in project.parents:
         _safe(component, directory=True)
     with selected_root(project, original_root) as root_handle:
-        return _observe_npm_workspace_bound(project, root_handle, max_directories, max_manifests, lock_resolver)
+        return _observe_npm_workspace_bound(project, root_handle, max_directories, max_manifests, lock_resolver, plan_snapshot)
 
 
-def _observe_npm_workspace_bound(root, root_handle, max_directories, max_manifests, lock_resolver):
+def _observe_npm_workspace_bound(root, root_handle, max_directories, max_manifests, lock_resolver, plan_snapshot):
     if any((root / name).exists() for name in ("npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml")):
         raise GoalContractError("WORKSPACE_LOCK_OWNER_UNSUPPORTED")
     root_raw, manifest = _read(root / "package.json", 2 * 1024 * 1024, root=root, root_handle=root_handle)
@@ -228,6 +228,8 @@ def _observe_npm_workspace_bound(root, root_handle, max_directories, max_manifes
             raise GoalContractError("WORKSPACE_INPUT_CHANGED")
     identity = {"manifestInputs": {p: hashlib.sha256(b).hexdigest() for p, b in sorted(inputs.items())},
                 "workspaceOwners": [o["owner"] for o in owners], "patterns": patterns}
+    if plan_snapshot is not None:
+        return plan_snapshot(canonical_digest(identity), declarations, packages)
     lock_resolutions = None
     if lock_resolver is not None:
         lock_resolutions = []
@@ -286,9 +288,13 @@ def propose_workspace_targets(project: Path, expected_inventory_digest: str, tar
 
 def main() -> int:
     try:
-        if len(sys.argv) not in {2, 3}:
+        if len(sys.argv) == 4 and sys.argv[2] == "plan-snapshot":
+            from deploom_mcp.workspace_plan_snapshot import plan_workspace_snapshot
+
+            result = {"ok": True, "plan": plan_workspace_snapshot(Path(sys.argv[1]), json.loads(sys.argv[3]))}
+        elif len(sys.argv) not in {2, 3}:
             raise GoalContractError("INVALID_WORKSPACE_REQUEST")
-        if len(sys.argv) == 3:
+        elif len(sys.argv) == 3:
             if len(sys.argv[2]) > 65536:
                 raise GoalContractError("INVALID_WORKSPACE_REQUEST")
             request = json.loads(sys.argv[2])

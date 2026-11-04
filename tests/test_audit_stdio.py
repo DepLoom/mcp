@@ -24,7 +24,7 @@ class AuditStdioTests(unittest.TestCase):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     tools = await session.list_tools()
-                    self.assertEqual({"get_upgrade_plan", "evaluate_assignment", "explain_conflict", "audit_dependencies", "get_goal_plan", "get_goal_report", "verify_goal_candidate", "apply_goal_candidate", "get_goal_checkpoint", "observe_workspace_inventory_v1"}, {tool.name for tool in tools.tools})
+                    self.assertEqual({"get_upgrade_plan", "evaluate_assignment", "explain_conflict", "audit_dependencies", "get_goal_plan", "get_goal_report", "verify_goal_candidate", "apply_goal_candidate", "get_goal_checkpoint", "observe_workspace_inventory_v1", "plan_workspace_snapshot_v1"}, {tool.name for tool in tools.tools})
                     result = await session.call_tool("audit_dependencies", {"project_path": "relative"})
                     self.assertTrue(result.is_error)
                     self.assertEqual("invalid-project", result.structured_content["error"]["code"])
