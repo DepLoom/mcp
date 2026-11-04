@@ -159,7 +159,7 @@
     "revision": "b8913c85e5cfe88a7ad1a9ff863bd8dab819cbb5",
     "version": "1.0.0-preview.20"
   },
-  "mcpVersion": "0.2.4",
+  "mcpVersion": "0.2.5",
   "schemaSha256": "974ea52175ea09928cddae9694b5eb750cc1024520e758e64f23ed967fe81627",
   "schemaVersion": 1,
   "skill": {
