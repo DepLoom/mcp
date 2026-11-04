@@ -1,7 +1,7 @@
 {
   "blueprintSchemaVersion": 2,
   "core": {
-    "contentSha256": "5e7f5d8e9225ea3718dc4db989f0f689fd5fdf832430c93f6c52b91d29987ba9",
+    "contentSha256": "650b6efd19c5f5671c514c3b8cbc307377138826986770f8a235c004bcebd450",
     "files": {
       "VERSION": "2698c63efcc74d9adc7a29889fc4ecc7fadfb58c4588db3f117f9d87cfaaff40",
       "analyze_verification_telemetry.py": "1ee235ef0b9cf275fe34c22cf16cb4049e88fb19953096ddaecbb73d7a700e6f",
@@ -90,7 +90,7 @@
       "lockfile_preflight.py": "b13ee58c00905c27223062e872f0c3219239b76249a19b3ea6c15e1fd1238924",
       "manual_dependency_audit.py": "2c7b393466c3b2b1e030fbacbb28b52697b7b21eddcb09c80c15e93eee8e3340",
       "materialization_retention.py": "9e4c37f073de700ef4a0d0fe2a5225a3b71b7e3e814c1fd48ab59189af5f6abf",
-      "materialized_workspace_verifier.py": "996b837283089aa3240d8929147c9f58933a4a9a5694abb87ac9d7e551943d94",
+      "materialized_workspace_verifier.py": "491f083de2f162a56397767b0354a18d7d46a716ff6836337160e23931cb70f6",
       "migration_documents.py": "8f20583f19aa3bb09454ae3047866f301a50c4b7ab2f3fa8e8d64c0fdda25a19",
       "migration_research.py": "f95a8c7de05a867374f20582838ce7313504c8717b3d36ebf3bdebfd30b8c4d9",
       "migration_validation.py": "aa8cc3395c242a4d4f0f94affe5901fb36f0af7793fb829e696c97258294175b",
@@ -135,8 +135,9 @@
       "verification_experiment_registry.py": "ee7741da389a97b86320e9a13c559b5051f452b709bd8c9c56fd1cb5f53d758a",
       "verification_identity_diagnostics.py": "58da0339d91fe6735bab7ab731dfc8cc86ff85ed555f243fad8bcbc4c03d4ece",
       "verification_invocation.py": "166cdaa516e57db983c90c63466074e4f6178a1301ff400254551ab86a744478",
+      "verification_linux_pid_namespace.py": "2c9c157b5ab8e3db208399925a6f33bac79306a7fc34efa1bf7b827f065c3486",
       "verification_observability.py": "d30ec27b23a68c6e9c329910640c4360d320786443f9f3ad040270b2000a2ba2",
-      "verification_process_supervisor.py": "66d68e421298e4f07714d0ff90b00bbfe082ad13ade40573a3e494e5b19543ee",
+      "verification_process_supervisor.py": "bab4dcbb72a30ecbcadb06f865bd6185f221d69f0ae6013ae49b24edef16bc16",
       "verification_proof.py": "9b37fab4eaa42e5b565978542718f77038777ed112bfa23ed4153b87f813fbfa",
       "verification_source_closure.py": "8103e069e8cd73d65be720f7223981fd3b0a221c4e7b0583ccc6f7176166ad6d",
       "verification_stage_checkpoint.py": "573121e8eb0b73c056224287fe27fd12c2861042420b1bb793d89a82e42ea926",
@@ -153,7 +154,7 @@
       "yarn_berry.py": "bd769e797823ff99129983f8295a52b5aac1f01f9be2c2a8eac9ffeaf20903d2"
     },
     "repository": "https://github.com/DepLoom/core",
-    "revision": "735c5d24ac1e2c2c00a10e064571d03d64ef7305",
+    "revision": "7b48b00a2da688d45659cfd9bf34703e565c9e88",
     "version": "1.0.0-preview.20"
   },
   "mcpVersion": "0.2.4",
