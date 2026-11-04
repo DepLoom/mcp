@@ -59,6 +59,30 @@ def _valid_success(row, targets, expected_digest):
                     or declaration["section"] not in {"dependencies","devDependencies","optionalDependencies","peerDependencies"}
                     or not safe_spec(declaration["declaredSpec"])):
                 return False
+        evidence = row["lockResolutionEvidence"]
+        if evidence["authority"] != "LOCKFILE_ONLY":
+            return False
+        resolutions = evidence["rows"]
+        if resolutions is not None:
+            if not isinstance(resolutions, list) or len(resolutions) != len(declarations):
+                return False
+            for declaration, resolution in zip(declarations, resolutions):
+                if set(resolution) != set(declaration) | {"lockPath", "lockVersion"}:
+                    return False
+                if any(resolution[key] != value for key, value in declaration.items()):
+                    return False
+                path, version = resolution["lockPath"], resolution["lockVersion"]
+                if path is None and version is None:
+                    continue
+                if not isinstance(version, str) or not version or not isinstance(path, str):
+                    return False
+                owner = declaration["owner"]
+                owner_parts = [] if owner == "." else owner.split("/")
+                suffix = "node_modules/" + declaration["name"]
+                candidates = {"/".join([*owner_parts[:i], suffix]) for i in range(len(owner_parts) + 1)}
+                if path not in candidates or "\\" in path or ":" in path or any(
+                        part in {"", ".", ".."} for part in path.split("/")):
+                    return False
         links=row["workspaceLinks"]
         return (isinstance(links,list) and len(links)==len(owners)-1
                 and {r["targetOwner"] for r in links}==set(owner_map)-{"."}
@@ -122,7 +146,7 @@ async def observe_workspace_inventory_v1(project_path: str, expected_inventory_d
 
 def register_workspace_tools(server, result_builder):
     @server.tool(name="observe_workspace_inventory_v1", title="Observe npm-workspace declarations without execution",
-        description="Read-only bounded root npm lock-v3 workspace inventory. Relative literal/single-star patterns only; no globstar, negation or brace expansion. Owners and declaration sections stay separate. Optional owner/section/name/fromSpec/toVersion targets require the current inventory digest and produce declaration intent only. No registry, solver, install, checks, repair, checkpoint or execution authority. Existing goal APIs still reject workspaces. Hashes bind dependency inputs only, not full source or runtime. Caps/errors never yield a complete truncated proposal.",
+        description="Read-only bounded root npm lock-v3 workspace inventory. Relative literal/single-star patterns only; no globstar, negation or brace expansion. Owners and declaration sections stay separate. When supported by bundled Core, report owner-specific lock paths and versions as lockfile-only evidence. Optional owner/section/name/fromSpec/toVersion targets require the current inventory digest and produce declaration intent only. No registry, solver, install, checks, repair, checkpoint or execution authority. Existing goal APIs still reject workspaces. Hashes bind dependency inputs only, not full source or runtime. Caps/errors never yield a complete truncated proposal.",
         annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))
     async def observe_workspace_inventory_tool(project_path: str, expected_inventory_digest: str = "",
                                                 targets: list[dict] | None = None, deadline_seconds: float = 15):

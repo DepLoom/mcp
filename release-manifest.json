@@ -1,7 +1,7 @@
 {
   "blueprintSchemaVersion": 2,
   "core": {
-    "contentSha256": "c6e2df99cc11af93886e2a905b800f3ef42dcd508d3d3983de0a890c40616d9f",
+    "contentSha256": "85dd2fcdbbb0c3a499cc3bc7c99b04590f412a79474a518dceebfbc96d910916",
     "files": {
       "VERSION": "2698c63efcc74d9adc7a29889fc4ecc7fadfb58c4588db3f117f9d87cfaaff40",
       "analyze_verification_telemetry.py": "1ee235ef0b9cf275fe34c22cf16cb4049e88fb19953096ddaecbb73d7a700e6f",
@@ -113,7 +113,7 @@
       "registry_metadata_cache.py": "71599efd302a915173c01afd303b1f43de6d5535a77874699bece32a369b36e2",
       "registry_request_context.py": "e1a5783e8859b7477a9a69fd600feaeeb1cae403a09098181099d1bd898fad0e",
       "reparse_materialization.py": "ddb8d24337b510f6b432571fa26917f9270433416f9b69f612cfbceaec2509c7",
-      "resolution_inventory.py": "d6c36b92e92ec486332c20f86e8b4693a828752c100025d743487954e7b08eed",
+      "resolution_inventory.py": "5cbffe95dab1c69ca2656b80aaa54c69a2e2386c83a1cd24973247d80367749e",
       "resolved_dependency_state.py": "0a37f40587fa78c80e4d5bdbe09cae9cbac322f53b0c8c7a8d53ca42c1df8058",
       "run_tool_tests.py": "70d3cf1e3b192d4d2f759dbc9583d6b119b0a609be9e283f40f156aa660023e3",
       "run_writer_lock.py": "811ac5cd1157ba021cdd1814c871ff5eca75643ff2c00f9a796e4dc10ed877fe",
@@ -149,7 +149,7 @@
       "yarn_berry.py": "bd769e797823ff99129983f8295a52b5aac1f01f9be2c2a8eac9ffeaf20903d2"
     },
     "repository": "https://github.com/DepLoom/core",
-    "revision": "ec9f4289a0632eb3767a62cddbad411fdc15d6e0",
+    "revision": "ba0cae5af1537f3c33f56d2355e37b109845d0cb",
     "version": "1.0.0-preview.20"
   },
   "mcpVersion": "0.2.4",
