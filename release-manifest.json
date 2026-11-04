@@ -1,7 +1,7 @@
 {
   "blueprintSchemaVersion": 2,
   "core": {
-    "contentSha256": "6b0382df9686fe8e393815a81f190c392f9ed2b03dfc8b41d46477be5190daef",
+    "contentSha256": "5a665f6a5eb822812a28aad58ad0ee4e3c15134eb7124e7a951ac86883c57f63",
     "files": {
       "VERSION": "2698c63efcc74d9adc7a29889fc4ecc7fadfb58c4588db3f117f9d87cfaaff40",
       "analyze_verification_telemetry.py": "1ee235ef0b9cf275fe34c22cf16cb4049e88fb19953096ddaecbb73d7a700e6f",
@@ -137,7 +137,7 @@
       "verification_invocation.py": "166cdaa516e57db983c90c63466074e4f6178a1301ff400254551ab86a744478",
       "verification_linux_pid_namespace.py": "2c9c157b5ab8e3db208399925a6f33bac79306a7fc34efa1bf7b827f065c3486",
       "verification_observability.py": "d30ec27b23a68c6e9c329910640c4360d320786443f9f3ad040270b2000a2ba2",
-      "verification_process_supervisor.py": "bab4dcbb72a30ecbcadb06f865bd6185f221d69f0ae6013ae49b24edef16bc16",
+      "verification_process_supervisor.py": "1f89abe0b6307eddc56cd4e59ade4d73df35332e2441ea8f91afba71198478c6",
       "verification_proof.py": "9b37fab4eaa42e5b565978542718f77038777ed112bfa23ed4153b87f813fbfa",
       "verification_source_closure.py": "8103e069e8cd73d65be720f7223981fd3b0a221c4e7b0583ccc6f7176166ad6d",
       "verification_stage_checkpoint.py": "573121e8eb0b73c056224287fe27fd12c2861042420b1bb793d89a82e42ea926",
@@ -156,7 +156,7 @@
       "yarn_berry.py": "bd769e797823ff99129983f8295a52b5aac1f01f9be2c2a8eac9ffeaf20903d2"
     },
     "repository": "https://github.com/DepLoom/core",
-    "revision": "b8913c85e5cfe88a7ad1a9ff863bd8dab819cbb5",
+    "revision": "c67c2544297ae60677c7a1c08a63bcf733db6f46",
     "version": "1.0.0-preview.20"
   },
   "mcpVersion": "0.2.5",
