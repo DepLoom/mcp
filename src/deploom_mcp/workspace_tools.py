@@ -160,7 +160,7 @@ async def plan_workspace_snapshot_v1(project_path: str, request: dict) -> dict:
         child = await run_process_async(
             argv, cwd=str(trusted_parent),
             env={key: value for key, value in os.environ.items() if not key.upper().startswith("PYTHON")},
-            timeout=15, max_output_bytes=600 * 1024)
+            timeout=75 if "preflight" in request else 15, max_output_bytes=600 * 1024)
         if child.timed_out:
             raise GoalContractError("WORKSPACE_PLAN_TIMEOUT")
         result = json.loads(child.stdout)
@@ -177,6 +177,23 @@ async def plan_workspace_snapshot_v1(project_path: str, request: dict) -> dict:
                 or (plan["status"] == "SAT_IN_MODELED_DOMAIN") != isinstance(plan["assignment"], dict)
                 or (plan["status"] != "SAT_IN_MODELED_DOMAIN" and plan["assignment"] is not None)):
             raise GoalContractError("WORKSPACE_WORKER_INVALID_RESULT")
+        receipt = plan.get("packageManagerValidation")
+        if ("preflight" in request) != ("packageManagerValidation" in plan):
+            raise GoalContractError("WORKSPACE_WORKER_INVALID_RESULT")
+        if "preflight" in request:
+            if not isinstance(receipt, dict) or receipt.get("status") not in {
+                "NOT_RUN", "RESOLUTION_PASSED", "RESOLUTION_FAILED", "UNKNOWN"
+            }:
+                raise GoalContractError("WORKSPACE_WORKER_INVALID_RESULT")
+            if receipt["status"] == "NOT_RUN":
+                if set(receipt) != {"status", "code"}:
+                    raise GoalContractError("WORKSPACE_WORKER_INVALID_RESULT")
+            elif (plan["status"] != "SAT_IN_MODELED_DOMAIN"
+                  or receipt.get("authority") != "LOCKFILE_ONLY"
+                  or receipt.get("installation") != "NOT_RUN"
+                  or receipt.get("runtime") != "NOT_RUN"
+                  or receipt.get("learningAllowed") is not False):
+                raise GoalContractError("WORKSPACE_WORKER_INVALID_RESULT")
         return result
     except GoalContractError as exc:
         error = exc.code
@@ -194,7 +211,7 @@ def register_workspace_tools(server, result_builder):
         return result_builder(await observe_workspace_inventory_v1(project_path, expected_inventory_digest, targets, deadline_seconds))
 
     @server.tool(name="plan_workspace_snapshot_v1", title="Model a bounded npm workspace upgrade",
-        description="Planning only. Takes the current workspace inventory digest, owner-scoped candidate lists, caller metadata and optionally a proposed instance topology. No registry calls, writes, package installs, physical-tree observation or execution authority.",
-        annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+        description="Planning only. Takes the current workspace inventory digest, owner-scoped candidate lists, caller metadata and optionally a proposed instance topology. Optional host-enabled preflight writes only a scratch lock via offline npm. No package installation, physical-tree observation or execution authority.",
+        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False))
     async def plan_workspace_snapshot_tool(project_path: str, request: dict):
         return result_builder(await plan_workspace_snapshot_v1(project_path, request))

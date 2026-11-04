@@ -229,7 +229,7 @@ def _observe_npm_workspace_bound(root, root_handle, max_directories, max_manifes
     identity = {"manifestInputs": {p: hashlib.sha256(b).hexdigest() for p, b in sorted(inputs.items())},
                 "workspaceOwners": [o["owner"] for o in owners], "patterns": patterns}
     if plan_snapshot is not None:
-        return plan_snapshot(canonical_digest(identity), declarations, packages)
+        return plan_snapshot(canonical_digest(identity), declarations, packages, inputs)
     lock_resolutions = None
     if lock_resolver is not None:
         lock_resolutions = []

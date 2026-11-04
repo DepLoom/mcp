@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -20,7 +21,7 @@ def _key(value):
 def plan_workspace_snapshot(project: Path, request: dict) -> dict:
     """Bind a bounded caller-provided metadata snapshot to current project bytes."""
     required = {"inventoryDigest", "mutable", "packuments", "environment", "topology"}
-    if (not isinstance(request, dict) or set(request) != required
+    if (not isinstance(request, dict) or not required <= request.keys() <= required | {"preflight"}
             or not isinstance(request["inventoryDigest"], str)
             or not re.fullmatch(r"[0-9a-f]{64}", request["inventoryDigest"])
             or not isinstance(request["mutable"], list)
@@ -32,7 +33,11 @@ def plan_workspace_snapshot(project: Path, request: dict) -> dict:
             or len(json.dumps(request, ensure_ascii=True, allow_nan=False)) > 12000):
         raise GoalContractError("INVALID_WORKSPACE_PLAN_REQUEST")
 
-    def plan(digest, rows, packages):
+    preflight = request.get("preflight")
+    if "preflight" in request and (not isinstance(preflight, dict) or set(preflight) != {"reauthor"}):
+        raise GoalContractError("INVALID_WORKSPACE_PREFLIGHT_REQUEST")
+
+    def plan(digest, rows, packages, inputs):
         if digest != request["inventoryDigest"]:
             raise GoalContractError("STALE_WORKSPACE_INVENTORY")
         declarations = {(row["owner"], row["section"], row["name"]): row["declaredSpec"]
@@ -87,9 +92,48 @@ def plan_workspace_snapshot(project: Path, request: dict) -> dict:
             result = plan_workspace_upgrade(
                 packages, declarations, admitted, exact, request["packuments"],
                 environment=request["environment"], topology=topology, timeout_ms=5000)
+            if preflight is not None:
+                result["packageManagerValidation"] = _preflight(
+                    project, preflight, result, admitted, inputs)
         finally:
             sys.path.pop(0)
         return {**result, "inventoryDigest": digest, "candidateEvidence": "CALLER_SNAPSHOT",
                 "executionReady": False}
 
     return observe_npm_workspace(project, plan_snapshot=plan)
+
+
+def _preflight(project, request, plan, admitted, inputs):
+    if plan["status"] != "SAT_IN_MODELED_DOMAIN":
+        return {"status": "NOT_RUN", "code": "WORKSPACE_PLAN_UNAVAILABLE"}
+    configured = [os.environ.get(key) for key in ("DEPLOOM_WORKSPACE_NPM_ARTIFACTS",
+                  "DEPLOOM_WORKSPACE_NPM_CACHE", "DEPLOOM_WORKSPACE_NPM_REGISTRY")]
+    if not all(configured):
+        return {"status": "NOT_RUN", "code": "WORKSPACE_PREFLIGHT_HOST_DISABLED"}
+    artifacts, cache = (Path(value) for value in configured[:2])
+    project = project.resolve()
+    if (not artifacts.is_absolute() or not cache.is_absolute() or not cache.is_dir()
+            or any(path.resolve().is_relative_to(project) or project.is_relative_to(path.resolve())
+                   for path in (artifacts, cache))):
+        raise GoalContractError("WORKSPACE_PREFLIGHT_HOST_PATH_INVALID")
+    from deploom_mcp.dependency_audit import AuditError, checked_registry
+    from workspace_npm_preflight import run_workspace_npm_preflight
+
+    try:
+        registry = checked_registry(configured[2])
+    except AuditError as exc:
+        raise GoalContractError("WORKSPACE_PREFLIGHT_HOST_REGISTRY_INVALID") from exc
+
+    assignment = {_key(json.loads(key)): version for key, version in plan["assignment"].items()}
+    reauthor = _key(request["reauthor"]) if request["reauthor"] is not None else None
+    if reauthor is not None and (reauthor not in assignment or reauthor in admitted):
+        raise GoalContractError("INVALID_WORKSPACE_PREFLIGHT_REAUTHOR")
+    manifests = {str(Path(path).parent.as_posix()): raw for path, raw in inputs.items()
+                 if path.endswith("package.json")}
+    result = run_workspace_npm_preflight(
+        manifests, inputs["package-lock.json"], assignment, frozenset(admitted),
+        artifacts=artifacts.resolve(), cache=cache.resolve(), registry=registry,
+        reauthor=reauthor, timeout_seconds=60)
+    # The scratch path is host-owned; the response contains only receipts.
+    result.pop("workspace", None)
+    return result
