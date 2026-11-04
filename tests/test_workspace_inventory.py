@@ -64,7 +64,7 @@ class WorkspaceInventoryTests(unittest.TestCase):
         self.assertNotEqual(after["inventoryDigest"], observe_npm_workspace(self.root)["inventoryDigest"])
 
     def test_project_npmrc_rejects_settings_the_isolated_command_does_not_preserve(self):
-        for raw in (b"strict-peer-deps=false", b"//registry.example.invalid/:_authToken=example",
+        for raw in (b"strict-peer-deps=false", b"//registry.example.invalid/:_authToken=x",
                     b"registry=https://mirror.example.invalid/\x24{REGISTRY}",
                     b"registry=https://one.invalid\nregistry=https://two.invalid",
                     b"save-exact=maybe"):
