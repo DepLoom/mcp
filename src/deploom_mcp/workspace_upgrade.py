@@ -7,6 +7,7 @@ from typing import Any
 from deploom_mcp.blueprint import _validate_blueprint_schema
 from deploom_mcp.distribution import blueprint_schema_path
 from deploom_mcp.goal_contract import GoalContractError, canonical_digest
+from deploom_mcp.workspace_plan_details import prepare_workspace_details, retain_workspace_details
 from deploom_mcp.workspace_tools import plan_workspace_snapshot_v1
 
 _KIND = "npm-workspace-upgrade-blueprint"
@@ -125,9 +126,12 @@ async def get_workspace_upgrade_plan(project_path: str, request: dict) -> dict[s
     if not result["ok"]:
         return result
     try:
-        compact = _compact_workspace_plan(result["plan"], request)
+        plan = result["plan"]
+        compact = _compact_workspace_plan(plan, request)
+        compact["details"], detail_bytes = prepare_workspace_details(compact, plan)
     except (KeyError, TypeError, ValueError):
         return {"ok": False, "error": {"code": "WORKSPACE_WORKER_INVALID_RESULT"}}
     if _validate_blueprint_schema(compact, blueprint_schema_path(workspace=True)) is not None:
         return {"ok": False, "error": {"code": "WORKSPACE_BLUEPRINT_SCHEMA_INVALID"}}
+    retain_workspace_details(compact["details"]["planId"], detail_bytes)
     return compact

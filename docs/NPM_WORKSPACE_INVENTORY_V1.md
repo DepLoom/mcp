@@ -70,4 +70,12 @@ Call `get_upgrade_plan(project_path=..., workspace_request=...)` in Python or pa
 3. Supply `packuments` for the frozen candidate evidence, `environment` with the modeled Node and npm versions, and `topology`. Use `null` to model the observed layout when it can be proven. An explicit layout uses `instanceGroups` and `providers`, with owner-qualified declaration triples.
 4. For a pure plan, omit `preflight`. For host-authorized lock-only validation, set `preflight: {reauthor: null}`. The host must have configured its isolated offline npm cache, registry and artifact directory. Optional `immutableInstances` pins exact lock paths and `candidateLimit` sets a maximum from one to three within the shared 60-second budget.
 
+Call `get_workspace_plan_details` with the issued `details.planId`, `requestId`, nullable
+`candidateId` and `details.snapshotSha256`, mapped to the snake-case tool parameters.
+Choose an owner and section from the selected targets, then follow `page.nextOffset`.
+Details are available in the originating server or Python process for up to 15 minutes
+and may be evicted after 16 plans. The ID is a read capability. External rule
+endpoints are redacted. The response includes shared native status and command
+digests, without exposing raw logs or reading a path supplied by the client.
+
 The [workspace response schema](../contracts/workspace-upgrade-blueprint.schema.json) separates the modeled assignment, native npm validation, installation, checks, runtime, acceptance and policy. The response is planning-only. A matching candidate lock can be reviewed for an authorized isolated trial. `MONOREPO_TO_POLICY` returns an explicit unsupported-goal error on this route.

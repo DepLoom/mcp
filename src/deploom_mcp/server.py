@@ -71,6 +71,7 @@ from deploom_mcp.registry_projection import (
 )
 
 from deploom_mcp.goal_tools import register_goal_tools
+from deploom_mcp.workspace_plan_details import get_workspace_plan_details
 from deploom_mcp.workspace_tools import register_workspace_tools
 from deploom_mcp.workspace_upgrade import get_workspace_upgrade_plan
 
@@ -1075,6 +1076,27 @@ async def explain_conflict_tool(
         package=package,
         expected_decision_digest=expected_decision_digest,
         max_items=max_items,
+    ))
+
+
+@server.tool(
+    name="get_workspace_plan_details",
+    title="Read scoped workspace plan evidence",
+    description=(
+        "Read an owner/section page from an issued workspace plan capability. Supply the exact planId, "
+        "requestId, candidateId (nullable) and snapshotSha256 from get_upgrade_plan. Reads only selected "
+        "declarations in that scope. External rule endpoints are redacted. Native status and command "
+        "digests are shared plan evidence. Handles expire or are evicted; no path reads, solver or npm run."
+    ),
+    annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False),
+)
+async def get_workspace_plan_details_tool(
+    plan_id: str, request_id: str, candidate_id: str | None, snapshot_sha256: str,
+    owner: str, section: str, offset: int = 0, limit: int = 8,
+) -> CallToolResult:
+    return _result(get_workspace_plan_details(
+        plan_id=plan_id, request_id=request_id, candidate_id=candidate_id, snapshot_sha256=snapshot_sha256,
+        owner=owner, section=section, offset=offset, limit=limit,
     ))
 
 

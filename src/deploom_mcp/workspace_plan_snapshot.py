@@ -105,7 +105,7 @@ def plan_workspace_snapshot(project: Path, request: dict) -> dict:
                 return plan_workspace_upgrade(
                     packages, declarations, admitted, exact, request["packuments"],
                     environment=request["environment"], topology=topology, timeout_ms=timeout_ms,
-                    excluded_assignments=tuple(excluded))
+                    excluded_assignments=tuple(excluded), include_constraint_evidence=True)
 
             if preflight is None:
                 result = solve((), 5000)
