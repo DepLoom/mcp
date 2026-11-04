@@ -22,19 +22,24 @@ def _key(value):
 
 def plan_workspace_snapshot(project: Path, request: dict) -> dict:
     """Bind a bounded caller-provided metadata snapshot to current project bytes."""
-    required = {"inventoryDigest", "mutable", "packuments", "environment", "topology"}
+    health_goal = isinstance(request, dict) and "policy" in request
+    required = {"inventoryDigest", "mutable", "environment", "topology", "policy" if health_goal else "packuments"}
     if (not isinstance(request, dict) or not required <= request.keys() <= required | {"preflight"}
             or not isinstance(request["inventoryDigest"], str)
             or not re.fullmatch(r"[0-9a-f]{64}", request["inventoryDigest"])
             or not isinstance(request["mutable"], list)
-            or not 1 <= len(request["mutable"]) <= 64
-            or not isinstance(request["packuments"], dict)
+            or not (0 if health_goal else 1) <= len(request["mutable"]) <= 64
+            or (not health_goal and not isinstance(request["packuments"], dict))
             or not isinstance(request["environment"], dict)
             or set(request["environment"]) - {"node", "npm"}
             or any(not isinstance(value, str) for value in request["environment"].values())
             or len(json.dumps(request, ensure_ascii=True, allow_nan=False)) > 12000):
         raise GoalContractError("INVALID_WORKSPACE_PLAN_REQUEST")
 
+    if health_goal:
+        from deploom_mcp.workspace_policy_request import validate_workspace_policy
+
+        health_options = validate_workspace_policy(request["policy"])
     preflight = request.get("preflight")
     if "preflight" in request:
         if not isinstance(preflight, dict) or not {"reauthor"} <= preflight.keys() <= {"reauthor", "immutableInstances", "candidateLimit"}:
@@ -53,9 +58,10 @@ def plan_workspace_snapshot(project: Path, request: dict) -> dict:
             raise GoalContractError("STALE_WORKSPACE_INVENTORY")
         declarations = {(row["owner"], row["section"], row["name"]): row["declaredSpec"]
                         for row in rows if row["section"] != "peerDependencies"}
-        admitted, exact = {}, {}
+        admitted, exact, approved = {}, {}, {}
+        target_keys = {"declaration", "versions", "exactTarget"} | ({"approvedLines"} if health_goal else set())
         for entry in request["mutable"]:
-            if not isinstance(entry, dict) or set(entry) != {"declaration", "versions", "exactTarget"}:
+            if not isinstance(entry, dict) or set(entry) != target_keys:
                 raise GoalContractError("INVALID_WORKSPACE_PLAN_SCOPE")
             key = _key(entry["declaration"])
             versions = entry["versions"]
@@ -66,6 +72,14 @@ def plan_workspace_snapshot(project: Path, request: dict) -> dict:
                     or len(set(versions)) != len(versions) or (target is not None and target not in versions)):
                 raise GoalContractError("INVALID_WORKSPACE_PLAN_SCOPE")
             admitted[key] = tuple(versions)
+            if health_goal:
+                lines = entry["approvedLines"]
+                if (not isinstance(lines, list) or not 1 <= len(lines) <= 32
+                        or any(type(line) is not int or not 0 <= line <= 999999 for line in lines)
+                        or len(set(lines)) != len(lines)
+                        or any(len(v) > 64 or int(v.split(".", 1)[0]) not in lines for v in versions)):
+                    raise GoalContractError("INVALID_WORKSPACE_VERSION_AUTHORITY")
+                approved[key] = tuple(lines)
             if target is not None:
                 exact[key] = target
 
@@ -101,11 +115,17 @@ def plan_workspace_snapshot(project: Path, request: dict) -> dict:
                         raise GoalContractError("INVALID_WORKSPACE_PLAN_TOPOLOGY")
                     providers[consumer, peer] = provider
                 topology = WorkspaceTopology(providers, tuple(groups))
-            def solve(excluded, timeout_ms):
-                return plan_workspace_upgrade(
-                    packages, declarations, admitted, exact, request["packuments"],
-                    environment=request["environment"], topology=topology, timeout_ms=timeout_ms,
-                    excluded_assignments=tuple(excluded), include_constraint_evidence=True)
+            if health_goal:
+                from deploom_mcp.workspace_policy_request import bind_workspace_policy_solver
+
+                solve = bind_workspace_policy_solver(health_options, packages, declarations, approved, exact,
+                                                     admitted, request["environment"], topology)
+            else:
+                def solve(excluded, timeout_ms):
+                    return plan_workspace_upgrade(
+                        packages, declarations, admitted, exact, request["packuments"],
+                        environment=request["environment"], topology=topology, timeout_ms=timeout_ms,
+                        excluded_assignments=tuple(excluded), include_constraint_evidence=True)
 
             if preflight is None:
                 result = solve((), 5000)
@@ -130,7 +150,7 @@ def plan_workspace_snapshot(project: Path, request: dict) -> dict:
             }
         finally:
             sys.path.pop(0)
-        return {**result, "inventoryDigest": digest, "candidateEvidence": "CALLER_SNAPSHOT",
+        return {**result, "inventoryDigest": digest, "candidateEvidence": "CORE_REGISTRY" if health_goal else "CALLER_SNAPSHOT",
                 "executionReady": False}
 
     return observe_npm_workspace(project, plan_snapshot=plan)
@@ -209,6 +229,8 @@ def _preflight(project, request, plan, admitted, inputs, timeout_seconds):
     except AuditError as exc:
         raise GoalContractError("WORKSPACE_PREFLIGHT_HOST_REGISTRY_INVALID") from exc
 
+    if "policy" in plan and plan["policy"]["evidence"]["registryIdentitySha256"] != sha256(registry.encode()).hexdigest():
+        return {"status": "NOT_RUN", "code": "WORKSPACE_POLICY_RESOLVER_REGISTRY_MISMATCH"}
     assignment = {_key(json.loads(key)): version for key, version in plan["assignment"].items()}
     reauthor = _key(request["reauthor"]) if request["reauthor"] is not None else None
     if reauthor is not None and (reauthor not in assignment or reauthor in admitted):

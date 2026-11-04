@@ -1,7 +1,7 @@
 {
   "blueprintSchemaVersion": 2,
   "core": {
-    "contentSha256": "c7c7a200fca725b80b571c616ce0833744b940e8e49759ed83e120eee7468f0e",
+    "contentSha256": "6b0382df9686fe8e393815a81f190c392f9ed2b03dfc8b41d46477be5190daef",
     "files": {
       "VERSION": "2698c63efcc74d9adc7a29889fc4ecc7fadfb58c4588db3f117f9d87cfaaff40",
       "analyze_verification_telemetry.py": "1ee235ef0b9cf275fe34c22cf16cb4049e88fb19953096ddaecbb73d7a700e6f",
@@ -100,9 +100,9 @@
       "package_manager_profile.py": "17c0aa5f01cd6d73b5bfee2c468fd36b42696b09e2f1c2d54c54f34a75e74efe",
       "package_manager_telemetry.py": "03dcb08777e3865113e91fdc04058b6298cc2ca165ff1516652e31d989740ec5",
       "peer_solver_goal.py": "2e9dffd7f5da6145a513fc409e804f56e8cabc25c8c63b9bcaf1b2da30daeb7a",
-      "peer_solver_model.py": "4b42a838cf4c30de72550a3789a47ca4d078b336e91a0ab8b9076e18942c917c",
+      "peer_solver_model.py": "7653535756327a2c2e30f7971374e11b9a64e237546af79ea6cbb44a24408b7b",
       "peer_solver_transition.py": "80a00cec7aa2a2ebbf7907c121682dcae8a56a9f1c1aec6669df5b779b3a78eb",
-      "peer_solver_z3.py": "ff01bb3daaf7f220025b9469001385bdb77516cc4b0ce3cea1d6620d30e60495",
+      "peer_solver_z3.py": "9879dcccf47bb4db2f546454bd9fa49f8a7d4471ca5ede65e854a2c3b6d9f045",
       "planning_cache.py": "5b54a50d425ad82c1563a9b7f22f529dcbeee9c423d4092c637061b5fc144cd3",
       "prepared_workspace_fastpath.py": "906ac8374894b08ed4d0043fd69e5621cde5ee8ded2562b639dae33130720f8e",
       "project_execution_environment.py": "10cabffb0abd73704a305c5ab59ba14600de3343c6ca50e29d6c514ad4e096ac",
@@ -146,24 +146,26 @@
       "windows_unc.py": "6b6589177faa963f0e1c8b3c7134a8719e9f251237ec6a075c667db6cf375bd1",
       "worker_runtime_state.py": "69cd5bf6ef0b4fb15bbf6b3418fbe7659a87bbbc5201bd9d2ef3e1e1d5a77345",
       "workspace_glob.py": "ab7e6fb0bb8abb2812362dc7c416e79cad319b471d5c94aa5012a42b308813c7",
+      "workspace_health_evidence.py": "8b39de6fe4e1d3f99c13d28c3d23b2528f6ce223cf586d6aa9e2eb98864ab3b0",
+      "workspace_health_policy.py": "6aa0024feb51775e2333f438f84486c18b4fcaaa6d1c7afb0b3d16a24065fe62",
       "workspace_noise.py": "0ed76379a5308cb8a5b053ed92293fdf4bd255c7799c6e77a644db8bac3af27a",
       "workspace_npm_lock_delta.py": "176fd664a8638e028b353fa20e2e9864e9145dba365e4af330d10b3baf0e0b8d",
       "workspace_npm_obligations.py": "646ed1b88dde5dccbcf4f5cf379deb8d3cd183dfd391cc0440a3657d4880d912",
       "workspace_npm_preflight.py": "b5b15958dfb039b2a9a662145dab0e82ffc5c1e39b280acbed0e257f0d97a344",
-      "workspace_peer_model.py": "1e142d396e975ce043974b021884685c19a65850b81a57cc2f5f08c10cb4a3c1",
+      "workspace_peer_model.py": "8f7669f7bd26a54bdf4e442667a6902d968993b9ece97d2592d4dbd60cf97439",
       "yarn_berry.py": "bd769e797823ff99129983f8295a52b5aac1f01f9be2c2a8eac9ffeaf20903d2"
     },
     "repository": "https://github.com/DepLoom/core",
-    "revision": "4d7bef523cd7c24800353f9358f1cff875ce472b",
+    "revision": "b2d92516533c6c49b0d362403825ea8a4951f469",
     "version": "1.0.0-preview.20"
   },
   "mcpVersion": "0.2.4",
   "schemaSha256": "974ea52175ea09928cddae9694b5eb750cc1024520e758e64f23ed967fe81627",
   "schemaVersion": 1,
   "skill": {
-    "bundleSha256": "e05f9f47c80e9ede4041e6398c845211a5833abe436ff39c479ad7e1a73913cf",
-    "contractVersion": "2.0.4"
+    "bundleSha256": "af8270ec77c027690b755d26332f295aef6c7001a754cf0dd86ee8b07b54d476",
+    "contractVersion": "2.0.5"
   },
-  "skillManifestSha256": "b25996ae4c454a401fd7dfbea581f7a487e4e172f18c65f8ac230bd6976214cb",
-  "workspaceSchemaSha256": "4ae478ddeaba36bfbfa79525b6432c7cf53417dde15a19910aa816e37a96aa12"
+  "skillManifestSha256": "dfd850fda6e03c42f5fd4280ebaf96dcc64bbbffddb8519d19a230dc174ea593",
+  "workspaceSchemaSha256": "385d097361ec94dedd54e96018b8d355a5da408849a69758bf86ad57866d5a7f"
 }

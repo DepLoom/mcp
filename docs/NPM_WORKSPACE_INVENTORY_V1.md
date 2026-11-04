@@ -78,4 +78,25 @@ and may be evicted after 16 plans. The ID is a read capability. External rule
 endpoints are redacted. The response includes shared native status and command
 digests, without exposing raw logs or reading a path supplied by the client.
 
-The [workspace response schema](../contracts/workspace-upgrade-blueprint.schema.json) separates the modeled assignment, native npm validation, installation, checks, runtime, acceptance and policy. The response is planning-only. A matching candidate lock can be reviewed for an authorized isolated trial. `MONOREPO_TO_POLICY` returns an explicit unsupported-goal error on this route.
+The [workspace response schema](../contracts/workspace-upgrade-blueprint.schema.json) separates the modeled assignment, native npm validation, installation, checks, runtime, acceptance and policy. The response is planning-only. A matching candidate lock can be reviewed for an authorized isolated trial.
+
+## Whole-workspace policy planning
+
+Use `goalKind: MONOREPO_TO_POLICY` with `policy: {targetLevel: "yellow"}` or
+`policy: {targetLevel: "green"}`. Omit `packuments`. Core uses the host's HTTPS
+`DEPLOOM_WORKSPACE_POLICY_REGISTRY` and only sends exact names in
+`DEPLOOM_WORKSPACE_POLICY_OSV_PACKAGES` (a comma-separated operator allowlist)
+to OSV. Authorize the inventory for the selected registry before enabling it.
+Missing host configuration, unavailable evidence or a name omitted from the
+OSV allowlist can leave the result unknown. The opt-in
+`DEPLOOM_WORKSPACE_POLICY_SYSTEM_PROXY=1` uses the existing system proxy.
+Native preflight, if requested, requires the same registry identity.
+
+Targets control mutable declarations. An empty target list holds every
+declaration. Held external declarations still count toward the lag denominator.
+Workspace links are classified separately and remain in the compatibility
+model. Green requires 100 percent confirmed lag and zero Critical/High.
+The default M/L rule for Green is the existing combined cap of 20. Explicit
+per-severity caps use the corresponding configured values. The response
+identifies the modeled scope, evidence coverage and policy limits. Final
+audit, install and runtime have separate gates.

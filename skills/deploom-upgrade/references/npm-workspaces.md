@@ -1,4 +1,4 @@
-# Targeted npm workspace upgrades
+# npm workspace upgrades
 
 1. Observe the lockfile root with `observe_workspace_inventory_v1`. Reuse its
    `inventoryDigest`. Select exact `{owner, section, name}` declarations, where
@@ -23,5 +23,9 @@
    owner and evidence. Independently verify install, project checks and
    affected runtime. Preserve unverified gates and deferred changes.
 
-The current route targets explicit dependency scope. A request for whole
-monorepo Yellow or Green retains its policy goal even if this route is unavailable.
+For Yellow or Green across the workspace, use `goalKind: MONOREPO_TO_POLICY`
+and `policy.targetLevel`. Omit caller packuments. The host registry and explicit
+OSV package allowlist control evidence collection. Inspect `policy` for the
+denominator, limits, and missing facts. Held external declarations stay in scope.
+Preserve the requested health goal when evidence or host configuration is missing.
+A feasible modeled result still requires an independent audit of the exact final lock.

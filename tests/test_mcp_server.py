@@ -65,7 +65,7 @@ class GetUpgradePlanValidationTests(unittest.TestCase):
     def test_workspace_policy_intent_cannot_be_downgraded_to_targeted(self) -> None:
         result = get_upgrade_plan(project_path="C:/nope",
                                   workspace_request={"schemaVersion": 2, "goalKind": "MONOREPO_TO_POLICY"})
-        self.assertEqual(result["error"]["code"], "UNSUPPORTED_WORKSPACE_GOAL")
+        self.assertEqual(result["error"]["code"], "INVALID_WORKSPACE_UPGRADE_REQUEST")
 
     def test_empty_project_path_is_invalid_args(self) -> None:
         res = get_upgrade_plan(project_path="")

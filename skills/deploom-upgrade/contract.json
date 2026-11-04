@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "name": "deploom-upgrade",
-  "contractVersion": "2.0.4",
+  "contractVersion": "2.0.5",
   "files": {
-    "SKILL.md": "efc7c60959bfadedcfa58ee8b6fc91b290f98683da271f4befbbd7a9316e1c16",
+    "SKILL.md": "3c531ff453b5e71f7e81152939a09f8f67091d33b8d4ddf3c145714e123309a8",
     "examples/blocked-upgrade.md": "b921b3ffd59d054ca69bddb7bc317450cc9c40d836cb1d44f5de86c9b974bfe4",
     "examples/plan-only.md": "ccfaad2b5e5f00678ff019e5988bb32e95ac2b82b6050a8786ab87295ca6883b",
     "examples/yellow-exclude-react.md": "379ccdd540513232fc5a2f396b2d9d3ee9cb4a420d7d27912ecd10c95b0da16b",
@@ -11,10 +11,10 @@
     "references/evidence-report.md": "9d4404725330d7891a845102104675fb3acf9d634b60a2ac2d9004e399d2bcbc",
     "references/execution-policy.md": "240bcc5086b6abe204776830a4d8f7bd33ed629b111759f439aebaaa364d08a5",
     "references/goal-and-migration-evidence.md": "1d455f9875fc51d01744d3363d47a0021a39f3227d075dd32f7df35f72b01b5e",
-    "references/npm-workspaces.md": "bc898b4935eed0d84949db57ad7674d25c13e275f4b1b43791a7d4e9f046e558",
+    "references/npm-workspaces.md": "03c8a450e2bb561c5c18346217ca1f0aaeb1a21d95266afd764df55ba910b871",
     "references/preflight.md": "6bf05b0297312b45c5b0154fc89487fbbadf46f38719034a597d24320eaa806a",
     "references/verification-policy.md": "57d6d0dbb3d52816badfa582d416fb3504c4c1c2e78ef80eed64aaa57642318c",
     "scripts/validate_evidence.py": "7e8fc003473b7e5d94a20a29d06bcba14844c699b787baf67c26305402a0bf3b"
   },
-  "bundleSha256": "e05f9f47c80e9ede4041e6398c845211a5833abe436ff39c479ad7e1a73913cf"
+  "bundleSha256": "af8270ec77c027690b755d26332f295aef6c7001a754cf0dd86ee8b07b54d476"
 }

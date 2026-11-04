@@ -37,7 +37,10 @@
       "const": "npm-workspace-upgrade-blueprint"
     },
     "goalKind": {
-      "const": "TARGETED_UPGRADE"
+      "enum": [
+        "TARGETED_UPGRADE",
+        "MONOREPO_TO_POLICY"
+      ]
     },
     "inventoryDigest": {
       "type": "string",
@@ -117,7 +120,7 @@
       "properties": {
         "targets": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 0,
           "maxItems": 64,
           "items": {
             "$ref": "#/$defs/target"
@@ -133,6 +136,9 @@
           "items": {
             "type": "string"
           }
+        },
+        "workspacePolicy": {
+          "$ref": "#/$defs/workspacePolicyOptions"
         }
       },
       "additionalProperties": false
@@ -167,7 +173,10 @@
           ]
         },
         "domainEvidence": {
-          "const": "CALLER_SNAPSHOT"
+          "enum": [
+            "CALLER_SNAPSHOT",
+            "CORE_REGISTRY"
+          ]
         },
         "transitivePlacement": {
           "const": "NOT_MODELED"
@@ -191,7 +200,7 @@
         },
         "targets": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 0,
           "maxItems": 64,
           "items": {
             "$ref": "#/$defs/selection"
@@ -380,20 +389,7 @@
       "additionalProperties": false
     },
     "policy": {
-      "type": "object",
-      "required": [
-        "status",
-        "targetScope"
-      ],
-      "properties": {
-        "status": {
-          "const": "NOT_ASSESSED"
-        },
-        "targetScope": {
-          "const": "NONE_FOR_TARGETED_UPGRADE"
-        }
-      },
-      "additionalProperties": false
+      "$ref": "#/$defs/workspacePolicyResult"
     },
     "action": {
       "type": "object",
@@ -775,20 +771,7 @@
           "additionalProperties": false
         },
         "policy": {
-          "type": "object",
-          "required": [
-            "status",
-            "targetScope"
-          ],
-          "properties": {
-            "status": {
-              "const": "NOT_ASSESSED"
-            },
-            "targetScope": {
-              "const": "NONE_FOR_TARGETED_UPGRADE"
-            }
-          },
-          "additionalProperties": false
+          "$ref": "#/$defs/workspacePolicyResult"
         },
         "constraintModel": {
           "type": "object",
@@ -820,7 +803,10 @@
               ]
             },
             "domainEvidence": {
-              "const": "CALLER_SNAPSHOT"
+              "enum": [
+                "CALLER_SNAPSHOT",
+                "CORE_REGISTRY"
+              ]
             },
             "transitivePlacement": {
               "const": "NOT_MODELED"
@@ -1236,6 +1222,314 @@
         }
       },
       "additionalProperties": false
+    },
+    "workspacePolicyOptions": {
+      "type": "object",
+      "required": [
+        "targetLevel",
+        "minLagOkPct",
+        "lagPolicyMonths",
+        "maxKnownHigh"
+      ],
+      "properties": {
+        "targetLevel": {
+          "enum": [
+            "yellow",
+            "green"
+          ]
+        },
+        "minLagOkPct": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "lagPolicyMonths": {
+          "enum": [
+            3,
+            6,
+            9,
+            12
+          ]
+        },
+        "maxKnownHigh": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxKnownModerate": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxKnownLow": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "workspaceHealth": {
+      "type": "object",
+      "required": [
+        "status",
+        "targetLevel",
+        "authority",
+        "finalAudit"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "FEASIBLE_IN_MODELED_DOMAIN",
+            "BLOCKED_IN_MODELED_DOMAIN",
+            "UNKNOWN"
+          ]
+        },
+        "targetLevel": {
+          "enum": [
+            "yellow",
+            "green"
+          ]
+        },
+        "authority": {
+          "const": "DECLARED_DOMAIN_PLANNING_ONLY"
+        },
+        "finalAudit": {
+          "const": "NOT_RUN"
+        },
+        "targetScope": {
+          "const": "ACTIVE_WORKSPACE_DECLARATIONS"
+        },
+        "lagDenominator": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lagRequired": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "severityLimits": {
+          "type": "object",
+          "properties": {
+            "C": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "H": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "M": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "L": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "U": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "M+L": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "securityUnit": {
+          "const": "UNIQUE_PACKAGE_NAMES_PER_SEVERITY"
+        },
+        "internalLinkDeclarations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lagConfirmed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lagUnknown": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "securityUnknown": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "knownBySeverity": {
+          "type": "object",
+          "properties": {
+            "C": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "H": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "M": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "L": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "U": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "evidence": {
+          "type": "object",
+          "required": [
+            "status",
+            "source",
+            "lagWindowMonths",
+            "lagReference",
+            "exactVersionCount",
+            "unknownLagVersionCount",
+            "unknownSecurityVersionCount",
+            "osvSkippedNameCount",
+            "snapshotSha256",
+            "registryIdentitySha256"
+          ],
+          "properties": {
+            "status": {
+              "const": "COLLECTED"
+            },
+            "source": {
+              "const": "CORE_REGISTRY_AND_EXACT_OSV"
+            },
+            "lagWindowMonths": {
+              "enum": [
+                3,
+                6,
+                9,
+                12
+              ]
+            },
+            "lagReference": {
+              "enum": [
+                "LATEST_ALLOWED_REGISTRY_METADATA",
+                "LATEST_INSTALLABLE_IN_CONFIGURED_REGISTRY"
+              ]
+            },
+            "exactVersionCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "unknownLagVersionCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "unknownSecurityVersionCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "osvSkippedNameCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "snapshotSha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "registryIdentitySha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "FEASIBLE_IN_MODELED_DOMAIN"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "lagDenominator",
+              "lagRequired",
+              "lagConfirmed",
+              "lagUnknown",
+              "securityUnknown",
+              "knownBySeverity",
+              "evidence"
+            ]
+          }
+        }
+      ]
+    },
+    "workspacePolicyResult": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "status",
+            "targetScope"
+          ],
+          "properties": {
+            "status": {
+              "const": "NOT_ASSESSED"
+            },
+            "targetScope": {
+              "const": "NONE_FOR_TARGETED_UPGRADE"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/workspaceHealth"
+        }
+      ]
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "goalKind": {
+            "const": "MONOREPO_TO_POLICY"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "policy": {
+            "$ref": "#/$defs/workspaceHealth"
+          },
+          "intent": {
+            "required": [
+              "workspacePolicy"
+            ]
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "policy": {
+            "properties": {
+              "status": {
+                "const": "NOT_ASSESSED"
+              }
+            }
+          },
+          "intent": {
+            "not": {
+              "required": [
+                "workspacePolicy"
+              ]
+            }
+          }
+        }
+      }
+    }
+  ]
 }

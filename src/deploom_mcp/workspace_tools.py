@@ -160,7 +160,7 @@ async def plan_workspace_snapshot_v1(project_path: str, request: dict) -> dict:
         child = await run_process_async(
             argv, cwd=str(trusted_parent),
             env={key: value for key, value in os.environ.items() if not key.upper().startswith("PYTHON")},
-            timeout=75 if "preflight" in request else 15, max_output_bytes=600 * 1024)
+            timeout=75 if "preflight" in request or "policy" in request else 15, max_output_bytes=600 * 1024)
         if child.timed_out:
             raise GoalContractError("WORKSPACE_PLAN_TIMEOUT")
         result = json.loads(child.stdout)
@@ -171,7 +171,8 @@ async def plan_workspace_snapshot_v1(project_path: str, request: dict) -> dict:
             raise GoalContractError(code)
         plan = result["plan"]
         if (plan["authority"] != "PLANNING_ONLY" or plan["verification"] != "NOT_VERIFIED"
-                or plan["executionReady"] is not False or plan["candidateEvidence"] != "CALLER_SNAPSHOT"
+                or plan["executionReady"] is not False
+                or plan["candidateEvidence"] != ("CORE_REGISTRY" if "policy" in request else "CALLER_SNAPSHOT")
                 or plan["inventoryDigest"] != request.get("inventoryDigest")
                 or plan["status"] not in {"SAT_IN_MODELED_DOMAIN", "UNSAT_IN_MODELED_DOMAIN", "UNKNOWN"}
                 or (plan["status"] == "SAT_IN_MODELED_DOMAIN") != isinstance(plan["assignment"], dict)

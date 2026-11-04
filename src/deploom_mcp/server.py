@@ -961,7 +961,9 @@ def get_upgrade_plan(
         "workspace_request schemaVersion=2 and goalKind=TARGETED_UPGRADE select "
         "exact owner/section/name declarations and caller-snapshot domains. Workspace "
         "requests use their own options. Omit preflight for a pure model; opt in only "
-        "when authorized to run isolated lock-only npm. Workspace health is separate."
+        "when authorized to run isolated lock-only npm. For MONOREPO_TO_POLICY, provide policy "
+        "and omit packuments: evidence is collected by Core through the host-configured registry "
+        "and permitted exact-version OSV queries. Workspace policy remains planning-only."
     ),
 )
 async def get_upgrade_plan_tool(

@@ -5,7 +5,7 @@ description: Plan and execute JavaScript and TypeScript dependency upgrades with
 
 # deploom-upgrade
 
-**Contract version: 2.0.4.** Canonical file hashes are in `contract.json`.
+**Contract version: 2.0.5.** Canonical file hashes are in `contract.json`.
 
 Use `get_upgrade_plan` for health/policy planning evidence. For an explicitly
 agreed functional-maintenance or finite coupled goal, use `get_goal_plan` and
@@ -53,7 +53,7 @@ Advisory mode changes recommendations, never proven peers/engines or user pins.
    Reuse an isolated worktree already supplied by the user. Load
    `references/preflight.md` for details. Missing MCP is an infrastructure
    limitation; do not fabricate a DepLoom plan.
-2. **Plan.** For a targeted npm workspace upgrade, use `get_upgrade_plan` with
+2. **Plan.** For an npm workspace upgrade, use `get_upgrade_plan` with
    `workspace_request` v2. Read [the workspace route](references/npm-workspaces.md)
    for selectors, scoped evidence and the lock-only boundary. For a flat
    `get_upgrade_plan` request, send the objective, `target_mode`, scope and

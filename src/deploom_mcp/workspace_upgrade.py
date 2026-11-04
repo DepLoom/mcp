@@ -7,24 +7,29 @@ from typing import Any
 from deploom_mcp.blueprint import _validate_blueprint_schema
 from deploom_mcp.distribution import blueprint_schema_path
 from deploom_mcp.goal_contract import GoalContractError, canonical_digest
+from deploom_mcp.workspace_policy_request import validate_workspace_policy
 from deploom_mcp.workspace_plan_details import prepare_workspace_details, retain_workspace_details
 from deploom_mcp.workspace_tools import plan_workspace_snapshot_v1
 
 _KIND = "npm-workspace-upgrade-blueprint"
 _VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
-_REQUEST_FIELDS = {"schemaVersion", "goalKind", "inventoryDigest", "targets", "packuments", "environment", "topology"}
+_REQUEST_FIELDS = {"schemaVersion", "goalKind", "inventoryDigest", "targets", "environment", "topology"}
 
 
 def _snapshot_request(request: dict) -> dict:
     if (not isinstance(request, dict) or type(request.get("schemaVersion")) is not int
             or request["schemaVersion"] != 2):
         raise GoalContractError("INVALID_WORKSPACE_REQUEST_VERSION")
-    if request.get("goalKind") != "TARGETED_UPGRADE":
+    goal = request.get("goalKind")
+    if goal not in ("TARGETED_UPGRADE", "MONOREPO_TO_POLICY"):
         raise GoalContractError("UNSUPPORTED_WORKSPACE_GOAL")
-    if not _REQUEST_FIELDS <= request.keys() <= _REQUEST_FIELDS | {"preflight"}:
+    health_goal = goal == "MONOREPO_TO_POLICY"
+    required = _REQUEST_FIELDS | ({"policy"} if health_goal else {"packuments"})
+    if not required <= request.keys() <= required | {"preflight"}:
         raise GoalContractError("INVALID_WORKSPACE_UPGRADE_REQUEST")
+    policy = validate_workspace_policy(request["policy"]) if health_goal else None
     targets = request["targets"]
-    if not isinstance(targets, list) or not 1 <= len(targets) <= 64:
+    if not isinstance(targets, list) or not (0 if health_goal else 1) <= len(targets) <= 64:
         raise GoalContractError("INVALID_WORKSPACE_UPGRADE_TARGETS")
     seen, mutable = set(), []
     for row in targets:
@@ -49,10 +54,14 @@ def _snapshot_request(request: dict) -> dict:
                 or len(set(versions)) != len(versions)
                 or (exact is not None and (not isinstance(exact, str) or exact not in versions))):
             raise GoalContractError("INVALID_WORKSPACE_VERSION_AUTHORITY")
-        mutable.append({"declaration": list(key), "versions": versions, "exactTarget": exact})
-    return {key: value for key, value in request.items() if key not in {"schemaVersion", "goalKind", "targets"}} | {
-        "mutable": mutable,
-    }
+        item = {"declaration": list(key), "versions": versions, "exactTarget": exact}
+        if health_goal:
+            item["approvedLines"] = lines
+        mutable.append(item)
+    snapshot = {key: value for key, value in request.items() if key not in {"schemaVersion", "goalKind", "targets", "policy"}}
+    if policy is not None:
+        snapshot["policy"] = policy
+    return {**snapshot, "mutable": mutable}
 
 
 def _compact_workspace_plan(plan: dict, request: dict) -> dict:
@@ -60,10 +69,14 @@ def _compact_workspace_plan(plan: dict, request: dict) -> dict:
     validation = plan.get("packageManagerValidation", {"status": "NOT_RUN", "code": "WORKSPACE_PREFLIGHT_NOT_REQUESTED"})
     candidate = plan["assignment"]
     request_id = canonical_digest(request)
+    policy = plan.get("policy", {"status": "NOT_ASSESSED", "targetScope": "NONE_FOR_TARGETED_UPGRADE"})
+    identity = {"requestId": request_id}
+    if policy.get("evidence"):
+        identity["healthEvidenceSha256"] = policy["evidence"]["snapshotSha256"]
     compact = {
         "ok": True, "schemaVersion": 2, "kind": _KIND, "goalKind": request["goalKind"],
         "inventoryDigest": plan["inventoryDigest"], "requestId": request_id,
-        "candidateId": canonical_digest({"requestId": request_id, "assignment": candidate}) if candidate else None,
+        "candidateId": canonical_digest({**identity, "assignment": candidate}) if candidate else None,
         "authority": "PLANNING_ONLY", "verification": "NOT_VERIFIED", "executionReady": False,
         "coverage": {
             "discoveredOwnerCount": len(evidence["owners"]),
@@ -94,15 +107,17 @@ def _compact_workspace_plan(plan: dict, request: dict) -> dict:
         },
         "installation": {"status": "NOT_RUN"}, "checks": {"status": "NOT_RUN"},
         "runtime": {"status": "NOT_RUN"}, "acceptance": {"status": "NOT_RUN"},
-        "policy": {"status": "NOT_ASSESSED", "targetScope": "NONE_FOR_TARGETED_UPGRADE"},
+        "policy": policy,
     }
+    if request["goalKind"] == "MONOREPO_TO_POLICY":
+        compact["intent"]["workspacePolicy"] = validate_workspace_policy(request["policy"])
     search = plan.get("candidateSearch")
     if search is not None:
         compact["packageManagerValidation"]["search"] = {
             "limit": search["limit"], "timeoutSeconds": search["timeoutSeconds"],
             "attemptCount": len(search["attempts"]), "stop": search["stop"],
             "attempts": [
-                {"candidateId": canonical_digest({"requestId": request_id, "assignment": entry["assignment"]}),
+                {"candidateId": canonical_digest({**identity, "assignment": entry["assignment"]}),
                  "status": entry["validation"]["status"], "code": entry["validation"]["code"]}
                 for entry in search["attempts"]
             ],
