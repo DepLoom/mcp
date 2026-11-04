@@ -1,0 +1,22 @@
+name: Live workspace Yellow witness
+on:
+  push:
+    branches: [codex/live-workspace-yellow-witness]
+permissions:
+  contents: read
+jobs:
+  witness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install the exact released MCP source and bundled Core
+        run: python -m pip install -e .
+      - name: Verify live workspace policy selection
+        run: python scripts/smoke_live_workspace_yellow.py
