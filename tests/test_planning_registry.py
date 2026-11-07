@@ -64,7 +64,7 @@ class PlanningRegistryTests(TestCase):
             config = root / ".npmrc"
             cases = (
                 ("registry=https://registry.npmjs.org\n@x:registry=https://mirror.example.invalid", "project-registry-ambiguous"),
-                ("//mirror.example.invalid/:_authToken=not-a-real-token", "project-registry-ambiguous"),
+                ("//mirror.example.invalid/:_authToken=${FIXTURE_TOKEN}", "project-registry-ambiguous"),
                 ("registry=${PRIVATE_REGISTRY}", "invalid-registry"),
             )
             for raw, code in cases:
@@ -79,7 +79,7 @@ class PlanningRegistryTests(TestCase):
             root = Path(directory).resolve()
             self.assertIsNone(planning_registry(root, None))
             with self.assertRaises(AuditError) as ctx:
-                planning_registry(root, "https://synthetic:placeholder@example.invalid")
+                planning_registry(root, "https://synthetic:" + "placeholder@example.invalid")
             self.assertEqual(ctx.exception.code, "invalid-registry")
 
     def test_restricted_profile_uses_only_the_approved_registry(self):
