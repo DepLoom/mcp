@@ -144,6 +144,14 @@ The HTTP transport and container setup are described in [HTTP deployment](docs/H
 
 For today's trials distribute the [local installation kit](docs/SHARING_WITH_COLLEAGUES.md). An HTTP server serving wheel files is **file distribution, not Networked MCP**.
 
+## Registry-only security evidence
+
+For hosts that disallow external advisory queries, set `DEPLOOM_MCP_DISABLE_EXTERNAL_EVIDENCE=1`. To let the flat planner use npm bulk advisories, also set `DEPLOOM_MCP_REGISTRY_ADVISORY_SOURCE` to the exact approved HTTPS registry URL. For automatic discovery from project config, set `DEPLOOM_MCP_ALLOWED_PROJECT_REGISTRY` to that same URL. Set these variables in the MCP server environment, then restart it.
+
+Enable the advisory source only if the registry operator confirms that omitted package keys mean no advisories reported for the requested versions. Node and npm's bundled semver are used to match advisory ranges. Check `planningOptions.securityEvidenceMode` for `REGISTRY_BULK_ADVISORY`. This covers exact versions queried by the flat planner. Verify the final lockfile and runtime separately.
+
+For Yarn Classic, high and critical findings can include `lockfileRootAttribution` from `audit_dependencies`. Each exact version lists the number of direct declarations that reach it and up to four example chains, with the manifest and dependency section. A partial result does not rule out other paths. This is lockfile evidence for choosing what to investigate, and runtime impact requires separate verification.
+
 ## Troubleshooting
 
 - MCP connected, Skill missing: install both parts, restart, explicitly load `deploom-upgrade`.

@@ -19,8 +19,13 @@ Read existing user authority first. Record missing evidence as unknown.
    and actual runtime. Keep the whole graph as compatibility context even when
    only a subset may change. `mutable_packages` limits edits; it is not an
    instruction to exclude contextual peers from analysis.
-5. Read configured registry and package scripts; never expose credentials. Pass
-   registry explicitly on the health-plan route. The goal route uses its host
+5. Read configured registry and package scripts; never expose credentials. A
+   flat plan can resolve a single literal root `.npmrc` or Yarn Classic `.yarnrc`
+   registry if it is public or matches `DEPLOOM_MCP_ALLOWED_PROJECT_REGISTRY`.
+   Pass an authorized explicit registry when routes are ambiguous or automatic
+   selection is unavailable. For flat plans whose host must suppress external
+   advisory and release-note lookups, set `DEPLOOM_MCP_DISABLE_EXTERNAL_EVIDENCE=1`
+   on the server. Advisory evidence then remains unknown. The goal route uses its host
    context, not an invented registry argument. Discover bootstrap, typecheck, lint, build, tests,
    Storybook and runtime entry points affected by proposed updates.
 6. Record which checks are required by the user/protocol and already authorized.

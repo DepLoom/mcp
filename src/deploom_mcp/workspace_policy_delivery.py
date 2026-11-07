@@ -7,6 +7,7 @@ from pathlib import Path, PurePosixPath
 import re
 
 from deploom_mcp.audit_worker import read_bytes
+from deploom_mcp.dependency_audit import AUDIT_EGRESS_CONFIGURATION
 from deploom_mcp.goal_contract import canonical_digest
 from deploom_mcp.goal_report import _plain_under
 from deploom_mcp.workspace_policy_request import validate_workspace_policy, workspace_health_policy
@@ -28,6 +29,9 @@ def load_delivery_policy(audit_path, expected_sha256, policy_path, plan):
         raise ValueError("WORKSPACE_DELIVERY_AUDIT_DIGEST_MISMATCH")
     report = json.loads(raw)
     candidate = report["candidateAudit"]
+    if (options.get("securityEvidenceMode") == "REGISTRY_ONLY"
+            and candidate.get("egressConfiguration") != AUDIT_EGRESS_CONFIGURATION):
+        raise ValueError("WORKSPACE_DELIVERY_AUDIT_EGRESS_UNPROVEN")
     assessment = candidate["policyAssessment"]
     lag = report["lag"]
     manifests = {(PurePosixPath(owner) / "package.json").as_posix(): record["manifestSha256"]

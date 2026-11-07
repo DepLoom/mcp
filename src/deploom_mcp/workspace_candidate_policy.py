@@ -64,7 +64,10 @@ def audit_candidate_policy(inputs, manifests, registry, output, options, *, seco
 
     facts, source = {}, None
     if seconds > 0 and versions:
-        client = LiveDataClient(registry, timeout=5, batch_size=16, sleep_sec=0, use_system_proxy=use_system_proxy)
+        client = LiveDataClient(
+            registry, timeout=5, batch_size=16, sleep_sec=0, use_system_proxy=use_system_proxy,
+            allow_registry_metadata_redirects=False,
+        )
         client.draft = True
         client.set_deadline(DeadlineClock(seconds))
         try:

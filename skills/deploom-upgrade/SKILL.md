@@ -5,7 +5,7 @@ description: Plan and execute JavaScript and TypeScript dependency upgrades with
 
 # deploom-upgrade
 
-**Contract version: 2.0.5.** Canonical file hashes are in `contract.json`.
+**Contract version: 2.0.14.** Canonical file hashes are in `contract.json`.
 
 Use `get_upgrade_plan` for health/policy planning evidence. For an explicitly
 agreed functional-maintenance or finite coupled goal, use `get_goal_plan` and
@@ -53,11 +53,24 @@ Advisory mode changes recommendations, never proven peers/engines or user pins.
    Reuse an isolated worktree already supplied by the user. Load
    `references/preflight.md` for details. Missing MCP is an infrastructure
    limitation; do not fabricate a DepLoom plan.
-2. **Plan.** For an npm workspace upgrade, use `get_upgrade_plan` with
-   `workspace_request` v2. Read [the workspace route](references/npm-workspaces.md)
-   for selectors, scoped evidence and the lock-only boundary. For a flat
-   `get_upgrade_plan` request, send the objective, `target_mode`, scope and
-   registry explicitly. Interpret goal responses using the goal reference.
+2. **Plan.** In PLAN_ONLY for npm workspaces, use `model_workspace_upgrade_v1`
+   when available and the task permits registry-only planning against a
+   host-approved registry. Otherwise use `get_upgrade_plan` with
+   `workspace_request` v2. With `get_upgrade_plan`, send only
+   `project_path` and `workspace_request` at the top level. Read [the workspace route](references/npm-workspaces.md) for
+   the required workspace fields, selectors and lock-only boundary. A policy call
+   with empty targets observes a held baseline. Its feasibility status does
+   not establish a version change. If it gives no actionable assignment and
+   version choice is authorized, follow the targeted recovery in the workspace
+   reference, including its planning-only route when audit is unavailable.
+   After each executed cohort, compare the current audit and freshness with the
+   original goal. Continue independent in-scope cohorts while a gap remains.
+   A partial reduction is a checkpoint.
+   For a flat `get_upgrade_plan` request, send the objective, `target_mode`
+   and scope. Use the user's explicit registry or let the host select its
+   approved project route. If the MCP cannot resolve the project registry,
+   use the exact authorized URL. Never substitute the public registry to
+   get a result. Interpret goal responses using the goal reference.
    Inspect critical evidence before questions or edits: conflicts, unknowns,
    unresolved peers, exact-target security/policy assessment, coverage,
    source/policy identity, and next action. Current-version security does not
@@ -110,6 +123,13 @@ A small update does not establish safety, but it does not itself justify another
 lookup either. Reuse adequate fresh pinned references; avoid repeating a plan
 just to obtain the same material. References and syntax observations grant no
 repair, verification or execution authority.
+
+## Transitive npm findings
+
+When the vulnerable copy is transitive, do not pin an unchanged direct
+dependency as the remediation. For npm workspaces follow the scoped override
+workflow in `references/npm-workspaces.md`. Keep a range-crossing candidate
+separate from compatibility evidence.
 
 ## Recovery rules
 

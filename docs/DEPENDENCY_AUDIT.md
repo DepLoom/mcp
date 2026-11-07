@@ -62,6 +62,12 @@ security evidence from looking like zero findings.
 
 ## Read-only and network boundaries
 
+A host with `DEPLOOM_MCP_DISABLE_EXTERNAL_EVIDENCE=1` rejects standalone audit
+requests before launching npm or Yarn, including requests that provide a
+registry URL. Use the host-only exact-candidate audit with an approved registry
+and verified egress policy when private auditing is authorized. See
+[NPM_WORKSPACE_INVENTORY_V1.md](NPM_WORKSPACE_INVENTORY_V1.md#audit-the-exact-resolver-candidate).
+
 The source checkout is read only. A fresh private snapshot contains manifests,
 canonical locks and a declarative subset of registry/auth/TLS configuration.
 All native commands run there. The only commands allowed are npm/Yarn version

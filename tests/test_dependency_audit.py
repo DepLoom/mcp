@@ -23,6 +23,84 @@ def npm_report(findings=True):
     }
 
 
+class CandidateAuditEgressTests(unittest.TestCase):
+    def test_restricted_host_cannot_use_standalone_audit_or_omit_candidate_egress_check(self):
+        from deploom_mcp.dependency_audit import audit_dependencies
+
+        registry = "https://registry.example.test/npm"
+        with (
+            patch.dict(os.environ, {"DEPLOOM_MCP_DISABLE_EXTERNAL_EVIDENCE": "1",
+                                    "DEPLOOM_WORKSPACE_NPM_AUDIT_EGRESS_REGISTRY": ""}),
+            patch("deploom_mcp.dependency_audit.validate_request",
+                  return_value={"registry": registry, "root": str(Path.cwd() / "synthetic-project")}),
+            patch("deploom_mcp.dependency_audit._core_provenance",
+                  side_effect=AuditError("test-worker-boundary", "provenance requested")) as provenance,
+        ):
+            for binding, expected in ((None, "standalone-audit-external-evidence-disabled"),
+                                      ({}, "candidate-audit-egress-not-configured")):
+                with self.subTest(binding=binding):
+                    request = audit_dependencies(project_path="unused", package_manager="npm",
+                                                 registry=registry, _candidate_binding=binding)
+                    try:
+                        with self.assertRaises(StopIteration) as result:
+                            request.send(None)
+                    finally:
+                        request.close()
+                    self.assertEqual(expected, result.exception.value["error"]["code"])
+                    self.assertEqual("UNKNOWN", result.exception.value["security"]["verdict"])
+            provenance.assert_not_called()
+
+    def test_registry_only_requires_exact_https_host_configuration_before_worker(self):
+        from deploom_mcp.dependency_audit import audit_dependencies
+
+        registry = "https://registry.example.test/npm"
+        configuration = "DEPLOOM_WORKSPACE_NPM_AUDIT_EGRESS_REGISTRY"
+        binding = {"policy": {"targetLevel": "yellow", "securityEvidenceMode": "REGISTRY_ONLY"}}
+
+        def run_before_worker():
+            request = audit_dependencies(project_path="unused", package_manager="npm",
+                                         registry=registry, _candidate_binding=binding)
+            try:
+                with self.assertRaises(StopIteration) as result:
+                    request.send(None)
+                return result.exception.value
+            finally:
+                request.close()
+
+        with (
+            patch("deploom_mcp.dependency_audit.validate_request",
+                  return_value={"registry": registry, "root": str(Path.cwd() / "synthetic-project")}),
+            patch("deploom_mcp.dependency_audit._core_provenance",
+                  side_effect=AuditError("test-worker-boundary", "provenance requested")) as provenance,
+        ):
+            for invalid in ("", "https://registry.example.test/other", "http://registry.example.test/npm",
+                            "https://registry.example.test/npm?secret=synthetic"):
+                with self.subTest(configured=invalid), patch.dict(os.environ, {configuration: invalid}):
+                    report = run_before_worker()
+                    self.assertEqual("candidate-audit-egress-not-configured", report["error"]["code"])
+                    self.assertEqual("UNKNOWN", report["security"]["verdict"])
+                    self.assertNotIn("secret=synthetic", report["error"]["message"])
+            provenance.assert_not_called()
+
+            with patch.dict(os.environ, {configuration: registry + "/"}):
+                report = run_before_worker()
+            self.assertEqual("test-worker-boundary", report["error"]["code"])
+            provenance.assert_called_once()
+
+
+    def test_registry_only_delivery_requires_audit_egress_record(self):
+        from hashlib import sha256
+        from deploom_mcp.workspace_policy_delivery import load_delivery_policy
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            audit, policy = root / "audit.json", root / "policy.json"
+            audit.write_bytes(b'{"candidateAudit":{"finalPolicy":"PASS"}}')
+            policy.write_bytes(b'{"targetLevel":"yellow","securityEvidenceMode":"REGISTRY_ONLY"}')
+            with self.assertRaisesRegex(ValueError, "WORKSPACE_DELIVERY_AUDIT_EGRESS_UNPROVEN"):
+                load_delivery_policy(audit, sha256(audit.read_bytes()).hexdigest(), policy, {})
+
+
 class AuditNormalizationTests(unittest.TestCase):
     def test_npm_finding_exit_one_is_completed_not_execution_failure(self):
         report = normalize_audit(json.dumps(npm_report()), 1, "npm")

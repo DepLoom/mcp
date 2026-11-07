@@ -179,6 +179,27 @@ class DecisionEvidenceTests(unittest.TestCase):
         self.assertEqual(bp["recovery"]["suggestedDraftMaxCandidates"], 6)
         self.assertIn("deadline does not widen", bp["recovery"]["note"])
 
+    def test_deadline_recovery_takes_priority_over_candidate_cap(self):
+        bp = blueprint(capped=True)
+        bp["status"].update(
+            draftStatus="DRAFT_PARTIAL",
+            partialReason="Draft deadline (40.0s) exceeded at peer-solve; plan is partial.",
+        )
+        enrich_decisions(bp, candidate_cap=3)
+        recovery = bp["recovery"]
+        self.assertEqual(recovery["nextAction"], "RETRY_WITH_LARGER_DEADLINE")
+        self.assertEqual(recovery["deadlinePhase"], "peer-solve")
+        self.assertGreater(recovery["candidateCapEvidenceCount"], 0)
+        self.assertIsNone(recovery["suggestedDraftMaxCandidates"])
+        compact = compact_blueprint(bp)
+        self.assertEqual(compact["recovery"], recovery)
+        self.assertTrue(compact["partial"]["replanRequired"])
+
+        bp["status"]["partialReason"] = "Package-manager preflight: TIMEOUT; diagnosis/replanning required"
+        enrich_decisions(bp, candidate_cap=3)
+        self.assertNotIn("deadlinePhase", bp["recovery"])
+        self.assertEqual(bp["recovery"]["suggestedDraftMaxCandidates"], 6)
+
     def test_additive_full_contract_validates(self):
         self.assertIsNone(_validate_blueprint_schema(blueprint(conflict=True, capped=True, migration=True)))
 

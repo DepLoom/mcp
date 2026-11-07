@@ -446,6 +446,8 @@ def enrich_decisions(blueprint: Dict[str, Any], *, candidate_cap: int = 3,
     evidence_hash = digest({"rows": evidence_rows, "decisionEvidence": semantic_reasons,
                             "perProject": blueprint.get("perProject") or {},
                             "targetAssessment": blueprint["targetAssessment"],
+                            **({"securityEvidenceMode": blueprint["planningOptions"]["securityEvidenceMode"]}
+                               if (blueprint.get("planningOptions") or {}).get("securityEvidenceMode") else {}),
                             "coverage": {k: (blueprint.get("summary") or {}).get(k) for k in
                                          ("metadataKnown", "metadataTotal", "securityKnown", "securityTotal", "insufficientData")}})
     blueprint["identities"] = {
@@ -456,6 +458,14 @@ def enrich_decisions(blueprint: Dict[str, Any], *, candidate_cap: int = 3,
                                   "coverage": coverage_identity, "semanticInputHash": source.get("semanticInputHash")}),
     }
     capped = sum(x["code"] == "CANDIDATE_CAP" for x in evidence)
+    status = blueprint.get("status") or {}
+    # Recognize Core's deadline receipt only. Other partial reasons (including
+    # package-manager preflight and owner guards) require different recovery.
+    deadline = re.fullmatch(
+        r"Draft deadline \(\d+(?:\.\d+)?s\) exceeded at ([a-z][a-z0-9-]*); "
+        r"(?:metadata may be incomplete|plan is partial)\.",
+        str(status.get("partialReason") or ""),
+    ) if status.get("draftStatus") == "DRAFT_PARTIAL" else None
     blueprint["recovery"] = {
         "draftMaxCandidates": candidate_cap, "candidateCapEvidenceCount": capped,
         "previousEvidenceComparison": ("NOT_PROVIDED" if previous_evidence_digest is None else
@@ -465,3 +475,11 @@ def enrich_decisions(blueprint: Dict[str, Any], *, candidate_cap: int = 3,
         "suggestedDraftMaxCandidates": min(MAX_DRAFT_CANDIDATES, candidate_cap * 2) if capped and candidate_cap < MAX_DRAFT_CANDIDATES else None,
         "note": "A larger deadline does not widen the candidate cap. Repeat only when evidence, cap, inputs or policy changes.",
     }
+    if deadline:
+        blueprint["recovery"].update(
+            nextAction="RETRY_WITH_LARGER_DEADLINE",
+            deadlinePhase=deadline.group(1),
+            suggestedDraftMaxCandidates=None,
+            note="If time allows, retry with a larger deadline and the same inputs, scope, policy and candidate cap. "
+                 "Review candidate evidence after planning completes.",
+        )

@@ -1,4 +1,5 @@
 """Real filesystem scope and lock membership; no package-manager execution."""
+import asyncio
 import copy
 import hashlib
 import json
@@ -6,12 +7,14 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from deploom_mcp.goal_contract import GoalContractError
 from deploom_mcp.workspace_inventory import observe_npm_workspace
 from deploom_mcp.workspace_plan_snapshot import _workspace_registry, plan_workspace_snapshot
-from deploom_mcp.workspace_upgrade import _snapshot_request
+from deploom_mcp.workspace_tools import plan_workspace_snapshot_v1
+from deploom_mcp.workspace_upgrade import _snapshot_request, get_workspace_upgrade_plan
 
 
 class WorkspaceInventoryTests(unittest.TestCase):
@@ -91,6 +94,246 @@ class WorkspaceInventoryTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True), self.assertRaisesRegex(GoalContractError, "REGISTRY_NOT_AUTHORIZED"):
             plan_workspace_snapshot(self.root, _snapshot_request(request))
 
+    def test_targeted_shape_error_identifies_missing_fields_without_echoing_user_keys(self):
+        result = asyncio.run(get_workspace_upgrade_plan(str(self.root), {
+            "schemaVersion": 2, "goalKind": "TARGETED_UPGRADE", "untrusted-example": "private-value",
+        }))
+        error = result["error"]
+        self.assertEqual(error["code"], "INVALID_WORKSPACE_UPGRADE_REQUEST")
+        self.assertIn("environment", error["message"])
+        self.assertIn("registry or packuments", error["message"])
+        self.assertNotIn("untrusted-example", error["message"])
+        self.assertNotIn("private-value", error["message"])
+
+    def test_workspace_registry_advisories_require_host_match_and_publish_planning_only_evidence(self):
+        import sys
+        from deploom_mcp.distribution import resolve_core_dir
+
+        registry = "https://mirror.example.invalid/npm"
+        npmrc = self.root / ".npmrc"
+        npmrc.write_text(f"registry={registry}\n", encoding="utf-8")
+        self.lock["packages"]["node_modules/typescript"] = {"version": "5.0.0"}
+        self.save()
+
+        def request():
+            return {
+                "schemaVersion": 2, "goalKind": "MONOREPO_TO_POLICY",
+                "inventoryDigest": observe_npm_workspace(self.root)["inventoryDigest"],
+                "targets": [], "environment": {}, "topology": None,
+                "policy": {"targetLevel": "yellow", "securityEvidenceMode": "REGISTRY_ONLY"},
+            }
+
+        def packument(name):
+            versions = ("5.0.0",) if name == "typescript" else ("3.0.0", "4.0.0")
+            return {"name": name, "dist-tags": {"latest": versions[-1]},
+                    "time": {v: "2026-05-01T00:00:00Z" for v in versions},
+                    "versions": {v: {"name": name, "version": v,
+                                     "dist": {"tarball": f"{registry}/{name}/-/{name}-{v}.tgz"}}
+                                 for v in versions}}
+
+        sys.path.insert(0, str(resolve_core_dir()))
+        try:
+            from dependency_live_roadmap_generator import LiveDataClient
+            from registry_advisory_evidence import RegistryAdvisoryEvidence
+
+            def advisory(pairs, *_args, **_kwargs):
+                return {pair: RegistryAdvisoryEvidence("NO_REPORTED_ADVISORIES", "EXACT",
+                                                        response_sha256="c" * 64) for pair in pairs}
+
+            host = {"DEPLOOM_WORKSPACE_POLICY_REGISTRY": registry,
+                    "DEPLOOM_WORKSPACE_POLICY_OSV_PACKAGES": "kleur,typescript"}
+            with patch.dict(os.environ, host, clear=True), patch.object(
+                LiveDataClient, "fetch_npm_metadata", side_effect=packument,
+            ) as metadata, patch.object(
+                LiveDataClient, "query_registry_advisory_evidence", side_effect=advisory,
+            ) as bulk, patch.object(LiveDataClient, "query_osv_versions") as osv, patch(
+                "workspace_npm_preflight.observe_workspace_peer_overrides", return_value={},
+            ):
+                for source in ("", registry + "/wrong-repository"):
+                    with self.subTest(source=source), patch.dict(os.environ, {"DEPLOOM_MCP_REGISTRY_ADVISORY_SOURCE": source}):
+                        with self.assertRaisesRegex(GoalContractError, "WORKSPACE_REGISTRY_ADVISORY_NOT_AUTHORIZED"):
+                            plan_workspace_snapshot(self.root, _snapshot_request(request()))
+                metadata.assert_not_called()
+                bulk.assert_not_called()
+                with patch.dict(os.environ, {"DEPLOOM_MCP_REGISTRY_ADVISORY_SOURCE": registry + "/",
+                                             "DEPLOOM_MCP_DISABLE_EXTERNAL_EVIDENCE": "1"}):
+                    result = plan_workspace_snapshot(self.root, _snapshot_request(request()))
+                self.assertEqual(bulk.call_count, 1)
+                osv.assert_not_called()
+
+                bulk.reset_mock()
+                legacy = {**request(), "policy": {"targetLevel": "yellow"}}
+                with patch.dict(os.environ, {"DEPLOOM_MCP_DISABLE_EXTERNAL_EVIDENCE": "1"}):
+                    denied = plan_workspace_snapshot(self.root, _snapshot_request(legacy))
+                bulk.assert_not_called()
+                osv.assert_not_called()
+                self.assertEqual(denied["policy"]["evidence"]["unknownSecurityVersionCount"], 3)
+
+                npmrc.write_text(f"registry={registry}\n@fixture:registry=https://other.example.invalid/npm\n",
+                                 encoding="utf-8")
+                metadata.reset_mock()
+                with patch.dict(os.environ, {"DEPLOOM_MCP_REGISTRY_ADVISORY_SOURCE": registry}):
+                    with self.assertRaisesRegex(GoalContractError, "WORKSPACE_PREFLIGHT_PROJECT_NPMRC_UNSUPPORTED"):
+                        plan_workspace_snapshot(self.root, _snapshot_request(request()))
+                metadata.assert_not_called()
+                bulk.assert_not_called()
+                npmrc.write_text(f"registry={registry}\n", encoding="utf-8")
+
+            worker_payload = json.loads(json.dumps({"ok": True, "plan": result}))
+            with patch("deploom_mcp.workspace_upgrade.plan_workspace_snapshot_v1",
+                       new_callable=AsyncMock, return_value=worker_payload):
+                pending = get_workspace_upgrade_plan(str(self.root), request())
+                with self.assertRaises(StopIteration) as response:
+                    pending.send(None)
+                wire = response.exception.value
+            self.assertTrue(wire["ok"], wire)
+            self.assertEqual(wire["policy"]["evidence"]["source"], "REGISTRY_BULK_ADVISORY")
+            self.assertEqual(wire["policy"]["status"], "FEASIBLE_IN_MODELED_DOMAIN")
+            self.assertEqual(wire["action"], {"kind": "REVIEW_HELD_BASELINE", "code": "WORKSPACE_HELD_BASELINE"})
+            self.assertEqual(wire["coverage"]["selectedDeclarationCount"], 0)
+            self.assertEqual(wire["packageManagerValidation"]["status"], "NOT_RUN")
+            self.assertEqual(wire["policy"]["finalAudit"], "NOT_RUN")
+            self.assertEqual(wire["acceptance"]["status"], "NOT_RUN")
+            self.assertFalse(wire["executionReady"])
+        finally:
+            sys.path.pop(0)
+
+    def test_peer_observer_failure_stays_unknown_and_does_not_run_resolver(self):
+        registry = "https://mirror.example.invalid/npm"
+        (self.root / ".npmrc").write_text(f"registry={registry}\n", encoding="utf-8")
+        request = {
+            "schemaVersion": 2, "goalKind": "TARGETED_UPGRADE", "registry": registry,
+            "inventoryDigest": observe_npm_workspace(self.root)["inventoryDigest"],
+            "targets": [{"selector": {"owner": "packages/a", "section": "dependencies", "name": "kleur"},
+                         "approvedLines": [3], "versions": ["3.0.1"], "exactTarget": "3.0.1"}],
+            "environment": {}, "topology": None, "preflight": {"reauthor": None, "candidateLimit": 1},
+        }
+        import sys
+        from deploom_mcp.distribution import resolve_core_dir
+        sys.path.insert(0, str(resolve_core_dir()))
+        try:
+            from workspace_npm_preflight import WorkspacePeerEvidenceError
+            with patch.dict(os.environ, {"DEPLOOM_WORKSPACE_POLICY_REGISTRY": registry}), patch(
+                "workspace_npm_preflight.observe_workspace_peer_overrides",
+                side_effect=WorkspacePeerEvidenceError("NPM_OBSERVER_TIMEOUT"),
+            ), patch("workspace_npm_preflight.run_workspace_npm_preflight") as resolver:
+                result = plan_workspace_snapshot(self.root, _snapshot_request(request))
+                resolver.assert_not_called()
+            self.assertIsNone(result["assignment"])
+            worker_payload = json.loads(json.dumps({"ok": True, "plan": result}))
+            with patch("deploom_mcp.workspace_upgrade.plan_workspace_snapshot_v1",
+                       new_callable=AsyncMock, return_value=worker_payload):
+                wire = asyncio.run(get_workspace_upgrade_plan(str(self.root), request))
+            self.assertTrue(wire["ok"], wire)
+            self.assertEqual(wire["constraintModel"]["status"], "UNKNOWN")
+            self.assertEqual(wire["constraintModel"]["reason"], "WORKSPACE_EFFECTIVE_PEER_NPM_OBSERVER_TIMEOUT")
+            self.assertEqual(wire["packageManagerValidation"]["status"], "NOT_RUN")
+            self.assertFalse(wire["executionReady"])
+        finally:
+            sys.path.pop(0)
+
+    def test_health_plan_preserves_unknown_when_peer_observer_fails(self):
+        registry = "https://mirror.example.invalid/npm"
+        (self.root / ".npmrc").write_text(f"registry={registry}\n", encoding="utf-8")
+        request = {
+            "schemaVersion": 2, "goalKind": "MONOREPO_TO_POLICY", "registry": registry,
+            "inventoryDigest": observe_npm_workspace(self.root)["inventoryDigest"],
+            "targets": [], "environment": {}, "topology": None,
+            "policy": {"targetLevel": "yellow", "securityEvidenceMode": "REGISTRY_ONLY"},
+        }
+        import sys
+        from deploom_mcp.distribution import resolve_core_dir
+        sys.path.insert(0, str(resolve_core_dir()))
+        try:
+            from workspace_npm_preflight import WorkspacePeerEvidenceError
+            with patch.dict(os.environ, {"DEPLOOM_WORKSPACE_POLICY_REGISTRY": registry}), patch(
+                "workspace_npm_preflight.observe_workspace_peer_overrides",
+                side_effect=WorkspacePeerEvidenceError("NPM_OBSERVER_TIMEOUT"),
+            ), patch("deploom_mcp.workspace_policy_request.bind_workspace_policy_solver") as solver:
+                plan = plan_workspace_snapshot(self.root, _snapshot_request(request))
+                solver.assert_not_called()
+            with patch("deploom_mcp.workspace_upgrade.plan_workspace_snapshot_v1",
+                       new_callable=AsyncMock, return_value={"ok": True, "plan": plan}):
+                pending = get_workspace_upgrade_plan(str(self.root), request)
+                with self.assertRaises(StopIteration) as response:
+                    pending.send(None)
+                wire = response.exception.value
+            self.assertTrue(wire["ok"], wire)
+            self.assertEqual(wire["constraintModel"]["reason"], "WORKSPACE_EFFECTIVE_PEER_NPM_OBSERVER_TIMEOUT")
+            self.assertEqual(wire["policy"]["status"], "UNKNOWN")
+            self.assertEqual(wire["policy"]["finalAudit"], "NOT_RUN")
+            self.assertFalse(wire["executionReady"])
+        finally:
+            sys.path.pop(0)
+
+    def test_model_route_shares_peer_and_registry_deadline(self):
+        from deploom_mcp.distribution import resolve_core_dir
+        import sys
+        registry = "https://mirror.example.invalid/npm"
+        (self.root / ".npmrc").write_text(f"registry={registry}\n", encoding="utf-8")
+        request = _snapshot_request({
+            "schemaVersion": 2, "goalKind": "MONOREPO_TO_POLICY", "registry": registry,
+            "inventoryDigest": observe_npm_workspace(self.root)["inventoryDigest"],
+            "targets": [], "environment": {}, "topology": None,
+            "policy": {"targetLevel": "yellow", "securityEvidenceMode": "REGISTRY_ONLY"},
+        })
+        sys.path.insert(0, str(resolve_core_dir()))
+        try:
+            import workspace_npm_preflight
+            with patch.dict(os.environ, {"DEPLOOM_WORKSPACE_POLICY_REGISTRY": registry}), patch.object(
+                workspace_npm_preflight, "observe_workspace_peer_overrides", return_value={},
+            ) as observer, patch("deploom_mcp.workspace_policy_request.bind_workspace_policy_solver") as bind, patch(
+                "deploom_mcp.workspace_plan_snapshot.time", SimpleNamespace(monotonic=lambda: 100.0),
+            ):
+                bind.return_value = lambda *_: {"assignment": None, "status": "UNKNOWN",
+                                                 "topology": "OBSERVED_LOCK_LAYOUT"}
+                plan_workspace_snapshot(self.root, request, model_only=True)
+                self.assertEqual(observer.call_args.kwargs["timeout_seconds"], 20)
+                self.assertEqual(bind.call_args.kwargs["metadata_deadline"], 165.0)
+                plan_workspace_snapshot(self.root, request)
+                self.assertEqual(observer.call_args.kwargs["timeout_seconds"], 10)
+                self.assertIsNone(bind.call_args.kwargs["metadata_deadline"])
+        finally:
+            sys.path.pop(0)
+
+    def test_targeted_registry_supplies_held_metadata_without_granting_policy_authority(self):
+        registry = "https://mirror.example.invalid/npm"
+        (self.root / ".npmrc").write_text(f"registry={registry}\n", encoding="utf-8")
+        request = {
+            "schemaVersion": 2, "goalKind": "TARGETED_UPGRADE", "registry": registry,
+            "inventoryDigest": observe_npm_workspace(self.root)["inventoryDigest"],
+            "targets": [{"selector": {"owner": "packages/a", "section": "dependencies", "name": "kleur"},
+                         "approvedLines": [3], "versions": ["3.0.1"], "exactTarget": "3.0.1"}],
+            "environment": {}, "topology": None,
+        }
+        snapshot = _snapshot_request(request)
+        with patch("deploom_mcp.workspace_policy_request.bind_workspace_policy_solver") as bind:
+            with patch.dict(os.environ, {}, clear=True):
+                with self.assertRaisesRegex(GoalContractError, "REGISTRY_NOT_AUTHORIZED"):
+                    plan_workspace_snapshot(self.root, snapshot)
+                bind.assert_not_called()
+            with patch.dict(os.environ, {"DEPLOOM_WORKSPACE_POLICY_REGISTRY": registry}, clear=True):
+                with self.assertRaisesRegex(GoalContractError, "REQUEST_REGISTRY_MISMATCH"):
+                    plan_workspace_snapshot(self.root, {**snapshot, "registry": registry + "/other"})
+                bind.assert_not_called()
+                bind.return_value = lambda *_: {"assignment": None, "status": "UNKNOWN",
+                                                  "topology": "OBSERVED_LOCK_LAYOUT"}
+                result = plan_workspace_snapshot(self.root, snapshot)
+                self.assertIsNone(bind.call_args.args[0])
+                self.assertEqual(len(bind.call_args.args[2]), 3)
+                self.assertEqual(result["candidateEvidence"], "CORE_REGISTRY")
+                self.assertNotIn("policy", result)
+                self.assertFalse(result["executionReady"])
+
+        result.update(authority="PLANNING_ONLY", verification="NOT_VERIFIED")
+        worker_reply = SimpleNamespace(returncode=0, timed_out=False,
+                                       stdout=json.dumps({"ok": True, "plan": result}))
+        with patch("deploom_mcp.workspace_tools.run_process_async", new_callable=AsyncMock) as worker:
+            worker.return_value = worker_reply
+            wire = asyncio.run(plan_workspace_snapshot_v1(str(self.root), snapshot))
+            self.assertTrue(wire["ok"])
+            self.assertEqual(worker.call_args.kwargs["timeout"], 75)
+
     def test_workspace_request_registry_rejects_unsafe_destinations(self):
         for registry in (None, "http://mirror.example.invalid/npm", "https://mirror.example.invalid/npm?x=1"):
             with self.subTest(registry=registry), self.assertRaisesRegex(GoalContractError, "REQUEST_REGISTRY_INVALID"):
@@ -99,8 +342,15 @@ class WorkspaceInventoryTests(unittest.TestCase):
                     "topology": None, "policy": {"targetLevel": "yellow"}, "registry": registry,
                 })
 
+    def test_project_npmrc_accepts_explicit_strict_flags_matching_preflight(self):
+        registry = "https://mirror.example.invalid/npm"
+        raw = (f"registry={registry}\nsave-exact=true\nengine-strict=true\n"
+               "strict-peer-deps=true\nlegacy-peer-deps=false\nforce=false").encode()
+        self.assertEqual(_workspace_registry(registry, {".npmrc": raw}), registry)
+
     def test_project_npmrc_rejects_settings_the_isolated_command_does_not_preserve(self):
-        for raw in (b"strict-peer-deps=false", b"//registry.example.invalid/:_authToken=x",
+        for raw in (b"strict-peer-deps=false", b"engine-strict=false",
+                    b"legacy-peer-deps=true", b"force=true", b"//registry.example.invalid/:_authToken=x",
                     b"registry=https://mirror.example.invalid/\x24{REGISTRY}",
                     b"registry=https://one.invalid\nregistry=https://two.invalid",
                     b"save-exact=maybe"):
@@ -157,6 +407,28 @@ class WorkspaceInventoryTests(unittest.TestCase):
         del self.lock['packages']['packages/a']
         self.save()
         self.fails('LOCK_MEMBER_MISSING')
+
+    def test_nested_workspace_group_is_not_an_owner(self):
+        self.manifests['package.json']['workspaces'] = ['packages/*', 'packages/group/*']
+        self.lock['packages']['']['workspaces'] = ['packages/*', 'packages/group/*']
+        member = 'packages/group/nested'
+        value = {'name': '@fixture/nested', 'version': '1.0.0'}
+        self.manifests[member + '/package.json'] = value
+        self.lock['packages'][member] = value
+        self.lock['packages']['node_modules/@fixture/nested'] = {'resolved': member, 'link': True}
+        self.save()
+        inventory = observe_npm_workspace(self.root)
+        self.assertEqual({row['owner'] for row in inventory['owners']},
+                         {'.', 'packages/a', 'packages/b', member})
+        self.lock['packages']['packages/group'] = {'name': '@fixture/group'}
+        self.save()
+        self.fails('LOCK_MEMBERSHIP_MISMATCH')
+
+    def test_literal_workspace_without_manifest_is_rejected(self):
+        (self.root / 'packages/group').mkdir()
+        self.manifests['package.json']['workspaces'].append('packages/group')
+        self.save()
+        self.fails('WORKSPACE_MANIFEST_MISSING')
 
     def test_unmatched_workspace_pattern_rejected(self):
         self.manifests['package.json']['workspaces'] = ['missing/*']

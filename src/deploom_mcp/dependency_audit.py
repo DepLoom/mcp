@@ -21,6 +21,7 @@ from deploom_mcp.proxy_settings import ProxySettingError, resolve_system_proxy
 
 LOCKS = ("npm-shrinkwrap.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml")
 MAX_REPORT_BYTES = 8 * 1024 * 1024
+AUDIT_EGRESS_CONFIGURATION = "HOST_CONFIGURED_EGRESS_AND_NO_REDIRECT_ENDPOINT"
 
 
 def checked_registry(value: str | None) -> str | None:
@@ -146,12 +147,33 @@ async def audit_dependencies(*, project_path: str, package_manager: str = "auto"
     worker/npm/Yarn process tree. No synthetic successful report on timeout.
     """
     try:
+        restricted_host = os.environ.get("DEPLOOM_MCP_DISABLE_EXTERNAL_EVIDENCE") == "1"
+        if restricted_host and _candidate_binding is None:
+            raise AuditError(
+                "standalone-audit-external-evidence-disabled",
+                "The host blocks standalone network audits. Use host-authorized exact-candidate auditing.",
+            )
         request = validate_request(project_path, package_manager=package_manager, registry=registry,
             deadline_seconds=deadline_seconds, include_lag=include_lag, lag_months=lag_months,
             use_system_proxy=use_system_proxy)
         if _candidate_binding is not None:
             if package_manager != "npm" or include_lag or not registry:
                 raise AuditError("candidate-audit-options-invalid", "candidate binding requires npm security-only audit")
+            policy = _candidate_binding.get("policy")
+            registry_only = policy is not None and policy.get("securityEvidenceMode") == "REGISTRY_ONLY"
+            if restricted_host or registry_only:
+                error = AuditError(
+                    "candidate-audit-egress-not-configured",
+                    "Configure host-enforced npm audit egress and a no-redirect endpoint for the exact registry, "
+                    "then set DEPLOOM_WORKSPACE_NPM_AUDIT_EGRESS_REGISTRY in the host environment.",
+                )
+                try:
+                    approved = checked_registry(os.environ.get("DEPLOOM_WORKSPACE_NPM_AUDIT_EGRESS_REGISTRY"))
+                except AuditError:
+                    raise error from None
+                if not approved or not approved.startswith("https://") or approved != request["registry"]:
+                    raise error
+                request["candidateAuditEgressConfiguration"] = AUDIT_EGRESS_CONFIGURATION
             request["candidateBinding"] = _candidate_binding
         from deploom_mcp.blueprint import resolve_output_outside
         root = Path(request["root"])

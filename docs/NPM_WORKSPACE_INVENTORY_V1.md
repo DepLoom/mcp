@@ -68,8 +68,8 @@ Call `get_upgrade_plan(project_path=..., workspace_request=...)` in Python or pa
 
 1. Call `observe_workspace_inventory_v1` on the npm lockfile owner and reuse its `inventoryDigest`.
 2. Supply `targets` with one exact `selector: {owner, section, name}` per declaration. The root owner is `.`. Each target has `approvedLines`, an ordered finite list of stable `versions` in those major lines, and an `exactTarget` from that list or `null`.
-3. Supply `packuments` for the frozen candidate evidence, `environment` with the modeled Node and npm versions, and `topology`. Use `null` to model the observed layout when it can be proven. An explicit layout uses `instanceGroups` and `providers`, with owner-qualified declaration triples.
-4. For a pure plan, omit `preflight`. For host-authorized lock-only validation, set `preflight: {reauthor: null}`. The host must configure its isolated offline npm cache and artifact directory. Native npm uses the HTTPS registry declared in the root `.npmrc`, or the host's `DEPLOOM_WORKSPACE_NPM_REGISTRY` if the project does not declare one. If both exist, they must match. Optional `immutableInstances` pins exact lock paths and `candidateLimit` sets a maximum from one to three within the shared 60-second budget.
+3. Supply `packuments` for a frozen caller snapshot. To collect metadata from an authorized project registry, omit `packuments` and supply its exact HTTPS URL as `registry`. The host online registry must match the project and request. This route performs no OSV queries and adds no policy authority. Supply `environment` with the modeled Node and npm versions and `topology` in both cases. Use `null` to model the observed layout when it can be proven. An explicit layout uses `instanceGroups` and `providers`, with owner-qualified declaration triples.
+4. For a pure plan, omit `preflight`. For host-authorized lock-only validation, set `preflight: {reauthor: null}`. The host must configure its isolated offline npm cache and artifact directory. Native npm uses the HTTPS registry declared in the root `.npmrc`, or the host's `DEPLOOM_WORKSPACE_NPM_REGISTRY` if the project does not declare one. If both exist, they must match. When the project requires a different npm version, the host can set `DEPLOOM_WORKSPACE_NPM_ENTRYPOINT` to the absolute path of its installed `npm-cli.js`. This uses Node from the host PATH and applies to npm resolution and Arborist together. The request cannot select a binary and DepLoom does not install toolchains. Optional `immutableInstances` pins exact lock paths and `candidateLimit` sets a maximum from one to three within the shared 60-second budget.
 
 Call `get_workspace_plan_details` with the issued `details.planId`, `requestId`, nullable
 `candidateId` and `details.snapshotSha256`, mapped to the snake-case tool parameters.
@@ -81,12 +81,22 @@ digests, without exposing raw logs or reading a path supplied by the client.
 
 The [workspace response schema](../contracts/workspace-upgrade-blueprint.schema.json) separates the modeled assignment, native npm validation, installation, checks, runtime, acceptance and policy. The response is planning-only. A matching candidate lock can be reviewed for an authorized isolated trial.
 
-A supported root `.npmrc` may contain a credential-free HTTPS `registry` and
-boolean `save-exact`. The native preflight passes the validated registry to npm
+A supported root `.npmrc` may contain a credential-free HTTPS `registry`,
+boolean `save-exact`, and the explicit flags already enforced by the resolver:
+`engine-strict=true`, `strict-peer-deps=true`, `legacy-peer-deps=false`,
+and `force=false`. The native preflight passes the validated registry to npm
 and writes exact candidate versions itself. It uses isolated npm config files
 and rejects unsupported settings or a member `.npmrc` rather than silently
 dropping them. The npm cache must already have the evidence needed to resolve
 against that registry.
+
+For an observed lock layout with root overrides, Core asks npm Arborist for
+effective peer ranges in a private copy of the bound manifests and lockfile.
+The solver uses those ranges for held consumers when the observed slot, version,
+peer and original range match. Evidence from the current lock does not describe
+a changed consumer or a proposed layout. If the override evidence cannot be bound
+or an override references a mutable root declaration, planning stays unknown.
+A plan still requires independent strict npm resolution and project verification.
 
 Existing root npm overrides with registry specs or references to root dependencies
 are preserved during preflight. In this case the same npm distribution checks
@@ -102,8 +112,17 @@ Use `goalKind: MONOREPO_TO_POLICY` with `policy: {targetLevel: "yellow"}` or
 `DEPLOOM_WORKSPACE_POLICY_REGISTRY` and only sends exact names in
 `DEPLOOM_WORKSPACE_POLICY_OSV_PACKAGES` (a comma-separated operator allowlist)
 to OSV. Authorize the inventory for the selected registry before enabling it.
-Missing host configuration, unavailable evidence or a name omitted from the
-OSV allowlist can leave the result unknown. The opt-in
+For private workspaces, set `policy.securityEvidenceMode` to `REGISTRY_ONLY`.
+The host must approve the same exact HTTPS registry in both
+`DEPLOOM_WORKSPACE_POLICY_REGISTRY` and `DEPLOOM_MCP_REGISTRY_ADVISORY_SOURCE`.
+Set the advisory source only after confirming that omitted package keys
+represent no reported findings for the submitted versions. This mode refuses
+redirects and sends no requests to OSV. Root scope overrides and member npmrc
+files remain unsupported by this profile. Unknown findings and exhausted
+budgets stay unknown. Run a separate audit of the final lockfile before claiming
+Yellow or Green. `DEPLOOM_MCP_DISABLE_EXTERNAL_EVIDENCE=1` also suppresses
+workspace OSV calls when registry-only mode is omitted.
+The opt-in
 `DEPLOOM_WORKSPACE_POLICY_SYSTEM_PROXY=1` uses the existing system proxy.
 If the project declares a registry, it must match the host's online registry.
 Native preflight, if requested, also requires that same registry identity.
@@ -158,6 +177,15 @@ collects fresh publication metadata from the same registry. The report includes
 the normalized policy hash, counts and per-owner lag evidence. Missing facts
 can yield `UNKNOWN`. With a policy file, exit zero requires a policy pass.
 Physical installation, project checks and runtime require separate evidence.
+
+For a `REGISTRY_ONLY` policy, the audit host must restrict the npm subprocess
+to the approved registry or enforcing proxy. Configure the trusted endpoint
+to reject redirects for audit and metadata requests. Then set the host-only
+`DEPLOOM_WORKSPACE_NPM_AUDIT_EGRESS_REGISTRY` to the exact HTTPS resolver
+registry URL. The audit refuses to start without this matching configuration.
+The receipt records the host declaration. Setting the variable alone does
+not configure or verify a network control. Validate the host rules using a
+synthetic redirect canary before sending private dependency inventory.
 
 ### Observe an approved local trial
 

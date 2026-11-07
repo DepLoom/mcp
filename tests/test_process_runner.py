@@ -17,12 +17,14 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from deploom_mcp.process_runner import (  # noqa: E402
+    _wait_with_cancel,
     run_process,
     run_process_async,
 )
@@ -292,6 +294,15 @@ class ProcessRunnerAsyncTests(unittest.IsolatedAsyncioTestCase):
                 await _close_fixture_task(task)
         self.assertEqual(spawn.call_count, 1)
         kill.assert_not_called()
+
+    async def test_cancel_with_unconfirmed_stop_has_explicit_error(self) -> None:
+        cancel = asyncio.Event()
+        cancel.set()
+        proc = Mock(returncode=None, wait=AsyncMock(side_effect=asyncio.TimeoutError))
+        with patch("deploom_mcp.process_runner.kill_process_tree") as kill:
+            with self.assertRaisesRegex(RuntimeError, "PROCESS_TREE_STOP_UNCONFIRMED"):
+                await _wait_with_cancel(proc, cancel)
+        kill.assert_called_once_with(proc)
 
     async def test_many_calls_succeed_after_previous_cancellation(self) -> None:
         cancel = asyncio.Event()
