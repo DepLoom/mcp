@@ -11,7 +11,7 @@ from deploom_mcp.planning_registry import planning_registry
 class PlanningRegistryTests(TestCase):
     def test_configured_classic_route_requires_host_approval(self):
         with TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             url = "https://mirror.example.invalid/npm"
             (root / ".yarnrc").write_text(f'"registry" "{url}/"\n', encoding="utf-8")
             with patch.dict(os.environ, clear=True):
@@ -28,7 +28,7 @@ class PlanningRegistryTests(TestCase):
             "DEPLOOM_MCP_DISABLE_EXTERNAL_EVIDENCE": "1",
             "DEPLOOM_MCP_ALLOWED_PROJECT_REGISTRY": approved,
         }, clear=True):
-            root = Path(directory)
+            root = Path(directory).resolve()
             (root / ".npmrc").write_text(f"registry={approved}\n", encoding="utf8")
             yarn = root / ".yarnrc.yml"
             document = f"npmRegistryServer: {approved}/\nnpmScopes:\n  demo:\n    npmRegistryServer: {approved}\n"
@@ -42,7 +42,7 @@ class PlanningRegistryTests(TestCase):
 
     def test_yarn_yaml_rejects_duplicates_aliases_and_nonliteral_registry(self):
         with TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             yarn = root / ".yarnrc.yml"
             for data, code in (
                 ("npmRegistryServer: https://one.example.invalid\nnpmRegistryServer: https://two.example.invalid",
@@ -60,7 +60,7 @@ class PlanningRegistryTests(TestCase):
 
     def test_split_or_unresolved_routing_cannot_fall_back(self):
         with TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             config = root / ".npmrc"
             cases = (
                 ("registry=https://registry.npmjs.org\n@x:registry=https://mirror.example.invalid", "project-registry-ambiguous"),
@@ -76,7 +76,7 @@ class PlanningRegistryTests(TestCase):
 
     def test_plain_project_retains_default_and_explicit_credentials_are_rejected(self):
         with TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             self.assertIsNone(planning_registry(root, None))
             with self.assertRaises(AuditError) as ctx:
                 planning_registry(root, "https://synthetic:placeholder@example.invalid")
@@ -88,7 +88,7 @@ class PlanningRegistryTests(TestCase):
             "DEPLOOM_MCP_DISABLE_EXTERNAL_EVIDENCE": "1",
             "DEPLOOM_MCP_ALLOWED_PROJECT_REGISTRY": approved,
         }, clear=True):
-            root = Path(directory)
+            root = Path(directory).resolve()
             self.assertEqual(planning_registry(root, None), approved)
             self.assertEqual(planning_registry(root, approved + "/"), approved)
             (root / ".npmrc").write_text("registry=https://registry.npmjs.org", encoding="utf-8")
@@ -116,7 +116,7 @@ class PlanningRegistryTests(TestCase):
         from deploom_mcp.blueprint import BlueprintOptions, BlueprintPolicy, _prepare_generation
 
         with TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             project = root / "project"
             project.mkdir()
             (project / "package.json").write_text("{}", encoding="utf-8")

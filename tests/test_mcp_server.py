@@ -61,7 +61,7 @@ class GetUpgradePlanValidationTests(unittest.TestCase):
 
     def test_host_can_scale_omitted_flat_deadline_with_a_cap(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            project = Path(temp)
+            project = Path(temp).resolve()
             manifest = project / "package.json"
             manifest.write_text(json.dumps({"dependencies": {"a": "1.0.0"},
                                             "peerDependencies": {"b": "^1"}}), encoding="utf-8")
