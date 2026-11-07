@@ -24,6 +24,7 @@ import unittest
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Optional
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -43,6 +44,7 @@ from deploom_mcp.server import (  # noqa: E402
     KIND,
     MIN_DEADLINE_SECONDS,
     TOOL_NAME,
+    _default_flat_deadline,
     _result,
     _result_from_planning,
     compact_blueprint,
@@ -56,6 +58,25 @@ RESERVED_VERIFIED = {"CONSTRAINT_SATISFIED", "MATERIALIZED", "PROJECT_VERIFIED"}
 
 class GetUpgradePlanValidationTests(unittest.TestCase):
     """Misuse paths: pure validation, never launches the planner."""
+
+    def test_host_can_scale_omitted_flat_deadline_with_a_cap(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            project = Path(temp).resolve()
+            manifest = project / "package.json"
+            manifest.write_text(json.dumps({"dependencies": {"a": "1.0.0"},
+                                            "peerDependencies": {"b": "^1"}}), encoding="utf-8")
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(_default_flat_deadline(project), DEFAULT_DEADLINE_SECONDS)
+            with patch.dict(os.environ, {"DEPLOOM_MCP_AUTO_FLAT_DEADLINE": "1"}):
+                self.assertEqual(_default_flat_deadline(project), 22)
+                manifest.write_text(json.dumps({"dependencies": {f"p{i}": "1.0.0" for i in range(84)}}),
+                                    encoding="utf-8")
+                self.assertEqual(_default_flat_deadline(project), 65)
+                manifest.write_text(json.dumps({"dependencies": {f"p{i}": "1.0.0" for i in range(102)}}),
+                                    encoding="utf-8")
+                self.assertEqual(_default_flat_deadline(project), 90)
+                manifest.write_text("not json", encoding="utf-8")
+                self.assertEqual(_default_flat_deadline(project), DEFAULT_DEADLINE_SECONDS)
 
     def test_workspace_request_rejects_flat_scope_options(self) -> None:
         result = get_upgrade_plan(project_path="C:/nope", workspace_request={"schemaVersion": 2},
@@ -126,6 +147,25 @@ class GetUpgradePlanHardeningValidationTests(unittest.TestCase):
         self.assertEqual(self._code(min_lag_ok_pct=150), "invalid-policy")
         self.assertEqual(self._code(min_lag_ok_pct=-1), "invalid-policy")
         self.assertEqual(self._code(min_lag_ok_pct=80.5), "invalid-policy")
+
+    def test_yarn_classic_project_registry_reaches_flat_planner_only_when_approved(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            project = root / "project"
+            project.mkdir()
+            (project / "package.json").write_text("{}", encoding="utf-8")
+            registry = "https://mirror.example.invalid/npm"
+            (project / ".yarnrc").write_text(f'registry "{registry}"', encoding="utf-8")
+            with (patch.dict(os.environ, {"DEPLOOM_MCP_STATE_DIR": str(root / "state")}, clear=True),
+                  patch("deploom_mcp.server.generate_upgrade_blueprint") as planner,
+                  patch("deploom_mcp.server._result_from_planning", return_value={"ok": True})):
+                denied = get_upgrade_plan(project_path=str(project))
+                self.assertEqual(denied["error"]["code"], "project-registry-not-authorized")
+                planner.assert_not_called()
+                self.assertFalse((root / "state").exists())
+                with patch.dict(os.environ, {"DEPLOOM_MCP_ALLOWED_PROJECT_REGISTRY": registry}):
+                    self.assertTrue(get_upgrade_plan(project_path=str(project))["ok"])
+                self.assertEqual(planner.call_args.kwargs["options"].registry, registry)
 
     def test_registry_url_with_credentials_is_rejected(self) -> None:
         # Synthetic userinfo exercises rejection without embedding a credential URL.

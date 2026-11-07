@@ -44,8 +44,9 @@ import os
 import re
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from typing import Any, Dict, List, Literal, Optional, Tuple, TypedDict
+from deploom_mcp.dependency_audit import AuditError
+from deploom_mcp.planning_registry import planning_registry
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.context import Context
@@ -71,6 +72,8 @@ from deploom_mcp.registry_projection import (
 )
 
 from deploom_mcp.goal_tools import register_goal_tools
+from deploom_mcp.goal_contract import GoalContractError
+from deploom_mcp.workspace_inventory import SECTIONS as DECLARATION_SECTIONS, _read_bytes
 from deploom_mcp.workspace_plan_details import get_workspace_plan_details
 from deploom_mcp.workspace_tools import register_workspace_tools
 from deploom_mcp.workspace_upgrade import get_workspace_upgrade_plan
@@ -79,9 +82,10 @@ SERVER_NAME = "deploom-mcp"
 TOOL_NAME = "get_upgrade_plan"
 KIND = "upgrade-blueprint"
 
-# Section H budget: default deadline 15..30 s. We default to 20 s and clamp to
-# a safe hard range so a client cannot hang the server on an absurd budget.
 DEFAULT_DEADLINE_SECONDS = 20.0
+AUTO_FLAT_STANDARD_DEADLINE_SECONDS = 65.0
+AUTO_FLAT_STANDARD_DECLARATIONS = 85
+AUTO_FLAT_DEADLINE_MAX_SECONDS = 90.0
 MIN_DEADLINE_SECONDS = 5.0
 MAX_DEADLINE_SECONDS = 600.0
 
@@ -138,12 +142,28 @@ def _error(code: str, message: str, detail: Optional[Any] = None) -> Dict[str, A
     return {"code": code, "message": message, "detail": detail}
 
 
+def _default_flat_deadline(project: Path) -> float:
+    if os.environ.get("DEPLOOM_MCP_AUTO_FLAT_DEADLINE") != "1":
+        return DEFAULT_DEADLINE_SECONDS
+    try:
+        manifest = json.loads(_read_bytes(project / "package.json", 1024 * 1024, root=project))
+    except (OSError, ValueError, GoalContractError):
+        return DEFAULT_DEADLINE_SECONDS
+    if not isinstance(manifest, dict):
+        return DEFAULT_DEADLINE_SECONDS
+    count = sum(len(declarations) for key in DECLARATION_SECTIONS
+                if isinstance(declarations := manifest.get(key), dict))
+    additional_declarations = max(0, count - AUTO_FLAT_STANDARD_DECLARATIONS)
+    size_cap = AUTO_FLAT_STANDARD_DEADLINE_SECONDS + 1.5 * additional_declarations
+    return min(AUTO_FLAT_DEADLINE_MAX_SECONDS, size_cap, DEFAULT_DEADLINE_SECONDS + count)
+
+
 def _build_request(
     *,
     project_path: str,
     target_level: str,
     min_lag_ok_pct: int,
-    deadline_seconds: float,
+    deadline_seconds: Optional[float],
     include_prerelease: bool,
     registry: Optional[str],
     registry_metadata_ttl: float,
@@ -208,21 +228,17 @@ def _build_request(
         return _error("invalid-policy", "min_lag_ok_pct must be an integer in [0, 100]"), None
 
     try:
-        deadline = float(deadline_seconds)
+        deadline = _default_flat_deadline(purl) if deadline_seconds is None else float(deadline_seconds)
     except (TypeError, ValueError):
         return _error("invalid-deadline", "deadline_seconds must be a number"), None
     if not math.isfinite(deadline) or deadline <= 0:
         return _error("invalid-deadline", "deadline_seconds must be a finite positive number"), None
     deadline = max(MIN_DEADLINE_SECONDS, min(MAX_DEADLINE_SECONDS, deadline))
 
-    if registry is not None:
-        if not isinstance(registry, str) or not registry.strip():
-            return _error("invalid-registry", "registry must be a non-empty URL string"), None
-        parsed = urlparse(registry.strip())
-        if parsed.scheme not in ("http", "https") or not parsed.netloc:
-            return _error("invalid-registry", "registry must be an http(s) URL"), None
-        if parsed.username or parsed.password:
-            return _error("invalid-registry", "registry URL must not carry embedded credentials"), None
+    try:
+        registry = planning_registry(purl, registry)
+    except AuditError as exc:
+        return _error(exc.code, str(exc)), None
 
     try:
         ttl = float(registry_metadata_ttl)
@@ -872,7 +888,7 @@ def compact_blueprint(
 
 # Legacy arguments must not be reinterpreted as owner-qualified workspace intent.
 _WORKSPACE_FLAT_DEFAULTS = {
-    "target_level": "yellow", "min_lag_ok_pct": 80, "deadline_seconds": DEFAULT_DEADLINE_SECONDS,
+    "target_level": "yellow", "min_lag_ok_pct": 80,
     "include_prerelease": False, "registry": None, "use_system_proxy": None,
     "registry_metadata_ttl": 3600.0, "output_dir": None, "exclude": None, "target_mode": "pinned",
     "objective": OBJECTIVES[0], "mutable_packages": None, "approved_version_lines": None,
@@ -882,7 +898,8 @@ _WORKSPACE_FLAT_DEFAULTS = {
 
 
 def _workspace_mixes_flat_options(arguments: dict) -> bool:
-    return any(arguments[key] != value for key, value in _WORKSPACE_FLAT_DEFAULTS.items())
+    return (arguments["deadline_seconds"] not in (None, DEFAULT_DEADLINE_SECONDS)
+            or any(arguments[key] != value for key, value in _WORKSPACE_FLAT_DEFAULTS.items()))
 
 
 def get_upgrade_plan(
@@ -890,7 +907,7 @@ def get_upgrade_plan(
     project_path: str,
     target_level: str = "yellow",
     min_lag_ok_pct: int = 80,
-    deadline_seconds: float = DEFAULT_DEADLINE_SECONDS,
+    deadline_seconds: Optional[float] = None,
     include_prerelease: bool = False,
     registry: Optional[str] = None,
     use_system_proxy: Optional[bool] = None,
@@ -949,18 +966,26 @@ def get_upgrade_plan(
         "and metadata cache remain outside it. PLANNING_ONLY/NOT_VERIFIED: PROPOSED "
         "is not installed or runtime-verified. target_mode=pinned|advisory changes "
         "recommendations, never peer/engine guards. Set objective, mutable_packages, "
-        "approved_version_lines and registry explicitly. Exclusions apply before "
+        "approved_version_lines explicitly. Omit registry to use a supported project route "
+        "approved by the MCP host, or pass an explicit registry. Exclusions apply before "
         "planning; other packages remain constraints. required_packages means move, "
         "not exact. For exact stable assignments use objective=explicit-version-targets "
         "with exact_targets; summary.exactTargetPolicy separates feasibility from "
         "final health, shortfall and original blockers; per-row lag proof may be "
         "unavailable. Inspect decisionCompleteness, decisionEvidence and workspaceCoverage; "
         "read artifacts for missing critical evidence. Unknown security/runtime stays "
-        "NOT_VERIFIED. draft_max_candidates bounds search, deadline_seconds bounds time. "
+        "NOT_VERIFIED. draft_max_candidates bounds search. Omit deadline_seconds to use the host's default "
+        "planning budget, or set it to a specific duration. "
         "Act only within existing authority. For bounded npm lock-v3 workspaces, "
         "workspace_request schemaVersion=2 and goalKind=TARGETED_UPGRADE select "
-        "exact owner/section/name declarations and caller-snapshot domains. Workspace "
-        "requests use their own options. Omit preflight for a pure model; opt in only "
+        "exact owner/section/name declarations and finite domains. Supply packuments for "
+        "a caller snapshot, or assert the authorized project registry and omit packuments "
+        "to collect metadata through Core. With workspace_request, send only project_path "
+        "and workspace_request at the top level. Do not send flat objective, target_mode, "
+        "exact_targets or registry. The workspace object always needs schemaVersion, "
+        "goalKind, inventoryDigest, targets, environment and topology. Use topology=null "
+        "for the observed lock layout; send observed environment versions when known. "
+        "Omit preflight for a pure model; opt in only "
         "when authorized to run isolated lock-only npm. For MONOREPO_TO_POLICY, provide policy "
         "and omit packuments: evidence is collected by Core through the host-configured registry "
         "and permitted exact-version OSV queries. For policy collection or native preflight, "
@@ -972,7 +997,7 @@ async def get_upgrade_plan_tool(
     project_path: str,
     target_level: str = "yellow",
     min_lag_ok_pct: int = 80,
-    deadline_seconds: float = DEFAULT_DEADLINE_SECONDS,
+    deadline_seconds: Optional[float] = None,
     include_prerelease: bool = False,
     registry: Optional[str] = None,
     use_system_proxy: Optional[bool] = None,
@@ -1081,6 +1106,56 @@ async def explain_conflict_tool(
         expected_decision_digest=expected_decision_digest,
         max_items=max_items,
     ))
+
+
+class WorkspaceModelEnvironment(TypedDict, total=False):
+    node: str
+    npm: str
+
+
+class WorkspaceModelSelector(TypedDict):
+    owner: str
+    section: Literal["dependencies", "devDependencies", "optionalDependencies"]
+    name: str
+
+
+class WorkspaceModelTarget(TypedDict):
+    selector: WorkspaceModelSelector
+    approvedLines: list[int]
+    versions: list[str]
+    exactTarget: str | None
+
+
+@server.tool(
+    name="model_workspace_upgrade_v1",
+    title="Plan npm workspace versions without preflight",
+    description=(
+        "Read-only dependency modeling on the observed npm lock-v3 layout. Supply the current inventory digest "
+        "and exact host-approved HTTPS registry. For MONOREPO_TO_POLICY supply a policy and use empty targets "
+        "to review held versions. Security evidence for this tool is registry-only. For TARGETED_UPGRADE select "
+        "owner, section and name and supply approved major lines, finite candidate versions and exactTarget "
+        "or null for each target. Supply observed Node and npm versions when known. "
+        "Does not run preflight, install, audit or edit the project. Only requests metadata or advisories "
+        "from the configured registry. All results are PLANNING_ONLY and NOT_VERIFIED."
+    ),
+    annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=True),
+)
+async def model_workspace_upgrade_tool(
+    project_path: str,
+    goal_kind: Literal["MONOREPO_TO_POLICY", "TARGETED_UPGRADE"],
+    inventory_digest: str,
+    registry: str,
+    environment: WorkspaceModelEnvironment,
+    targets: list[WorkspaceModelTarget],
+    policy: dict | None = None,
+) -> CallToolResult:
+    request = {"schemaVersion": 2, "goalKind": goal_kind, "inventoryDigest": inventory_digest,
+               "registry": registry, "environment": environment, "topology": None, "targets": targets}
+    if goal_kind == "MONOREPO_TO_POLICY" and policy is not None:
+        request["policy"] = {"securityEvidenceMode": "REGISTRY_ONLY", **policy}
+    elif policy is not None:
+        return _result({"ok": False, "error": {"code": "WORKSPACE_MODEL_ONLY_TARGET_POLICY_UNSUPPORTED"}})
+    return _result(await get_workspace_upgrade_plan(project_path, request, model_only=True))
 
 
 @server.tool(

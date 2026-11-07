@@ -119,6 +119,22 @@ migration report, with removal conditions such as a verified upstream repair.
    install evidence for the final state and re-run the required clean install.
    After source/config changes, refresh affected checks. Retain earlier failures.
 
+For a Yarn Classic transitive advisory, use `lockfileRootAttribution` from
+`audit_dependencies` to identify the exact version and direct declarations
+that reach it. Partial attribution leaves other paths unknown. Preserve the
+whole-tree audit scope even when a path starts at a dev dependency.
+
+- Prefer an in-range lock refresh when every held selector accepts the
+  replacement. Resolve changed child requirements in an isolated copy and
+  compare the lock delta. Keep unrelated selectors, versions and artifact
+  integrity unchanged.
+- If no audited replacement fits the actual selectors, re-plan the nearest
+  parent or a coupled tool group within the existing authority. A framework or
+  builder replacement needs its own workflow check. Apply an out-of-range
+  resolution only with authority and evidence for the affected consumers.
+- Bind the final audit to the new lock and verify the package-manager install.
+  A lower direct advisory count cannot substitute for the final tree audit.
+
 Re-plan when meaningful planner inputs/constraints change, when the selected
 assignment conflicts across workspaces, or when a pinned decision is no longer
 applicable. Do not re-plan after each expected edit in an accepted transaction;

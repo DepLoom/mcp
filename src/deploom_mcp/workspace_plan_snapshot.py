@@ -25,6 +25,10 @@ def _project_registry(inputs):
     """Interpret only settings whose behavior the isolated npm command preserves."""
     if any(path.endswith("/.npmrc") for path in inputs):
         raise GoalContractError("WORKSPACE_PREFLIGHT_MEMBER_NPMRC_UNSUPPORTED")
+    # These values are enforced by Core's isolated workspace npm command.
+    fixed_flags = {"engine-strict": "true", "strict-peer-deps": "true",
+                   "legacy-peer-deps": "false", "force": "false"}
+    allowed_keys = {"registry", "save-exact"} | fixed_flags.keys()
     options = {}
     try:
         for raw in inputs.get(".npmrc", b"").decode("utf-8-sig").splitlines():
@@ -32,7 +36,8 @@ def _project_registry(inputs):
             if not line or line.startswith(("#", ";")):
                 continue
             key, sep, value = (part.strip() for part in line.partition("="))
-            if not sep or key not in {"registry", "save-exact"} or key in options:
+            if (not sep or key not in allowed_keys or key in options
+                    or key in fixed_flags and value != fixed_flags[key]):
                 raise ValueError
             options[key] = value
         if "save-exact" in options and options["save-exact"] not in {"true", "false"}:
@@ -59,10 +64,10 @@ def _workspace_registry(configured, inputs, requested=None):
     return allowed
 
 
-def _requested_registry(request, health_goal):
+def _requested_registry(request, online_metadata):
     if "registry" not in request:
         return None
-    if not health_goal and "preflight" not in request:
+    if not online_metadata and "preflight" not in request:
         raise GoalContractError("WORKSPACE_REQUEST_REGISTRY_REQUIRES_ONLINE_STAGE")
     try:
         registry = checked_registry(request["registry"])
@@ -73,27 +78,37 @@ def _requested_registry(request, health_goal):
     return registry
 
 
-def plan_workspace_snapshot(project: Path, request: dict) -> dict:
+def plan_workspace_snapshot(project: Path, request: dict, *, model_only: bool = False) -> dict:
     """Bind a bounded caller-provided metadata snapshot to current project bytes."""
+    # Leave room in the 75-second parent watchdog for solver shutdown and publication.
+    metadata_deadline = time.monotonic() + 65 if model_only else None
     health_goal = isinstance(request, dict) and "policy" in request
-    required = {"inventoryDigest", "mutable", "environment", "topology", "policy" if health_goal else "packuments"}
+    registry_target = isinstance(request, dict) and not health_goal and "packuments" not in request
+    online_metadata = health_goal or registry_target
+    evidence_key = "policy" if health_goal else "registry" if registry_target else "packuments"
+    required = {"inventoryDigest", "mutable", "environment", "topology", evidence_key}
     if (not isinstance(request, dict) or not required <= request.keys() <= required | {"preflight", "registry"}
             or not isinstance(request["inventoryDigest"], str)
             or not re.fullmatch(r"[0-9a-f]{64}", request["inventoryDigest"])
             or not isinstance(request["mutable"], list)
             or not (0 if health_goal else 1) <= len(request["mutable"]) <= 64
-            or (not health_goal and not isinstance(request["packuments"], dict))
+            or (not online_metadata and not isinstance(request["packuments"], dict))
             or not isinstance(request["environment"], dict)
             or set(request["environment"]) - {"node", "npm"}
             or any(not isinstance(value, str) for value in request["environment"].values())
             or len(json.dumps(request, ensure_ascii=True, allow_nan=False)) > 12000):
         raise GoalContractError("INVALID_WORKSPACE_PLAN_REQUEST")
+    if model_only and ("preflight" in request or "packuments" in request or "registry" not in request):
+        raise GoalContractError("WORKSPACE_MODEL_ONLY_REQUIRES_APPROVED_REGISTRY")
 
+    health_options = None
     if health_goal:
         from deploom_mcp.workspace_policy_request import validate_workspace_policy
 
         health_options = validate_workspace_policy(request["policy"])
-    requested_registry = _requested_registry(request, health_goal)
+        if model_only and health_options.get("securityEvidenceMode") != "REGISTRY_ONLY":
+            raise GoalContractError("WORKSPACE_MODEL_ONLY_REQUIRES_REGISTRY_SECURITY")
+    requested_registry = _requested_registry(request, online_metadata)
     preflight = request.get("preflight")
     if "preflight" in request:
         if not isinstance(preflight, dict) or not {"reauthor"} <= preflight.keys() <= {"reauthor", "immutableInstances", "candidateLimit"}:
@@ -112,10 +127,10 @@ def plan_workspace_snapshot(project: Path, request: dict) -> dict:
             raise GoalContractError("STALE_WORKSPACE_INVENTORY")
         if requested_registry:
             policy_registry = os.environ.get("DEPLOOM_WORKSPACE_POLICY_REGISTRY")
-            if health_goal and not policy_registry:
+            if online_metadata and not policy_registry:
                 raise GoalContractError("WORKSPACE_REQUEST_REGISTRY_NOT_AUTHORIZED")
             try:
-                if health_goal:
+                if online_metadata:
                     _workspace_registry(policy_registry, inputs, requested_registry)
                 if preflight is not None:
                     _workspace_registry(os.environ.get("DEPLOOM_WORKSPACE_NPM_REGISTRY"), inputs, requested_registry)
@@ -124,7 +139,7 @@ def plan_workspace_snapshot(project: Path, request: dict) -> dict:
         declarations = {(row["owner"], row["section"], row["name"]): row["declaredSpec"]
                         for row in rows if row["section"] != "peerDependencies"}
         admitted, exact, approved = {}, {}, {}
-        target_keys = {"declaration", "versions", "exactTarget"} | ({"approvedLines"} if health_goal else set())
+        target_keys = {"declaration", "versions", "exactTarget"} | ({"approvedLines"} if online_metadata else set())
         for entry in request["mutable"]:
             if not isinstance(entry, dict) or set(entry) != target_keys:
                 raise GoalContractError("INVALID_WORKSPACE_PLAN_SCOPE")
@@ -137,7 +152,7 @@ def plan_workspace_snapshot(project: Path, request: dict) -> dict:
                     or len(set(versions)) != len(versions) or (target is not None and target not in versions)):
                 raise GoalContractError("INVALID_WORKSPACE_PLAN_SCOPE")
             admitted[key] = tuple(versions)
-            if health_goal:
+            if online_metadata:
                 lines = entry["approvedLines"]
                 if (not isinstance(lines, list) or not 1 <= len(lines) <= 32
                         or any(type(line) is not int or not 0 <= line <= 999999 for line in lines)
@@ -180,7 +195,29 @@ def plan_workspace_snapshot(project: Path, request: dict) -> dict:
                         raise GoalContractError("INVALID_WORKSPACE_PLAN_TOPOLOGY")
                     providers[consumer, peer] = provider
                 topology = WorkspaceTopology(providers, tuple(groups))
-            if health_goal:
+            from workspace_npm_preflight import WorkspacePeerEvidenceError, observe_workspace_peer_overrides
+
+            peer_failure = None
+            try:
+                effective_peer_ranges = observe_workspace_peer_overrides(
+                    inputs, packages, admitted, timeout_seconds=20 if model_only else 10,
+                )
+            except WorkspacePeerEvidenceError as exc:
+                peer_failure = str(exc)
+            else:
+                if topology is not None and effective_peer_ranges:
+                    peer_failure = "PROPOSED_LAYOUT_OVERRIDE_UNSUPPORTED"
+            if peer_failure:
+                def solve(_excluded, _timeout):
+                    result = {"status": "UNKNOWN", "assignment": None,
+                              "reason": f"WORKSPACE_EFFECTIVE_PEER_{peer_failure}",
+                              "authority": "PLANNING_ONLY", "verification": "NOT_VERIFIED",
+                              "topology": "PROPOSED_INSTANCE_LAYOUT" if topology else "OBSERVED_LOCK_LAYOUT"}
+                    if health_options is not None:
+                        result["policy"] = {"status": "UNKNOWN", "targetLevel": health_options["targetLevel"],
+                                            "authority": "DECLARED_DOMAIN_PLANNING_ONLY", "finalAudit": "NOT_RUN"}
+                    return result
+            elif online_metadata:
                 from deploom_mcp.workspace_policy_request import bind_workspace_policy_solver
 
                 # Policy collection is online. The project can select the registry
@@ -192,13 +229,16 @@ def plan_workspace_snapshot(project: Path, request: dict) -> dict:
                     except AuditError:
                         raise GoalContractError("WORKSPACE_POLICY_HOST_REGISTRY_INVALID") from None
                 solve = bind_workspace_policy_solver(health_options, packages, declarations, approved, exact,
-                                                     admitted, request["environment"], topology)
+                                                     admitted, request["environment"], topology,
+                                                     effective_peer_ranges=effective_peer_ranges,
+                                                     metadata_deadline=metadata_deadline)
             else:
                 def solve(excluded, timeout_ms):
                     return plan_workspace_upgrade(
                         packages, declarations, admitted, exact, request["packuments"],
                         environment=request["environment"], topology=topology, timeout_ms=timeout_ms,
-                        excluded_assignments=tuple(excluded), include_constraint_evidence=True)
+                        excluded_assignments=tuple(excluded), include_constraint_evidence=True,
+                        effective_peer_ranges=effective_peer_ranges)
 
             if preflight is None:
                 result = solve((), 5000)
@@ -223,7 +263,7 @@ def plan_workspace_snapshot(project: Path, request: dict) -> dict:
             }
         finally:
             sys.path.pop(0)
-        return {**result, "inventoryDigest": digest, "candidateEvidence": "CORE_REGISTRY" if health_goal else "CALLER_SNAPSHOT",
+        return {**result, "inventoryDigest": digest, "candidateEvidence": "CORE_REGISTRY" if online_metadata else "CALLER_SNAPSHOT",
                 "executionReady": False}
 
     return observe_npm_workspace(project, plan_snapshot=plan)

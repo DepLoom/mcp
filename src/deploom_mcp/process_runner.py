@@ -119,6 +119,7 @@ def kill_process_tree(proc) -> None:
             subprocess.run(
                 ["taskkill", "/PID", str(pid), "/T", "/F"],
                 capture_output=True,
+                check=True,
                 timeout=10,
             )
             return
@@ -203,7 +204,7 @@ async def _wait_with_cancel(proc, cancel_event) -> int:
             return returncode
         if cancel_event is not None and cancel_event.is_set():
             kill_process_tree(proc)
-            return await proc.wait()
+            return await _wait_killed_process(proc)
         await asyncio.sleep(0.05)
 
 

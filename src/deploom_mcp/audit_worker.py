@@ -391,6 +391,8 @@ def execute(request: dict) -> dict:
             "resolverIdentitySha256": candidate["resolverIdentitySha256"],
             "lockSha256": candidate["lockSha256"], "registrySha256": candidate["registrySha256"],
             "finalPolicy": "UNKNOWN" if candidate_policy is not None else "NOT_ASSESSED"}
+        if "candidateAuditEgressConfiguration" in request:
+            report["candidateAudit"]["egressConfiguration"] = request["candidateAuditEgressConfiguration"]
     try:
         inputs, manifests, issues = collect_inputs(root, project)
         report["sourceFiles"] = {k: digest_bytes(v) for k, v in inputs.items()}
@@ -488,6 +490,30 @@ def execute(request: dict) -> dict:
                 item["fixAvailable"] = "NOT_EVALUATED"
             security["counts"]["reportedNodesBySeverity"] = None
             security["nodeUnit"] = "PACKAGE_VERSION_PAIRS_NOT_INSTALL_PATHS"
+            high_priority = [item for item in security["packages"] if item["severity"] in {"critical", "high"}]
+            affected = {(item["name"], version) for item in high_priority for version in item["versions"]}
+            trace_roots = getattr(manual, "yarn_classic_finding_roots", None)
+            if affected and trace_roots is not None:
+                traces = [(name, trace_roots((snapshot / name).parent, affected)) for name in manifests]
+                complete = all(trace["complete"] for _, trace in traces)
+                for item in high_priority:
+                    versions = []
+                    for version in item["versions"]:
+                        pair = (item["name"], version)
+                        root_count = sum(trace["findings"][pair]["rootCount"] for _, trace in traces)
+                        paths = []
+                        for manifest_name, trace in traces:
+                            paths.extend(
+                                {**path, "manifest": manifest_name}
+                                for path in trace["findings"][pair]["paths"][:4 - len(paths)]
+                            )
+                        versions.append({"version": version, "rootCount": root_count,
+                                         "paths": paths, "pathsTruncated": root_count > len(paths)})
+                    item["lockfileRootAttribution"] = {
+                        "basis": "YARN_CLASSIC_EXACT_LOCKFILE_SELECTORS",
+                        "complete": complete and bool(versions) and all(v["rootCount"] > 0 for v in versions),
+                        "versions": versions,
+                    }
         else:
             security["nodeUnit"] = "LOCKFILE_PATHS" if manager == "npm" else "NOT_REPORTED"
         report["security"] = security

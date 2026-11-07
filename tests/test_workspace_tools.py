@@ -4,10 +4,30 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from deploom_mcp.process_runner import ProcessRun
-from deploom_mcp.workspace_tools import observe_workspace_inventory_v1, register_workspace_tools
+from deploom_mcp.workspace_tools import observe_workspace_inventory_v1, plan_workspace_snapshot_v1, register_workspace_tools
 
 
 class WorkspaceToolBoundaryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_model_only_refuses_preflight_and_unbound_metadata_before_worker(self):
+        registry = "https://fixture.example/npm"
+        with patch("deploom_mcp.workspace_tools.run_process_async", new_callable=AsyncMock) as child:
+            for request in ({}, {"registry": registry, "preflight": {}},
+                            {"registry": registry, "packuments": {}}):
+                with self.subTest(request=request):
+                    result = await plan_workspace_snapshot_v1(
+                        str(Path("public-fixture").absolute()), request, model_only=True,
+                    )
+                    self.assertEqual(result["error"]["code"], "WORKSPACE_MODEL_ONLY_REQUIRES_APPROVED_REGISTRY")
+            child.assert_not_awaited()
+
+    async def test_model_only_enforces_restricted_worker_egress(self):
+        with patch("deploom_mcp.workspace_tools.run_process_async", new_callable=AsyncMock,
+                   return_value=ProcessRun(1, '{"ok":false}', "")) as child:
+            await plan_workspace_snapshot_v1(
+                str(Path("public-fixture").absolute()), {"registry": "https://fixture.example/npm"}, model_only=True,
+            )
+        self.assertEqual(child.call_args.kwargs["env"]["DEPLOOM_MCP_DISABLE_EXTERNAL_EVIDENCE"], "1")
+
     async def test_invalid_budget_has_no_child(self):
         for deadline in (True, float('inf'), 0, 31):
             with patch('deploom_mcp.workspace_tools.run_process_async', new_callable=AsyncMock) as child:
@@ -60,10 +80,12 @@ class WorkspaceToolBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 recorded.append(options)
                 return lambda function: function
         register_workspace_tools(Server(), lambda result: result)
-        self.assertEqual(recorded[0]['name'], 'observe_workspace_inventory_v1')
-        self.assertTrue(recorded[0]['annotations'].read_only_hint)
-        self.assertFalse(recorded[0]['annotations'].destructive_hint)
-        self.assertFalse(recorded[0]['annotations'].open_world_hint)
+        by_name = {tool['name']: tool['annotations'] for tool in recorded}
+        for name in ('observe_workspace_inventory_v1', 'review_workspace_transitive_overrides_v1'):
+            with self.subTest(tool=name):
+                self.assertTrue(by_name[name].read_only_hint)
+                self.assertFalse(by_name[name].destructive_hint)
+                self.assertFalse(by_name[name].open_world_hint)
 
 
     async def test_malformed_success_with_four_status_fields_rejected(self):

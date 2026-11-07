@@ -402,6 +402,7 @@
           "enum": [
             "REVIEW_FOR_AUTHORIZED_ISOLATED_TRIAL",
             "REVIEW_FOR_AUTHORIZED_PREFLIGHT",
+            "REVIEW_HELD_BASELINE",
             "INSPECT_BLOCKER"
           ]
         },
@@ -1262,6 +1263,9 @@
         "maxKnownLow": {
           "type": "integer",
           "minimum": 0
+        },
+        "securityEvidenceMode": {
+          "const": "REGISTRY_ONLY"
         }
       },
       "additionalProperties": false
@@ -1399,7 +1403,7 @@
               "const": "COLLECTED"
             },
             "source": {
-              "const": "CORE_REGISTRY_AND_EXACT_OSV"
+              "enum": ["CORE_REGISTRY_AND_EXACT_OSV", "REGISTRY_BULK_ADVISORY"]
             },
             "lagWindowMonths": {
               "enum": [
@@ -1430,6 +1434,16 @@
             "osvSkippedNameCount": {
               "type": "integer",
               "minimum": 0
+            },
+            "registryAdvisoryUnknownReasons": {
+              "type": "object",
+              "propertyNames": {"pattern": "^[A-Z_]+$"},
+              "additionalProperties": {"type": "integer", "minimum": 1}
+            },
+            "registryAdvisoryResponseSha256": {
+              "type": "array",
+              "maxItems": 1,
+              "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
             },
             "snapshotSha256": {
               "type": "string",

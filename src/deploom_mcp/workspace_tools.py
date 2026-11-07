@@ -148,7 +148,7 @@ async def observe_workspace_inventory_v1(project_path: str, expected_inventory_d
                 "executionReady": False, "verification": "NOT_VERIFIED"}
 
 
-async def plan_workspace_snapshot_v1(project_path: str, request: dict) -> dict:
+async def plan_workspace_snapshot_v1(project_path: str, request: dict, *, model_only: bool = False) -> dict:
     error = "INVALID_WORKSPACE_PLAN_REQUEST"
     try:
         if not isinstance(project_path, str) or not Path(project_path).is_absolute():
@@ -159,12 +159,17 @@ async def plan_workspace_snapshot_v1(project_path: str, request: dict) -> dict:
         trusted_parent = Path(__file__).resolve().parent.parent
         bootstrap = ("import sys,runpy;sys.path.insert(0," + repr(str(trusted_parent))
                      + ");runpy.run_module('deploom_mcp.workspace_inventory',run_name='__main__')")
+        mode = "model-snapshot" if model_only else "plan-snapshot"
         argv = [sys.executable, "-I", "-B", "-X", "utf8", "-c", bootstrap,
-                project_path, "plan-snapshot", payload]
+                project_path, mode, payload]
+        env = {key: value for key, value in os.environ.items() if not key.upper().startswith("PYTHON")}
+        if model_only:
+            if {"preflight", "packuments"} & request.keys() or "registry" not in request:
+                raise GoalContractError("WORKSPACE_MODEL_ONLY_REQUIRES_APPROVED_REGISTRY")
+            env["DEPLOOM_MCP_DISABLE_EXTERNAL_EVIDENCE"] = "1"
         child = await run_process_async(
-            argv, cwd=str(trusted_parent),
-            env={key: value for key, value in os.environ.items() if not key.upper().startswith("PYTHON")},
-            timeout=75 if "preflight" in request or "policy" in request else 15, max_output_bytes=600 * 1024)
+            argv, cwd=str(trusted_parent), env=env,
+            timeout=75 if "preflight" in request or "packuments" not in request else 15, max_output_bytes=600 * 1024)
         if child.timed_out:
             raise GoalContractError("WORKSPACE_PLAN_TIMEOUT")
         result = json.loads(child.stdout)
@@ -176,7 +181,7 @@ async def plan_workspace_snapshot_v1(project_path: str, request: dict) -> dict:
         plan = result["plan"]
         if (plan["authority"] != "PLANNING_ONLY" or plan["verification"] != "NOT_VERIFIED"
                 or plan["executionReady"] is not False
-                or plan["candidateEvidence"] != ("CORE_REGISTRY" if "policy" in request else "CALLER_SNAPSHOT")
+                or plan["candidateEvidence"] != ("CALLER_SNAPSHOT" if "packuments" in request else "CORE_REGISTRY")
                 or plan["inventoryDigest"] != request.get("inventoryDigest")
                 or plan["status"] not in {"SAT_IN_MODELED_DOMAIN", "UNSAT_IN_MODELED_DOMAIN", "UNKNOWN"}
                 or (plan["status"] == "SAT_IN_MODELED_DOMAIN") != isinstance(plan["assignment"], dict)
@@ -213,7 +218,81 @@ async def plan_workspace_snapshot_v1(project_path: str, request: dict) -> dict:
     return {"ok": False, "error": {"code": error}, "executionReady": False, "verification": "NOT_VERIFIED"}
 
 
+async def review_workspace_transitive_overrides(project_path: str, request: dict) -> dict:
+    required = {"inventoryDigest", "dependency", "affectedPaths", "advisoryRanges"}
+    try:
+        if not isinstance(project_path, str) or not Path(project_path).is_absolute():
+            raise ValueError
+        if not isinstance(request, dict) or not required <= request.keys() <= required | {"candidateVersions", "candidate", "selectedConsumerPaths"}:
+            raise ValueError
+        digest, dependency = request["inventoryDigest"], request["dependency"]
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ValueError
+        if not isinstance(dependency, str) or not 1 <= len(dependency) <= 214:
+            raise ValueError
+        for key, minimum, maximum, width in (
+            ("affectedPaths", 1, 64, 512), ("advisoryRanges", 1, 32, 256), ("candidateVersions", 0, 256, 64),
+        ):
+            rows = request.get(key, [])
+            if (not isinstance(rows, list) or not minimum <= len(rows) <= maximum
+                    or any(not isinstance(row, str) or not 1 <= len(row) <= width for row in rows)):
+                raise ValueError
+        if "selectedConsumerPaths" in request:
+            selection = request["selectedConsumerPaths"]
+            if (not isinstance(selection, list) or not 1 <= len(selection) <= 64
+                    or any(not isinstance(path, str) or not 1 <= len(path) <= 512 for path in selection)
+                    or len(set(selection)) != len(selection)):
+                raise ValueError
+        if "candidate" in request:
+            candidate = request["candidate"]
+            if (not isinstance(candidate, dict) or candidate.keys() != {"projectPath", "inventoryDigest", "version"}
+                    or not isinstance(candidate["projectPath"], str) or not Path(candidate["projectPath"]).is_absolute()
+                    or not isinstance(candidate["inventoryDigest"], str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", candidate["inventoryDigest"])
+                    or not isinstance(candidate["version"], str) or not 1 <= len(candidate["version"]) <= 64):
+                raise ValueError
+        payload = json.dumps(request, ensure_ascii=True)
+        if len(payload) > 12000:
+            raise ValueError
+    except (ValueError, OSError):
+        return {"ok": False, "error": {"code": "INVALID_WORKSPACE_OVERRIDE_REQUEST"}}
+
+    parent = Path(__file__).resolve().parent.parent
+    bootstrap = ("import sys,runpy;sys.path.insert(0," + repr(str(parent))
+                 + ");runpy.run_module('deploom_mcp.workspace_inventory',run_name='__main__')")
+    argv = [sys.executable, "-I", "-B", "-X", "utf8", "-c", bootstrap, project_path,
+            "transitive-overrides", payload]
+    try:
+        child = await run_process_async(
+            argv, cwd=str(parent), env={k: v for k, v in os.environ.items() if not k.upper().startswith("PYTHON")},
+            timeout=15, max_output_bytes=128 * 1024,
+        )
+        if child.timed_out:
+            return {"ok": False, "error": {"code": "WORKSPACE_OVERRIDE_TIMEOUT"}}
+        result = json.loads(child.stdout)
+        if result.get("ok") is False:
+            code = result.get("error", {}).get("code")
+            if isinstance(code, str) and re.fullmatch(r"[A-Z_]{1,80}", code):
+                return {"ok": False, "error": {"code": code}}
+        review = result.get("review", {})
+        candidate = request.get("candidate")
+        if (child.returncode == 0 and result.get("ok") is True and review.get("inventoryDigest") == digest
+                and review.get("verification") == "NOT_VERIFIED" and review.get("executionReady") is False
+                and review.get("authority") == ("LOCKFILE_ONLY" if candidate else "PLANNING_ONLY")
+                and (not candidate or review.get("candidateInventoryDigest") == candidate["inventoryDigest"])):
+            return result
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return {"ok": False, "error": {"code": "WORKSPACE_OVERRIDE_INPUT_UNAVAILABLE"}}
+
+
 def register_workspace_tools(server, result_builder):
+    @server.tool(name="review_workspace_transitive_overrides_v1", title="Find scoped npm override review options",
+        description="Read-only npm workspace lock evidence. Bind to the current inventory digest, and supply the audited package, its lock paths, and advisory semver ranges. Optionally supply stable versions found in the configured registry. Finds version-qualified parent overrides and flags range crossings and downgrades. Optionally select exact affected consumer lock paths with selectedConsumerPaths and inspect remainingAffectedConsumerCount. Forward candidates precede downgrades. To compare a separately prepared candidate lock, provide candidate.projectPath, candidate.inventoryDigest and candidate.version. For leaf replacements, also compares every other declared lock binding. No audit, registry access, install, execution authority or runtime verification.",
+        annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))
+    async def review_workspace_transitive_overrides_tool(project_path: str, request: dict):
+        return result_builder(await review_workspace_transitive_overrides(project_path, request))
+
     @server.tool(name="observe_workspace_inventory_v1", title="Observe npm-workspace declarations without execution",
         description="Read-only bounded root npm lock-v3 workspace inventory. Relative literal/single-star patterns only; no globstar, negation or brace expansion. Owners and declaration sections stay separate. When supported by bundled Core, report owner-specific lock paths and versions as lockfile-only evidence. Optional owner/section/name/fromSpec/toVersion targets require the current inventory digest and produce declaration intent only. No registry, solver, install, checks, repair, checkpoint or execution authority. Existing goal APIs still reject workspaces. Hashes bind dependency inputs only, not full source or runtime. Caps/errors never yield a complete truncated proposal.",
         annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))

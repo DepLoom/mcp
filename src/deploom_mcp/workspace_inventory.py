@@ -104,12 +104,16 @@ def _discover(root: Path, patterns: list[str], max_directories: int, max_manifes
             relative = folder.relative_to(root).as_posix()
             included = [p for p in patterns if _glob_match(relative, p)]
             if included:
-                if not (folder / "package.json").is_file():
+                member = folder / "package.json"
+                if member.is_file():
+                    manifests.append(relative + "/package.json")
+                    matched.update(included)
+                    if len(manifests) > max_manifests:
+                        raise GoalContractError("WORKSPACE_MANIFEST_LIMIT")
+                elif relative in included or member.exists() or member.is_symlink():
                     raise GoalContractError("WORKSPACE_MANIFEST_MISSING")
-                manifests.append(relative + "/package.json")
-                matched.update(included)
-                if len(manifests) > max_manifests:
-                    raise GoalContractError("WORKSPACE_MANIFEST_LIMIT")
+                # npm wildcard matches without a manifest are grouping directories.
+                # The lock membership check still rejects an omitted real member.
             with os.scandir(scan_target.path if os.name=='nt' else scan_target.fd) as children:
                 for child in children:
                     entries += 1
@@ -308,12 +312,71 @@ def propose_workspace_targets(project: Path, expected_inventory_digest: str, tar
             "note": "Declaration intent only. No package availability, peers, installation, source repair or project checks evaluated."}
 
 
+def observe_transitive_override_options(project: Path, request: dict) -> dict:
+    from deploom_mcp.distribution import resolve_core_dir
+
+    core = resolve_core_dir()
+    if not (core / "workspace_npm_transitive_override.py").is_file():
+        raise GoalContractError("WORKSPACE_OVERRIDE_CORE_UNAVAILABLE")
+    sys.path.insert(0, str(core))
+    try:
+        from workspace_npm_transitive_override import (
+            propose_npm_transitive_overrides, verify_npm_transitive_override,
+        )
+
+        def analyze(digest, declarations, packages, inputs):
+            if digest != request["inventoryDigest"]:
+                raise GoalContractError("WORKSPACE_INVENTORY_DIGEST_MISMATCH")
+            manifest = json.loads(inputs["package.json"])
+            overrides = manifest.get("overrides", {})
+            if not isinstance(overrides, dict):
+                raise GoalContractError("WORKSPACE_INVALID_OVERRIDES")
+            advisory = (request["dependency"], request["affectedPaths"], request["advisoryRanges"])
+            selected = request.get("selectedConsumerPaths")
+            selection = {"selected_consumer_paths": selected} if selected is not None else {}
+            if "candidate" not in request:
+                options = propose_npm_transitive_overrides(
+                    packages, overrides, *advisory, request.get("candidateVersions", ()), **selection,
+                )
+            else:
+                candidate = request["candidate"]
+
+                def compare(candidate_digest, candidate_declarations, candidate_packages, candidate_inputs):
+                    if candidate_digest != candidate["inventoryDigest"]:
+                        raise GoalContractError("WORKSPACE_CANDIDATE_DIGEST_MISMATCH")
+                    candidate_manifest = json.loads(candidate_inputs["package.json"])
+                    candidate_overrides = candidate_manifest.pop("overrides", {})
+                    baseline_manifest = {key: value for key, value in manifest.items() if key != "overrides"}
+                    unchanged_inputs = lambda rows: {k: v for k, v in rows.items()
+                                                     if k not in {"package.json", "package-lock.json"}}
+                    if (candidate_manifest != baseline_manifest
+                            or unchanged_inputs(inputs) != unchanged_inputs(candidate_inputs)):
+                        raise GoalContractError("WORKSPACE_OVERRIDE_UNRELATED_INPUT_CHANGED")
+                    report = verify_npm_transitive_override(
+                        packages, candidate_packages, overrides, candidate_overrides,
+                        *advisory, candidate["version"], **selection,
+                    )
+                    return {**report, "candidateInventoryDigest": candidate_digest}
+
+                options = observe_npm_workspace(Path(candidate["projectPath"]), plan_snapshot=compare)
+            return {**options, "inventoryDigest": digest}
+
+        return observe_npm_workspace(project, plan_snapshot=analyze)
+    finally:
+        sys.path.pop(0)
+
+
 def main() -> int:
     try:
-        if len(sys.argv) == 4 and sys.argv[2] == "plan-snapshot":
+        if len(sys.argv) == 4 and sys.argv[2] == "transitive-overrides":
+            result = {"ok": True, "review": observe_transitive_override_options(
+                Path(sys.argv[1]), json.loads(sys.argv[3]))}
+        elif len(sys.argv) == 4 and sys.argv[2] in {"plan-snapshot", "model-snapshot"}:
             from deploom_mcp.workspace_plan_snapshot import plan_workspace_snapshot
 
-            result = {"ok": True, "plan": plan_workspace_snapshot(Path(sys.argv[1]), json.loads(sys.argv[3]))}
+            result = {"ok": True, "plan": plan_workspace_snapshot(
+                Path(sys.argv[1]), json.loads(sys.argv[3]), model_only=sys.argv[2] == "model-snapshot",
+            )}
         elif len(sys.argv) not in {2, 3}:
             raise GoalContractError("INVALID_WORKSPACE_REQUEST")
         elif len(sys.argv) == 3:

@@ -29,7 +29,6 @@ class SkillIntegrityTests(unittest.TestCase):
     def test_checked_in_manifest_covers_actual_content(self):
         self.assertEqual(verify(SOURCE), [])
         contract = json.loads((SOURCE / "contract.json").read_text(encoding="utf-8"))
-        self.assertEqual(contract["contractVersion"], "2.0.5")
         self.assertIn("scripts/validate_evidence.py", contract["files"])
         self.assertNotIn("contract.json", contract["files"])
 

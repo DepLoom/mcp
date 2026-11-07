@@ -24,9 +24,18 @@ def _snapshot_request(request: dict) -> dict:
     if goal not in ("TARGETED_UPGRADE", "MONOREPO_TO_POLICY"):
         raise GoalContractError("UNSUPPORTED_WORKSPACE_GOAL")
     health_goal = goal == "MONOREPO_TO_POLICY"
-    required = _REQUEST_FIELDS | ({"policy"} if health_goal else {"packuments"})
-    if not required <= request.keys() <= required | {"preflight", "registry"}:
-        raise GoalContractError("INVALID_WORKSPACE_UPGRADE_REQUEST")
+    required = _REQUEST_FIELDS | ({"policy"} if health_goal else set())
+    optional = {"preflight", "registry"} | (set() if health_goal else {"packuments"})
+    missing = required - request.keys()
+    unexpected = request.keys() - required - optional
+    needs_metadata_source = not health_goal and not {"registry", "packuments"} & request.keys()
+    if missing or unexpected or needs_metadata_source:
+        raise GoalContractError(
+            "INVALID_WORKSPACE_UPGRADE_REQUEST",
+            f"Missing workspace_request fields: {', '.join(sorted(missing)) or 'none'}. "
+            f"Unsupported workspace_request field count: {len(unexpected)}."
+            + (" Supply registry or packuments inside workspace_request." if needs_metadata_source else ""),
+        )
     policy = validate_workspace_policy(request["policy"]) if health_goal else None
     targets = request["targets"]
     if not isinstance(targets, list) or not (0 if health_goal else 1) <= len(targets) <= 64:
@@ -55,7 +64,7 @@ def _snapshot_request(request: dict) -> dict:
                 or (exact is not None and (not isinstance(exact, str) or exact not in versions))):
             raise GoalContractError("INVALID_WORKSPACE_VERSION_AUTHORITY")
         item = {"declaration": list(key), "versions": versions, "exactTarget": exact}
-        if health_goal:
+        if health_goal or "packuments" not in request:
             item["approvedLines"] = lines
         mutable.append(item)
     snapshot = {key: value for key, value in request.items() if key not in {"schemaVersion", "goalKind", "targets", "policy"}}
@@ -125,19 +134,34 @@ def _compact_workspace_plan(plan: dict, request: dict) -> dict:
     if validation["status"] == "RESOLUTION_PASSED":
         compact["action"] = {"kind": "REVIEW_FOR_AUTHORIZED_ISOLATED_TRIAL", "code": validation["code"]}
     elif candidate is not None and validation["code"] == "WORKSPACE_PREFLIGHT_NOT_REQUESTED":
-        compact["action"] = {"kind": "REVIEW_FOR_AUTHORIZED_PREFLIGHT", "code": validation["code"]}
+        if request["goalKind"] == "MONOREPO_TO_POLICY" and not request["targets"]:
+            compact["action"] = {"kind": "REVIEW_HELD_BASELINE", "code": "WORKSPACE_HELD_BASELINE"}
+        else:
+            compact["action"] = {"kind": "REVIEW_FOR_AUTHORIZED_PREFLIGHT", "code": validation["code"]}
     else:
         compact["action"] = {"kind": "INSPECT_BLOCKER", "code": validation["code"] if candidate is not None else plan["status"]}
     return compact
 
 
-async def get_workspace_upgrade_plan(project_path: str, request: dict) -> dict[str, Any]:
+async def get_workspace_upgrade_plan(
+    project_path: str, request: dict, *, model_only: bool = False,
+) -> dict[str, Any]:
     """Run the isolated owning workspace worker and project a targeted plan."""
     try:
         snapshot = _snapshot_request(request)
     except GoalContractError as exc:
-        return {"ok": False, "error": {"code": exc.code}}
-    result = await plan_workspace_snapshot_v1(project_path, snapshot)
+        error = {"code": exc.code}
+        detail = str(exc).partition(": ")[2]
+        if detail and exc.code in {"INVALID_WORKSPACE_UPGRADE_REQUEST", "INVALID_WORKSPACE_HEALTH_POLICY"}:
+            error["message"] = detail
+        return {"ok": False, "error": error}
+    if model_only:
+        policy = snapshot.get("policy")
+        if policy is not None and policy.get("securityEvidenceMode") != "REGISTRY_ONLY":
+            return {"ok": False, "error": {"code": "WORKSPACE_MODEL_ONLY_REQUIRES_REGISTRY_SECURITY"}}
+        result = await plan_workspace_snapshot_v1(project_path, snapshot, model_only=True)
+    else:
+        result = await plan_workspace_snapshot_v1(project_path, snapshot)
     if not result["ok"]:
         return result
     try:

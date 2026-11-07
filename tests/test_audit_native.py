@@ -65,6 +65,41 @@ class Registry:
         self.thread.join(5)
 
 
+class BoundPolicyRegistryTests(unittest.TestCase):
+    def test_candidate_lag_does_not_follow_registry_metadata_redirect(self):
+        import sys
+        from requests import Response, Session
+        from deploom_mcp.distribution import resolve_core_dir
+        from deploom_mcp.workspace_candidate_policy import audit_candidate_policy
+
+        manifest = {"dependencies": {"sample-dep": "1.0.0"}}
+        packages = {"": manifest, "node_modules/sample-dep": {"version": "1.0.0"}}
+        inputs = {
+            "package.json": json.dumps(manifest).encode(),
+            "package-lock.json": json.dumps({"packages": packages}).encode(),
+        }
+        redirect = Response()
+        redirect.status_code = 302
+        redirect.headers["Location"] = "https://other.example.invalid/sample-dep"
+        redirect.raw = unittest.mock.Mock()
+        with (
+            patch.object(sys, "path", [str(resolve_core_dir()), *sys.path]),
+            patch.object(Session, "get", return_value=redirect) as get,
+        ):
+            lag, policy = audit_candidate_policy(
+                inputs, ["package.json"], "https://registry.example.invalid",
+                '{"auditReportVersion":2,"vulnerabilities":{}}',
+                {"targetLevel": "yellow", "securityEvidenceMode": "REGISTRY_ONLY"},
+                seconds=5, use_system_proxy=False,
+            )
+
+        get.assert_called_once()
+        self.assertEqual(("https://registry.example.invalid/sample-dep",), get.call_args.args)
+        self.assertIs(get.call_args.kwargs.get("allow_redirects"), False)
+        self.assertEqual(1, lag["unknownDeclarations"])
+        self.assertEqual("UNKNOWN", policy["verdict"])
+
+
 @unittest.skipUnless(os.environ.get("DEPLOOM_NATIVE_AUDIT_TESTS") == "1", "native audit CLI gate is opt-in")
 class NativeAuditTests(unittest.TestCase):
     def setUp(self):
