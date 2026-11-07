@@ -20,8 +20,6 @@ def _read(path):
 
 def load_delivery_policy(audit_path, expected_sha256, policy_path, plan):
     """Require exact host-selected audit bytes and a PASS for the approved policy."""
-    from dependency_live_roadmap_generator import required_ratio_count
-
     options = validate_workspace_policy(json.loads(_read(policy_path)))
     policy_digest = canonical_digest(options)
     raw = _read(audit_path)
@@ -53,6 +51,8 @@ def load_delivery_policy(audit_path, expected_sha256, policy_path, plan):
         raise ValueError("WORKSPACE_DELIVERY_AUDIT_BINDING_MISMATCH")
     if candidate["finalPolicy"] != "PASS" or assessment["verdict"] != "PASS" or lag["policyAttainment"] != "PASS":
         raise ValueError("WORKSPACE_DELIVERY_POLICY_NOT_MET")
+    from dependency_live_roadmap_generator import required_ratio_count
+
     policy = workspace_health_policy(options)
     limits = policy.limits()
     counts = assessment["knownBySeverity"]
